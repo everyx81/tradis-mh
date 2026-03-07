@@ -59,8 +59,11 @@ class ScreenAI:
             
             # JPEG로 변환
             img_byte_arr = io.BytesIO()
-            screenshot.save(img_byte_arr, format='JPEG', quality=85)
-            return img_byte_arr.getvalue()
+            try:
+                screenshot.save(img_byte_arr, format='JPEG', quality=85)
+                return img_byte_arr.getvalue()
+            finally:
+                img_byte_arr.close()
             
         except Exception as e:
             print(f"[오류] 화면 캡처 실패: {e}")
@@ -82,8 +85,11 @@ class ScreenAI:
         try:
             screenshot = pyautogui.screenshot(region=(left, top, width, height))
             img_byte_arr = io.BytesIO()
-            screenshot.save(img_byte_arr, format='JPEG', quality=85)
-            return img_byte_arr.getvalue()
+            try:
+                screenshot.save(img_byte_arr, format='JPEG', quality=85)
+                return img_byte_arr.getvalue()
+            finally:
+                img_byte_arr.close()
         except Exception as e:
             print(f"[오류] 영역 캡처 실패: {e}")
             return None

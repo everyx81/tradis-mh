@@ -1001,7 +1001,7 @@ class MK3ScheduleOnlyWidget(QWidget):
             QListWidget.keyPressEvent(self.schedule_list, event)
             
     def test_notification(self):
-        self.notifier.show_toast("📅 JARVIS 알림 테스트", "일정관리 알림이 정상 작동합니다!", duration=5)
+        self.notifier.show_toast("📅 TRADIS MH 알림 테스트", "일정관리 알림이 정상 작동합니다!", duration=5)
 
 
 class MK3MemoOnlyWidget(QWidget):

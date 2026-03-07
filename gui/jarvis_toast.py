@@ -97,7 +97,7 @@ class JarvisToast(QWidget):
         
         # 앱 이름 + 시간
         header_layout = QHBoxLayout()
-        app_label = QLabel("JARVIS")
+        app_label = QLabel("TRADIS MH")
         app_label.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
         app_label.setStyleSheet("color: #00aaff; background: transparent;")
         header_layout.addWidget(app_label)
@@ -321,7 +321,7 @@ if __name__ == "__main__":
     
     # 핸들러 테스트
     handler = get_toast_handler()
-    handler.request_toast("🔔 테스트 알림", "JARVIS 커스텀 알림!", 5)
+    handler.request_toast("🔔 테스트 알림", "TRADIS MH 커스텀 알림!", 5)
     
     QTimer.singleShot(2000, lambda: handler.request_toast("⏰ 일정 알림", "15분 후 회의", 5))
     QTimer.singleShot(4000, lambda: handler.request_toast("🚨 수출요청! #123", "📦 경로: ICN/BKK", 5))

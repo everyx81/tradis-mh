@@ -16,6 +16,7 @@ DOC_TYPE_PAYMENT_NOTICE = "납부고지서"
 DOC_TYPE_IMPORT_TAX_INVOICE = "수입세금계산서"
 DOC_TYPE_FEE_TAX_INVOICE = "통관수수료계산서"
 DOC_TYPE_EXPORT_DECLARATION = "수출신고필증"
+DOC_TYPE_CONFORMITY_CERT = "적합성평가확인서"
 
 # 통관수수료계산서에 포함되는 수수료/비용 항목 목록
 # 이 항목들은 모두 "통관수수료계산서" 1장에 포함됨
@@ -62,5 +63,5 @@ EXPENSE_SYNONYMS = {
     "선박운임": ["해상운송계산서", "OCEAN FREIGHT"],
     "보세운송료": ["보세운송료계산서", "BONDED TRUCKING"],
     "운송료": ["운송료계산서", "TRUCKING"],
-    "창고료": ["창고료계산서", "STORAGE"],
+    "창고료": ["창고료계산서", "STORAGE", "보험료계산서", "보험료"],
 }

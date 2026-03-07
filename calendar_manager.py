@@ -26,7 +26,7 @@ class WindowsNotifier:
     """Windows 토스트 알림 관리 (winotify 기반)"""
     
     def __init__(self):
-        self.app_id = "JARVIS"
+        self.app_id = "TRADIS MH"
     
     def show_toast(self, title: str, message: str, duration: int = 10, icon_path: str = None):
         """토스트 알림 표시"""
@@ -506,4 +506,4 @@ if __name__ == "__main__":
     
     # Windows 알림 테스트
     notifier = WindowsNotifier()
-    notifier.show_toast("JARVIS 알림 테스트", "일정관리 모듈이 정상 작동합니다!")
+    notifier.show_toast("TRADIS MH 알림 테스트", "일정관리 모듈이 정상 작동합니다!")

@@ -69,10 +69,13 @@ class AutoRenamer:
         if self.observer:
             try:
                 self.observer.stop()
-                self.observer.join(timeout=2)
+                self.observer.join(timeout=5)
+                if self.observer.is_alive():
+                    print("[경고] Observer 스레드가 시간 내에 종료되지 않았습니다")
+            except Exception as e:
+                print(f"[경고] Observer 종료 오류: {e}")
+            finally:
                 self.observer = None
-            except:
-                pass
 
         if self.executor:
             try:
@@ -80,9 +83,10 @@ class AutoRenamer:
                     self.executor.shutdown(wait=False, cancel_futures=True)
                 else:
                     self.executor.shutdown(wait=False)
-            except:
-                pass
-            self.executor = None
+            except Exception as e:
+                print(f"[경고] Executor 종료 오류: {e}")
+            finally:
+                self.executor = None
 
         self.processing_files.clear()
 
@@ -328,26 +332,62 @@ class AutoRenamer:
                     return True
             return False
 
-        fee_invoice_added = False  # 수수료계산서 파일 중복 병합 방지
+        # ── 파일별 OCR 캐시 금액 조회 헬퍼 ──
+        def _get_file_amount(filename):
+            cached = gemini_ocr._get_cached_result(os.path.join(dr, filename))
+            if cached:
+                try:
+                    return int(str(cached.get('total_amount', 0)).replace(',', '').replace('원', ''))
+                except ValueError:
+                    pass
+            return 0
+
+        def _parse_item_amount(raw):
+            try:
+                return int(str(raw).replace(',', '').replace('원', ''))
+            except ValueError:
+                return 0
+
+        def _build_search_kws(item_name):
+            item_upper = item_name.upper().replace(" ", "")
+            kws = [item_upper]
+            for k, s in syns.items():
+                if k in item_name:
+                    kws.extend([x.upper().replace(" ", "") for x in s])
+            return kws
+
+        def _find_keyword_candidates(search_kws, exclude):
+            """키워드로 매칭되는 후보 파일 목록 반환 (exclude 제외)"""
+            candidates = []
+            for pdf in allp:
+                if pdf in exclude:
+                    continue
+                pdf_upper = pdf.upper().replace(" ", "")
+                if any(kw in pdf_upper for kw in search_kws):
+                    candidates.append(pdf)
+            return candidates
+
+        # ── 2-1단계: 금액 우선 1:1 매칭 ──
+        fee_invoice_added = False
+        matched_kws = []  # 매칭된 항목의 키워드 기록 (2-2단계용)
+
         for item_data in expense_list:
             if not item_data:
                 continue
-            
-            # 구버전 호환 (문자열)
+
             if isinstance(item_data, str):
                 item_name = item_data
                 item_amount = 0
             else:
                 item_name = item_data.get("name", "")
                 item_amount = item_data.get("amount", 0)
-                
+
             if not item_name:
                 continue
-
             if any(k in item_name for k in ["관세", "부가세"]):
                 continue
 
-            # 수수료계산서 항목이면 수수료계산서 파일에 매칭
+            # 통관수수료 항목 → 기존 로직 유지
             if _is_fee_item(item_name):
                 if fee_invoice_file:
                     if not fee_invoice_added:
@@ -361,81 +401,88 @@ class AutoRenamer:
                     m.append({'label': f'비용: {item_name}', 'filename': '', 'item_amount': item_amount})
                 continue
 
-            item_upper = item_name.upper().replace(" ", "")
+            search_kws = _build_search_kws(item_name)
+            candidates = _find_keyword_candidates(search_kws, af)
 
-            search_kws = [item_upper]
-            for k, s in syns.items():
-                if k in item_name:
-                    search_kws.extend([x.upper().replace(" ", "") for x in s])
+            picked = None
+            item_amt = _parse_item_amount(item_amount)
 
-            found_any_for_this_item = False
-            for pdf in allp:
-                if pdf in af:
-                    continue
+            if candidates:
+                if item_amt > 0:
+                    # 금액 일치하는 파일 우선 선택
+                    for c in candidates:
+                        if _get_file_amount(c) == item_amt:
+                            picked = c
+                            break
+                # 금액 매칭 실패 또는 금액 없음 → 첫 번째 후보
+                if not picked:
+                    picked = candidates[0]
 
-                pdf_upper = pdf.upper().replace(" ", "")
-                if any(kw in pdf_upper for kw in search_kws):
-                    m.append({'label': f'비용: {item_name}', 'filename': pdf, 'item_amount': item_amount})
-                    af.append(pdf)
-                    found_any_for_this_item = True
-
-            if not found_any_for_this_item:
+            if picked:
+                m.append({'label': f'비용: {item_name}', 'filename': picked, 'item_amount': item_amount})
+                af.append(picked)
+                matched_kws.append(search_kws)
+            else:
                 m.append({'label': f'비용: {item_name}', 'filename': '', 'item_amount': item_amount})
-        # [NEW] 3차: 금액 기반 보정 매칭 (미분류 파일 캐시 조회)
-        # 매칭 안 된 항목들 식별
-        unmatched_items = [idx for idx, x in enumerate(m) if x['filename'] == '' and '비용: ' in x['label'] and '수수료계산서 포함' not in x['label']]
-        
+                matched_kws.append(search_kws)
+
+        # ── 2-2단계: 남은 파일 추가 편입 ──
+        for pdf in allp:
+            if pdf in af:
+                continue
+            pdf_upper = pdf.upper().replace(" ", "")
+            absorbed = False
+            for kws in matched_kws:
+                if any(kw in pdf_upper for kw in kws):
+                    # 이 파일과 키워드가 맞는 비용 항목 이름 찾기
+                    for item in m:
+                        if item.get('filename') and '비용: ' in item['label']:
+                            label_kws = _build_search_kws(item['label'].split('비용: ')[-1].split(' (')[0])
+                            if any(kw in pdf_upper for kw in label_kws):
+                                short_name = item['label'].split('비용: ')[-1].split(' (')[0]
+                                m.append({'label': f'비용: {short_name} (추가)', 'filename': pdf, 'item_amount': 0})
+                                af.append(pdf)
+                                absorbed = True
+                                break
+                if absorbed:
+                    break
+
+        # ── 3단계: 금액 기반 보정 매칭 (미분류 파일 포함) ──
+        unmatched_items = [idx for idx, x in enumerate(m)
+                          if x['filename'] == '' and '비용: ' in x['label']
+                          and '수수료계산서 포함' not in x['label'] and '(추가)' not in x['label']]
+
         if unmatched_items:
-            # 남은 미분류 파일들 (기존 allp 목록 중)
             uncl_files = [f for f in allp if f not in af]
-            
-            # [NEW] 파일명에 괄호로 된 B/L번호가 없는 파일들도 금액 매칭 후보에 추가
+
             if os.path.exists(dr):
                 for f in os.listdir(dr):
                     if not f.lower().endswith('.pdf'):
                         continue
                     if f in af or f in uncl_files:
                         continue
-                        
-                    # 청구서(자금청구서)는 정산서에 병합하면 안 되는 별도 서류이므로 제외
                     if "청구서" in f and "계산서" not in f:
                         continue
-                        
                     c, i, d, s = parse_renamed_filename(f)
                     if not i:
                         uncl_files.append(f)
 
             uncl_amounts = {}
-            
             for f in uncl_files:
-                fp = os.path.join(dr, f)
-                cached = gemini_ocr._get_cached_result(fp)
-                if cached:
-                    amt_val = cached.get('total_amount', 0)
-                    try:
-                        amt = int(str(amt_val).replace(',', '').replace('원', ''))
-                    except ValueError:
-                        amt = 0
-                    if amt > 0:
-                        uncl_amounts[f] = amt
-            
+                amt = _get_file_amount(f)
+                if amt > 0:
+                    uncl_amounts[f] = amt
+
             for idx in unmatched_items:
-                item_amt = m[idx].get('item_amount', 0)
-                try:
-                    item_amt = int(str(item_amt).replace(',', '').replace('원', ''))
-                except ValueError:
-                    item_amt = 0
-                    
+                item_amt = _parse_item_amount(m[idx].get('item_amount', 0))
                 if item_amt > 0:
-                    # 일치하는 파일 찾기
                     matching_files = [f for f, amt in uncl_amounts.items() if amt == item_amt and f not in af]
-                    # 유일하게 1개만 매칭될 때만 자동 편입 (오매칭 방지)
                     if len(matching_files) == 1:
-                        target_f = matching_files[0]
-                        m[idx]['filename'] = target_f
+                        m[idx]['filename'] = matching_files[0]
                         m[idx]['matched_by_amount'] = True
-                        af.append(target_f)
-        
+                        af.append(matching_files[0])
+
+        # ── 4단계: 나머지 미분류 서류 ──
         for pdf in allp:
             if pdf not in af:
                 m.append({'label': '[추가] 미분류 서류', 'filename': pdf})
@@ -443,7 +490,7 @@ class AutoRenamer:
         return m
 
     def execute_merge_task(self, dr, of, fo, export_docs_root=None, marked_files=None):
-        """병합 수행 후 파일 정리 및 아카이빙"""
+        """병합 수행 후 파일 정리"""
         if not fo:
             return
 
@@ -569,15 +616,26 @@ class AutoRenamer:
                 self.log(f" -> [마킹] {len(marked_files)}개 파일 이동 시작...")
                 # 파일 앱(Acrobat/Excel 등) 종료 대기
                 time.sleep(1.5)
-                search_roots = [d for d in [export_docs_root, dr] if d and os.path.exists(d)]
-                
+
+                # 검색 디렉토리: export_docs_root, 작업 폴더, 마킹 파일의 원래 디렉토리
+                search_dirs_set = set()
+                for sd in [export_docs_root, dr]:
+                    if sd and os.path.exists(sd):
+                        search_dirs_set.add(sd)
+                for mf in marked_files:
+                    orig_path = mf.get('path', '')
+                    if orig_path:
+                        orig_dir = os.path.dirname(orig_path)
+                        if orig_dir and os.path.exists(orig_dir):
+                            search_dirs_set.add(orig_dir)
+                search_roots = list(search_dirs_set)
+
                 for mf in marked_files:
                     src_path = mf.get('path', '')
                     file_name = mf.get('name', '')
-                    base_name = os.path.splitext(file_name)[0] if file_name else ''
-                    
+
                     self.log(f" -> [마킹 디버그] 파일: {file_name}, 경로: {src_path or '(없음)'}")
-                    
+
                     # 경로가 있고 파일이 존재하면 바로 사용
                     if src_path and os.path.exists(src_path):
                         pass  # 경로 확정
@@ -586,35 +644,15 @@ class AutoRenamer:
                         if file_name:
                             check_in_archive = os.path.join(archive_dir, file_name)
                             if os.path.exists(check_in_archive):
-                                self.log(f" -> [마킹 건너뜀] {file_name} (이미 아카이브에 존재)")
+                                self.log(f" -> [마킹 건너뜀] {file_name} (이미 정리 폴더에 존재)")
                                 moved_marked.add(file_name)
                                 marked_count += 1
                                 continue
-                        
+
                         if file_name:
-                            # 경로가 없거나 파일이 없으면 검색
-                            src_path = ''
-                            for search_root in search_roots:
-                                if src_path:
-                                    break
-                                try:
-                                    for item in os.listdir(search_root):
-                                        item_path = os.path.join(search_root, item)
-                                        if os.path.isfile(item_path):
-                                            if item == file_name or os.path.splitext(item)[0] == base_name:
-                                                src_path = item_path
-                                                break
-                                        elif os.path.isdir(item_path):
-                                            for sub in os.listdir(item_path):
-                                                sub_path = os.path.join(item_path, sub)
-                                                if os.path.isfile(sub_path):
-                                                    if sub == file_name or os.path.splitext(sub)[0] == base_name:
-                                                        src_path = sub_path
-                                                        break
-                                            if src_path:
-                                                break
-                                except Exception:
-                                    continue
+                            # 경로가 없거나 파일이 없으면 재귀 검색
+                            from core.open_file_detector import find_file_path
+                            src_path = find_file_path(file_name, search_roots)
                             if src_path:
                                 self.log(f" -> [마킹 디버그] 검색으로 찾음: {src_path}")
                             else:
@@ -654,14 +692,14 @@ class AutoRenamer:
             # 마킹으로 이미 이동된 파일은 제외
             self._collect_related_items(dr, archive_dir, target_id, exclude_names=moved_marked)
 
-            self.log(f" -> [완료] 아카이빙 완료: {folder_name}")
+            self.log(f" -> [완료] 폴더 정리 완료: {folder_name}")
         except Exception as e:
             self.log(f"병합 실행 오류: {e}")
             print(f"병합 실행 오류: {e}")
 
 
     def _collect_related_items(self, dr, archive_dir, target_id, exclude_names=None):
-        """송품장번호가 포함된 파일/폴더를 아카이브 폴더로 자동 수집"""
+        """송품장번호가 포함된 파일/폴더를 정리 폴더로 자동 수집"""
         if not target_id:
             return
 
@@ -710,7 +748,7 @@ class AutoRenamer:
 
                 if has_related:
                     try:
-                        # 폴더 안의 파일들만 아카이브 폴더로 이동
+                        # 폴더 안의 파일들만 정리 폴더로 이동
                         for f in os.listdir(item_path):
                             src = os.path.join(item_path, f)
                             if os.path.isfile(src):

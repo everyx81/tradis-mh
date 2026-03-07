@@ -18,47 +18,6 @@ from .config import client
 from .utils import pdf_lock, cache_lock
 
 
-class KnowledgeBase:
-    """지식 베이스 (레거시 호환용)"""
-    def __init__(self):
-        if getattr(sys, 'frozen', False):
-            bd = os.path.dirname(sys.executable)
-        else:
-            bd = os.path.dirname(os.path.dirname(__file__))
-            
-        data_dir = os.path.join(bd, 'data')
-        os.makedirs(data_dir, exist_ok=True)
-            
-        self.path = os.path.join(data_dir, 'knowledge_base.json')
-        self.data = self._load()
-
-    def _load(self):
-        if os.path.exists(self.path):
-            try:
-                with open(self.path, 'r', encoding='utf-8') as f:
-                    d = json.load(f)
-                    if "analysis_cache" not in d:
-                        d["analysis_cache"] = {}
-                    if "examples" not in d:
-                        d["examples"] = []
-                    return d
-            except:
-                pass
-        return {"analysis_cache": {}, "examples": []}
-
-    def _save(self):
-        from .utils import kb_lock
-        with kb_lock:
-            try:
-                with open(self.path, 'w', encoding='utf-8') as f:
-                    json.dump(self.data, f, ensure_ascii=False, indent=2)
-            except Exception as e:
-                print(f"지식 베이스 저장 오류: {e}")
-
-
-knowledge_base = KnowledgeBase()
-
-
 class GeminiOCR:
     """Gemini AI 기반 PDF OCR 분석기"""
     
@@ -74,6 +33,7 @@ class GeminiOCR:
    - 납부고지서: 납부자의 상호
    - 세금계산서, 계산서, 영수증, 입금표: 공급받는자(수신자)의 상호
    - 수입요건 서류: 수입자 상호
+   - 적합성평가확인서 (방송통신기자재등의 적합성평가확인 신청서 등): 수입자(신청인) 상호
    - 공통: (주), 주식회사 등 법인명 접미사는 제외하고 본 이름만 추출하며, 모든 공백(띄어쓰기)은 반드시 제거하세요.
 
 2. identifier (식별 번호) - [매우 중요]:
@@ -87,7 +47,7 @@ class GeminiOCR:
 
 4. doc_type (문서 종류 결정 - [매우 중요]):
    A. [절대 기준] 다음 제목이 명확히 보이면 그대로 사용하세요:
-      - '수입신고필증', '수입신고서', '수출신고필증', '수출신고서', '자금정산서', '자금청구서', '납부고지서', '수입세금계산서'
+      - '수입신고필증', '수입신고서', '수출신고필증', '수출신고서', '자금정산서', '자금청구서', '납부고지서', '수입세금계산서', '적합성평가확인서'
 
    B. [내용 기반 심층 분석] 
       - 제목이 '세금계산서', '전자세금계산서', '계산서', '청구서', '영수증', '입금표' 등 범용적인 명칭일 경우, **반드시 품목/비고/내용을 분석**하여 실질에 맞는 이름을 부여하세요.
@@ -148,14 +108,19 @@ class GeminiOCR:
             img_data = None
             with pdf_lock:
                 pdf = pdfium.PdfDocument(pdf_bytes)
-                if len(pdf) > 0:
-                    p = pdf[0]
-                    bitmap = p.render(scale=1.5)
-                    pil_image = bitmap.to_pil()
-                    img_byte_arr = io.BytesIO()
-                    pil_image.save(img_byte_arr, format='JPEG', quality=70)
-                    img_data = img_byte_arr.getvalue()
-                pdf.close()
+                try:
+                    if len(pdf) > 0:
+                        p = pdf[0]
+                        bitmap = p.render(scale=1.5)
+                        pil_image = bitmap.to_pil()
+                        img_byte_arr = io.BytesIO()
+                        try:
+                            pil_image.save(img_byte_arr, format='JPEG', quality=70)
+                            img_data = img_byte_arr.getvalue()
+                        finally:
+                            img_byte_arr.close()
+                finally:
+                    pdf.close()
 
             if not img_data:
                 return {"company_name": "Unknown", "identifier": "Unknown", "id_type": "Unknown", "doc_type": "Unknown"}

@@ -37,6 +37,3 @@ from .file_processor import AutoRenamer, PDFHandler
 
 from .archiver import Archiver
 
-# Knowledge Base (레거시 호환)
-from .ocr import KnowledgeBase, knowledge_base
-

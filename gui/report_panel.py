@@ -36,7 +36,9 @@ class ReportPanel(QWidget):
         
         # exe에서도 올바르게 동작하도록 get_run_dir() 사용
         from gui.utils import get_run_dir
-        self.data_file = os.path.join(get_run_dir(), 'report_data.json')
+        data_dir = os.path.join(get_run_dir(), 'data')
+        os.makedirs(data_dir, exist_ok=True)
+        self.data_file = os.path.join(data_dir, 'report_data.json')
         
         # 메일 발송 주소 기억
         self.last_mail_to = ""
@@ -1131,7 +1133,7 @@ class ReportPanel(QWidget):
         lines.extend([
             "",
             "=" * 50,
-            f"생성: {datetime.now().strftime('%Y-%m-%d %H:%M')} | JARVIS",
+            f"생성: {datetime.now().strftime('%Y-%m-%d %H:%M')} | TRADIS MH",
         ])
         
         return "\n".join(lines)

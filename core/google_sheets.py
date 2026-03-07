@@ -20,14 +20,15 @@ DEFAULT_SHEET_GID = 1250042047
 
 def get_credentials_path() -> str:
     """credentials.json 파일 경로 반환"""
-    # 실행 파일 기준 또는 스크립트 기준
     import sys
     if getattr(sys, 'frozen', False):
         base_dir = os.path.dirname(sys.executable)
     else:
         base_dir = os.path.dirname(os.path.dirname(__file__))
-    
-    return os.path.join(base_dir, 'credentials.json')
+
+    data_dir = os.path.join(base_dir, 'data')
+    os.makedirs(data_dir, exist_ok=True)
+    return os.path.join(data_dir, 'credentials.json')
 
 
 def fetch_advances_from_sheet(

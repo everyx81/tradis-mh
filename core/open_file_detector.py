@@ -80,11 +80,11 @@ def get_open_files() -> list[dict]:
     # Acrobat, Chrome, Edge 등이 물리적으로 물고 있는 파일 핸들 추출
     _scan_process_handles(found_files)
     
-    # JARVIS 관련 파일 제외
+    # TRADIS MH 관련 파일 제외
     result = []
     for info in found_files.values():
         name_lower = info['name'].lower()
-        if 'jarvis' in name_lower or 'gui_jarvis' in name_lower:
+        if 'jarvis' in name_lower or 'gui_jarvis' in name_lower or 'tradis' in name_lower:
             continue
         # 정보 보정: source 필드 제거 (UI에 필요 없음)
         info.pop('source', None)
@@ -284,11 +284,9 @@ def find_file_path(filename: str, search_dirs: list[str] = None) -> str:
     for search_dir in search_dirs:
         if not search_dir or not os.path.exists(search_dir):
             continue
+        # 해당 디렉토리와 하위 폴더를 재귀 검색
         for root, dirs, files in os.walk(search_dir):
             if filename in files:
                 return os.path.join(root, filename)
-            # 1단계 깊이만 탐색
-            if root != search_dir:
-                continue
-    
+
     return ''

@@ -43,6 +43,8 @@ from gui.mk3_widgets import MK3ScheduleOnlyWidget, MK3MemoOnlyWidget
 from gui.dialogs import IntroWindow, GroupCard, MarkingPopup
 from gui.panels import FileManagerWidget
 from gui.jarvis_toast import get_toast_handler, show_custom_toast  # [NEW] Custom Toast Imports
+from version import __version__, APP_NAME
+from updater import check_for_update, download_update, apply_update
 
 
 
@@ -54,10 +56,11 @@ class JarvisGUI(QMainWindow):
     rename_trigger_signal = pyqtSignal()  # 파일 이름 변경 완료 시 emit (디바운싱 트리거)
     export_update_signal = pyqtSignal(object)  # 수출 자동화 UI 업데이트용
     marking_request_signal = pyqtSignal(str, str, str)  # 수출신고필증 마킹 요청 (company, invoice_id, filepath)
+    update_check_done = pyqtSignal(dict)  # 업데이트 확인 완료 시그널
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("JARVIS - Auto Renamer")
+        self.setWindowTitle("TRADIS MH - Auto Renamer")
         self.resize(1700, 950)
         self.setMinimumSize(1280, 720)
         
@@ -96,6 +99,9 @@ class JarvisGUI(QMainWindow):
         self.mail_sender = None       # 메일 발송기 (나중에 초기화)
 
         
+        # 라이선스 등급 (admin: 전체, standard: 통관/보고 제외)
+        self.license_tier = self._load_license_tier()
+
         # Setup UI
         self.init_ui()
         self.load_background()
@@ -113,6 +119,7 @@ class JarvisGUI(QMainWindow):
         # ReadyKorea 버튼 시그널 연결 (setup_right_panel에서 이미 연결됨 - 중복 제거)
         # 주의: rk_auto_input_clicked, send_mail_clicked는 setup_right_panel()에서 연결됨
         self.file_manager.item_deleted.connect(self._on_mail_item_deleted_reset) # 목록 삭제 시 초기화
+        self.file_manager.admin_unlocked.connect(self._on_admin_unlocked)  # 관리자 잠금 해제
         
         # Everything 자동 시작 (검색 기능 활성화) - 비동기 실행으로 프리징 방지
         threading.Thread(target=self._start_everything, daemon=True).start()
@@ -131,7 +138,23 @@ class JarvisGUI(QMainWindow):
         # [NEW] 글로벌 단축키 초기화
         self._setup_global_hotkeys()
 
+        # [NEW] 앱 시작 시 자동 업데이트 확인 (3초 후, 비동기)
+        self.update_check_done.connect(self._on_update_check_result)
+        QTimer.singleShot(3000, self._check_update_async)
+
     
+    def _load_license_tier(self):
+        """config.json에서 라이선스 등급 로드"""
+        try:
+            cfg_path = os.path.join(get_run_dir(), "config.json")
+            if os.path.exists(cfg_path):
+                with open(cfg_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                return data.get("license_tier", "standard")
+        except:
+            pass
+        return "standard"
+
     def _center_on_screen(self):
         """창을 화면 중앙에 배치"""
         screen = QApplication.primaryScreen().geometry()
@@ -300,8 +323,13 @@ class JarvisGUI(QMainWindow):
             ("REPORT", "보\n고", "#ff88ff"),
             ("SETTINGS", "설\n정", "#aaaaaa"),
         ]
-        
+
+        # admin 전용 탭
+        admin_only_tabs = {"VERONICA", "REPORT"}
+
         for tab_name, label, color in tab_defs:
+            if tab_name in admin_only_tabs and self.license_tier != "admin":
+                continue
             btn = QPushButton(label)
             btn.setFixedSize(30, 45)
             btn.setCheckable(True)
@@ -346,25 +374,27 @@ class JarvisGUI(QMainWindow):
             btn.setChecked(name == tab_name)
         
         self.current_nav_tab = tab_name
-        tab_index_map = {"MK1": 0, "MK3": 1, "VERONICA": 2, "REPORT": 3, "SETTINGS": 4}
-        if tab_name in tab_index_map:
-            self.file_manager.tabs.setCurrentIndex(tab_index_map[tab_name])
+        # 동적 탭 인덱스: 탭 이름으로 인덱스 찾기
+        for i in range(self.file_manager.tabs.count()):
+            if self.file_manager.tabs.tabText(i) == tab_name:
+                self.file_manager.tabs.setCurrentIndex(i)
+                break
         
-        self._on_main_tab_changed(tab_index_map.get(tab_name, 0), tab_name)
+        self._on_main_tab_changed(0, tab_name)
     
     def _create_placeholder_panels(self):
-        # VERONICA (통관)
+        # VERONICA (통관) - admin 전용
         self.veronica_panel = QWidget()
-        veronica_layout = QVBoxLayout(self.veronica_panel)
-        veronica_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lbl_veronica = QLabel("📦 VERONICA - 통관 자동화\n\n(Coming Soon)")
-        lbl_veronica.setStyleSheet("color: #ffa500; font-size: 16pt; font-weight: bold;")
-        lbl_veronica.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        veronica_layout.addWidget(lbl_veronica)
+        if self.license_tier == "admin":
+            veronica_layout = QVBoxLayout(self.veronica_panel)
+            veronica_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            lbl_veronica = QLabel("📦 VERONICA - 통관 자동화\n\n(Coming Soon)")
+            lbl_veronica.setStyleSheet("color: #ffa500; font-size: 16pt; font-weight: bold;")
+            lbl_veronica.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            veronica_layout.addWidget(lbl_veronica)
         self.veronica_panel.hide()
         self.main_layout.addWidget(self.veronica_panel, 0, 0, 1, 5)
 
-        # MK3 (일정)
         # MK3 (일정)
         self.shared_schedule_manager = LocalScheduleManager()
         
@@ -400,18 +430,17 @@ class JarvisGUI(QMainWindow):
         if hasattr(self.file_manager, 'mk3_memo_layout'):
             self.file_manager.mk3_memo_layout.addWidget(self.mk3_memo_widget)
         
-        # REPORT (일일 보고서) - 전체 화면 패널
-        from gui.report_panel import ReportPanel
+        # REPORT (일일 보고서) - admin 전용
         self.report_panel = GlassFrame()
-        report_layout = QVBoxLayout(self.report_panel)
-        report_layout.setContentsMargins(0, 0, 0, 0)
-        
-        self.report_widget = ReportPanel()
-        self.report_widget.log_signal.connect(self.emit_log)
-        report_layout.addWidget(self.report_widget)
-        
+        if self.license_tier == "admin":
+            from gui.report_panel import ReportPanel
+            report_layout = QVBoxLayout(self.report_panel)
+            report_layout.setContentsMargins(0, 0, 0, 0)
+            self.report_widget = ReportPanel()
+            self.report_widget.log_signal.connect(self.emit_log)
+            report_layout.addWidget(self.report_widget)
         self.report_panel.hide()
-        self.main_layout.addWidget(self.report_panel, 0, 0, 1, 5)  # 전체 너비 사용
+        self.main_layout.addWidget(self.report_panel, 0, 0, 1, 5)
             
         # 초기 탭 설정 (레이아웃 적용을 위해 명시적 호출)
         self._on_navbar_clicked("MK1")
@@ -1056,15 +1085,19 @@ class JarvisGUI(QMainWindow):
         layout.setSpacing(10)
         
         # Header
-        title_box = QHBoxLayout()
-        lbl_title = QLabel("JARVIS SYSTEM")
-        lbl_title.setFont(QFont("Impact", 24))
+        title_box = QVBoxLayout()
+        title_box.setSpacing(0)
+        lbl_title = QLabel("TRADIS MH")
+        lbl_title.setFont(QFont("Impact", 36))
         lbl_title.setProperty("heading", True)
-        lbl_title.setStyleSheet("color: #00ffff; letter-spacing: 2px;")
+        lbl_title.setStyleSheet("color: #00ffff; letter-spacing: 3px;")
         title_box.addWidget(lbl_title)
-        title_box.addStretch()
+
+        lbl_by = QLabel("by M.H. Choi")
+        lbl_by.setStyleSheet("color: #447799; font-size: 11pt; font-style: italic; letter-spacing: 1px; background: transparent; margin-left: 2px;")
+        title_box.addWidget(lbl_by)
         layout.addLayout(title_box)
-        
+
         # Subtitle
         lbl_sub = QLabel("AUTO RENAMER")
         lbl_sub.setStyleSheet("color: #005577; font-weight: bold; letter-spacing: 4px;")
@@ -1117,6 +1150,11 @@ class JarvisGUI(QMainWindow):
         self.lbl_api_version = QLabel("Model: Gemini 3 Flash Preview")
         self.lbl_api_version.setStyleSheet("color: #00aaaa; font-size: 8pt; background: transparent;")
         api_container_layout.addWidget(self.lbl_api_version)
+
+        # 앱 버전
+        self.lbl_app_version = QLabel(f"{APP_NAME} v{__version__}")
+        self.lbl_app_version.setStyleSheet("color: #00aaaa; font-size: 9pt; font-weight: bold; background: transparent;")
+        api_container_layout.addWidget(self.lbl_app_version)
         
         layout.addWidget(api_container)
         layout.addSpacing(10)
@@ -1164,7 +1202,7 @@ class JarvisGUI(QMainWindow):
         
         btn_collect = NeonButton("COLLECT FILES", color="cyan")
         btn_collect.setFixedSize(130, 32)
-        btn_collect.setToolTip("송품장번호와 일치하는 파일/폴더를 아카이브 폴더로 수집")
+        btn_collect.setToolTip("송품장번호와 일치하는 파일/폴더를 정리 폴더로 수집")
         btn_collect.clicked.connect(self._collect_related_files_all)
         info_row.addWidget(btn_collect)
         
@@ -1205,7 +1243,7 @@ class JarvisGUI(QMainWindow):
     def setup_right_panel(self):
         # self.right_panel.setMaximumWidth(380) # 동적 제어를 위해 제거
         layout = QVBoxLayout(self.right_panel)
-        self.file_manager = FileManagerWidget(path_callback=lambda: self.line_path.text(), archiver=self.archiver)
+        self.file_manager = FileManagerWidget(path_callback=lambda: self.line_path.text(), archiver=self.archiver, license_tier=self.license_tier)
         # VERONICA (수출 자동화) 시그널 연결
         self.file_manager.rk_auto_input_clicked.connect(self._run_readykorea_automation)
         self.file_manager.rk_test_clicked.connect(self._test_readykorea_connection)
@@ -1279,7 +1317,7 @@ class JarvisGUI(QMainWindow):
                 self.merge_layout.addWidget(QLabel("UNCLASSIFIED FILES"))
                 lbl_u = QLabel(", ".join(unclassified))
                 lbl_u.setWordWrap(True)
-                lbl_u.setStyleSheet("color: #555;")
+                lbl_u.setStyleSheet("color: #aaaaaa;")
                 self.merge_layout.addWidget(lbl_u)
             self.merge_layout.addStretch()
         except Exception as e: self.emit_log(f"Critical error updating UI: {e}")
@@ -1290,7 +1328,7 @@ class JarvisGUI(QMainWindow):
             self.file_manager.refresh_targets()
 
     def _collect_related_files_all(self):
-        """모든 아카이브 폴더에 대해 관련 파일/폴더 수집"""
+        """모든 정리 폴더에 대해 관련 파일/폴더 수집"""
         path = self.line_path.text()
         if not path or not os.path.exists(path):
             from gui.dialogs import JarvisMessageBox
@@ -1574,7 +1612,7 @@ class JarvisGUI(QMainWindow):
         layout.setSpacing(4)
         
         # JARVIS 라벨 (컴팩트 HUD 스타일)
-        lbl = QLabel("JARVIS")
+        lbl = QLabel("TRADIS MH")
         lbl.setStyleSheet("""
             color: #00ffff; 
             font-weight: bold; 
@@ -1996,6 +2034,213 @@ class JarvisGUI(QMainWindow):
         # 대기열에 다음 항목이 있으면 처리
         QTimer.singleShot(300, self._process_next_marking)
 
+    # ── 관리자 모드 ──────────────────────────────────────────
+
+    def _on_admin_unlocked(self):
+        """관리자 잠금 해제 → 통관/보고 탭 동적 추가"""
+        self.license_tier = "admin"
+
+        # config에 저장
+        self._save_license_tier("admin")
+
+        # navbar에 통관/보고 버튼 추가 (SETTINGS 앞에 삽입)
+        admin_tabs = [
+            ("VERONICA", "통\n관", "#ffa500"),
+            ("REPORT", "보\n고", "#ff88ff"),
+        ]
+        # navbar layout에서 stretch 제거 → 탭 추가 → stretch 다시 추가
+        navbar_layout = self.navbar.layout()
+
+        # 기존 stretch 제거 (마지막 아이템)
+        navbar_layout.takeAt(navbar_layout.count() - 1)
+
+        # SETTINGS 버튼 제거 (마지막 버튼)
+        settings_item = navbar_layout.takeAt(navbar_layout.count() - 1)
+        settings_btn = settings_item.widget()
+
+        for tab_name, label, color in admin_tabs:
+            if tab_name in self.nav_buttons:
+                continue
+            btn = QPushButton(label)
+            btn.setFixedSize(30, 45)
+            btn.setCheckable(True)
+            btn.setAutoExclusive(True)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setProperty("tab_name", tab_name)
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: rgba(5, 20, 35, 120);
+                    border: 1px solid rgba(0, 255, 255, 80);
+                    border-radius: 6px;
+                    color: rgba(255, 255, 255, 200);
+                    text-align: center;
+                    padding-top: 2px;
+                }}
+                QPushButton:hover {{
+                    background-color: rgba(0, 255, 255, 30);
+                    border: 1px solid {color};
+                    color: #ffffff;
+                }}
+                QPushButton:checked {{
+                    background-color: rgba(0, 255, 255, 50);
+                    border: 1px solid {color};
+                    border-left: 3px solid {color};
+                    color: {color};
+                    font-weight: bold;
+                }}
+            """)
+            btn.clicked.connect(lambda checked, name=tab_name: self._on_navbar_clicked(name))
+            navbar_layout.addWidget(btn)
+            self.nav_buttons[tab_name] = btn
+
+        # SETTINGS 버튼 다시 추가
+        navbar_layout.addWidget(settings_btn)
+        # stretch 다시 추가
+        navbar_layout.addStretch()
+
+        # VERONICA 패널 내용 초기화
+        if not self.veronica_panel.layout():
+            veronica_layout = QVBoxLayout(self.veronica_panel)
+            veronica_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            lbl_veronica = QLabel("📦 VERONICA - 통관 자동화\n\n(Coming Soon)")
+            lbl_veronica.setStyleSheet("color: #ffa500; font-size: 16pt; font-weight: bold;")
+            lbl_veronica.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            veronica_layout.addWidget(lbl_veronica)
+
+        # REPORT 패널 내용 초기화
+        if not self.report_panel.layout():
+            from gui.report_panel import ReportPanel
+            report_layout = QVBoxLayout(self.report_panel)
+            report_layout.setContentsMargins(0, 0, 0, 0)
+            self.report_widget = ReportPanel()
+            self.report_widget.log_signal.connect(self.emit_log)
+            report_layout.addWidget(self.report_widget)
+
+        # file_manager 탭에도 VERONICA/REPORT 추가
+        tabs = self.file_manager.tabs
+        # SETTINGS 탭 앞에 삽입
+        settings_idx = None
+        for i in range(tabs.count()):
+            if tabs.tabText(i) == "SETTINGS":
+                settings_idx = i
+                break
+
+        if settings_idx is not None:
+            # VERONICA 탭 (없으면 추가)
+            has_veronica = any(tabs.tabText(i) == "VERONICA" for i in range(tabs.count()))
+            if not has_veronica:
+                tab_veronica = QWidget()
+                tab_veronica.setStyleSheet("background-color: transparent;")
+                tabs.insertTab(settings_idx, tab_veronica, "VERONICA")
+                settings_idx += 1
+
+            # REPORT 탭 (없으면 추가)
+            has_report = any(tabs.tabText(i) == "REPORT" for i in range(tabs.count()))
+            if not has_report:
+                from gui.report_panel import ReportPanel
+                report_tab = ReportPanel()
+                report_tab.log_signal.connect(self.emit_log)
+                tabs.insertTab(settings_idx, report_tab, "REPORT")
+
+        self.emit_log("[관리자] 통관/보고 탭이 활성화되었습니다.")
+
+    def _save_license_tier(self, tier):
+        """config.json에 라이선스 등급 저장"""
+        try:
+            cfg = os.path.join(get_run_dir(), "config.json")
+            if os.path.exists(cfg):
+                with open(cfg, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+            else:
+                data = {}
+            data["license_tier"] = tier
+            with open(cfg, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=4)
+        except Exception as e:
+            print(f"License tier save error: {e}")
+
+    # ── 자동 업데이트 ──────────────────────────────────────────
+
+    def _check_update_async(self):
+        """백그라운드에서 업데이트 확인"""
+        def _check():
+            result = check_for_update()
+            self.update_check_done.emit(result)
+        threading.Thread(target=_check, daemon=True).start()
+
+    def _on_update_check_result(self, result):
+        """업데이트 확인 결과 처리 (메인 스레드)"""
+        if not result.get("available"):
+            self.emit_log(f"[업데이트] 최신 버전입니다. (v{__version__})")
+            return
+
+        new_ver = result["version"]
+        notes = result.get("notes", "")
+        download_url = result["download_url"]
+
+        from gui.dialogs import JarvisMessageBox
+        msg = f"새 버전 v{new_ver}이 있습니다.\n\n{notes[:200]}\n\n업데이트하시겠습니까?"
+        if not JarvisMessageBox.question(self, "업데이트 알림", msg):
+            self.emit_log(f"[업데이트] v{new_ver} 업데이트를 건너뛰었습니다.")
+            return
+
+        self._start_download(download_url, new_ver)
+
+    def _start_download(self, url, new_ver):
+        """업데이트 다운로드 시작 (진행 다이얼로그)"""
+        from PyQt6.QtWidgets import QProgressDialog
+        from PyQt6.QtCore import Qt
+
+        self._update_progress = QProgressDialog(
+            f"TRADIS MH v{new_ver} 다운로드 중...", "취소", 0, 100, self
+        )
+        self._update_progress.setWindowTitle("업데이트")
+        self._update_progress.setWindowModality(Qt.WindowModality.WindowModal)
+        self._update_progress.setMinimumWidth(350)
+        self._update_progress.setAutoClose(False)
+        self._update_progress.show()
+
+        self._download_url = url
+        self._new_ver = new_ver
+
+        def _do_download():
+            def on_progress(downloaded, total):
+                if total > 0:
+                    pct = int(downloaded * 100 / total)
+                    # 메인 스레드에서 UI 업데이트
+                    QTimer.singleShot(0, lambda p=pct: self._update_download_progress(p))
+
+            path = download_update(url, progress_callback=on_progress)
+            QTimer.singleShot(0, lambda: self._on_download_complete(path))
+
+        threading.Thread(target=_do_download, daemon=True).start()
+
+    def _update_download_progress(self, pct):
+        """다운로드 진행률 업데이트"""
+        if hasattr(self, '_update_progress') and self._update_progress:
+            if self._update_progress.wasCanceled():
+                return
+            self._update_progress.setValue(pct)
+
+    def _on_download_complete(self, tmp_path):
+        """다운로드 완료 처리"""
+        if hasattr(self, '_update_progress') and self._update_progress:
+            self._update_progress.close()
+            self._update_progress = None
+
+        if not tmp_path:
+            from gui.dialogs import JarvisMessageBox
+            JarvisMessageBox.warning(self, "업데이트 실패", "다운로드에 실패했습니다.\n다음에 다시 시도해주세요.")
+            return
+
+        self.emit_log(f"[업데이트] v{self._new_ver} 다운로드 완료. 재시작합니다...")
+
+        if apply_update(tmp_path):
+            # EXE 교체 bat가 시작됨 → 현재 앱 종료
+            QApplication.quit()
+        else:
+            from gui.dialogs import JarvisMessageBox
+            JarvisMessageBox.warning(self, "업데이트", "개발 모드에서는 자동 업데이트가 지원되지 않습니다.")
 
 
 
@@ -2003,7 +2248,7 @@ if __name__ == "__main__":
     instance_socket = check_single_instance()
     if not instance_socket:
         temp_app = QApplication(sys.argv)
-        QMessageBox.warning(None, "중복 실행", "JARVIS가 이미 실행 중입니다.")
+        QMessageBox.warning(None, "중복 실행", "TRADIS MH가 이미 실행 중입니다.")
         sys.exit(0)
 
     app = QApplication(sys.argv)

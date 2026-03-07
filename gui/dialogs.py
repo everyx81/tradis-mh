@@ -75,7 +75,7 @@ class IntroWindow(QWidget):
             self.lbl_img.setPixmap(pix)
             self.lbl_img.setFixedSize(280, 280)
         else:
-            self.lbl_img.setText("JARVIS LOADING...")
+            self.lbl_img.setText("TRADIS MH LOADING...")
             self.lbl_img.setStyleSheet("color: cyan; font-size: 30pt; font-weight: bold;")
         
         self.layout.addWidget(self.lbl_img, 0, Qt.AlignmentFlag.AlignCenter)
@@ -199,7 +199,7 @@ class GroupCard(GlassFrame):
         self.is_export_only = is_export_only
         
         if is_export_only:
-            btn_text = "ARCHIVE"
+            btn_text = "폴더 정리"
         elif has_statement:
             btn_text = "AI ANALYZE"
         else:
@@ -222,7 +222,7 @@ class GroupCard(GlassFrame):
         self.layout.addWidget(self.lbl_checklist)
         
         if is_export_only:
-            self.lbl_checklist.setText("✅ 수출신고필증 (정산서 없음 → 바로 아카이빙)")
+            self.lbl_checklist.setText("✅ 수출신고필증 (정산서 없음 → 바로 폴더 정리)")
         elif has_statement:
             self._update_checklist_basic()
         else:
@@ -322,65 +322,73 @@ class GroupCard(GlassFrame):
                         expense_list = cached.get("expense_items", [])
                     
                     # 비용 항목별로 해당하는 파일이 폴더에 있는지 확인
+                    # 같은 키워드의 파일 사용 횟수 추적 (N:N 매칭 지원)
+                    from core.constants import EXPENSE_SYNONYMS, FEE_INVOICE_ITEMS
+                    used_files = []  # 이미 매칭에 사용된 파일 추적
+
                     for item_data in expense_list:
                         if not item_data:
                             continue
-                        
+
                         if isinstance(item_data, str):
                             item_name = item_data
                         else:
                             item_name = item_data.get("name", "")
-                            
+
                         if not item_name or any(k in item_name for k in ["관세", "부가세"]):
                             continue
-                            
-                        # 동의어 사전으로 검색 키워드 확장 (선박운임 → 해상운송계산서 등)
-                        from core.constants import EXPENSE_SYNONYMS
+
+                        # 통관수수료 항목 체크
+                        item_clean = item_name.replace(" ", "")
+                        is_fee = (item_clean in FEE_INVOICE_ITEMS or
+                                 item_name in FEE_INVOICE_ITEMS or
+                                 any(fee in item_clean or item_clean in fee
+                                     for fee in FEE_INVOICE_ITEMS))
+                        if is_fee:
+                            found = any(
+                                "수수료계산서" in v or "수수료" in v
+                                for v in docs.values()
+                            )
+                            required.append({'name': item_name, 'found': found})
+                            continue
+
+                        # 동의어 사전으로 검색 키워드 확장
                         item_upper = item_name.upper().replace(" ", "")
                         search_kws = [item_upper]
                         for k, s in EXPENSE_SYNONYMS.items():
                             if k in item_name:
                                 search_kws.extend([x.upper().replace(" ", "") for x in s])
-                        # 폴더 내 파일명에서 비용 항목 키워드 검색
-                        found = any(
-                            any(kw in v.upper().replace(" ", "") for kw in search_kws)
-                            for v in docs.values()
-                        )
-                        # 통관수수료계산서 항목 매칭 (수수료/비용 항목은 1장에 포함)
-                        if not found:
-                            from core.constants import FEE_INVOICE_ITEMS
-                            item_clean = item_name.replace(" ", "")
-                            is_fee = (item_clean in FEE_INVOICE_ITEMS or 
-                                     item_name in FEE_INVOICE_ITEMS or
-                                     any(fee in item_clean or item_clean in fee 
-                                         for fee in FEE_INVOICE_ITEMS))
-                            if is_fee:
-                                found = any(
-                                    "수수료계산서" in v or "수수료" in v
-                                    for v in docs.values()
-                                )
-                                
-                        # [NEW] 금액 기반 보정 매칭 (위에서 못 찾은 경우)
+
+                        # 아직 사용 안 된 파일 중에서 키워드 매칭 (1개씩 소비)
+                        found = False
                         matched_by_amount = False
+                        for v in docs.values():
+                            if v in used_files:
+                                continue
+                            v_upper = v.upper().replace(" ", "")
+                            if any(kw in v_upper for kw in search_kws):
+                                found = True
+                                used_files.append(v)
+                                break
+
+                        # 금액 기반 보정 매칭 (위에서 못 찾은 경우)
                         if not found:
                             item_amt = item_data.get("amount", 0) if isinstance(item_data, dict) else 0
                             try:
                                 item_amt = int(str(item_amt).replace(',', '').replace('원', ''))
                             except ValueError:
                                 item_amt = 0
-                                
+
                             if item_amt > 0:
-                                # 폴더 내의 미분류 PDF 파일들 탐색
                                 uncl_amounts = {}
                                 if os.path.exists(self.directory):
                                     for f in os.listdir(self.directory):
                                         if not f.lower().endswith('.pdf'):
                                             continue
-                                        # 이미 이름/종류로 매칭된 파일이나 청구서는 제외
-                                        if f in docs.values() or ("청구서" in f and "계산서" not in f):
+                                        if f in docs.values() or f in used_files:
                                             continue
-                                            
-                                        # B/L 번호가 없거나 매칭되지 않은 파일들 확인
+                                        if "청구서" in f and "계산서" not in f:
+                                            continue
                                         fp = os.path.join(self.directory, f)
                                         f_cached = gemini_ocr._get_cached_result(fp)
                                         if f_cached:
@@ -391,16 +399,16 @@ class GroupCard(GlassFrame):
                                                 f_amt = 0
                                             if f_amt > 0:
                                                 uncl_amounts[f] = f_amt
-                                                
-                                # 일치하는 파일이 정확히 1개인지 확인 (오매칭 방지 로직 동일)
+
                                 matching_files = [f for f, amt in uncl_amounts.items() if amt == item_amt]
                                 if len(matching_files) == 1:
                                     found = True
                                     matched_by_amount = True
-                                    
+                                    used_files.append(matching_files[0])
+
                         required.append({
-                            'name': item_name, 
-                            'found': found, 
+                            'name': item_name,
+                            'found': found,
                             'matched_by_amount': matched_by_amount
                         })
             except Exception as e:
@@ -680,9 +688,9 @@ class GroupCard(GlassFrame):
         if not self.marked_files:
             # 마킹 없으면 빈 위젯 유지하되 파일 추가 버튼은 표시
             self.marking_widget.setVisible(True)
-            # ARCHIVE 버튼 텍스트 원복
+            # 폴더 정리 버튼 텍스트 원복
             if self.is_export_only and hasattr(self, 'btn_toggle'):
-                self.btn_toggle.setText("ARCHIVE")
+                self.btn_toggle.setText("폴더 정리")
             
             # 기존과 동일한 파일 추가 버튼 표시
             btn_add = NeonButton("📂 파일 추가", color="orange")
@@ -694,9 +702,9 @@ class GroupCard(GlassFrame):
         
         self.marking_widget.setVisible(True)
         
-        # ARCHIVE 버튼에 파일 수 표시
+        # 폴더 정리 버튼에 파일 수 표시
         if self.is_export_only and hasattr(self, 'btn_toggle'):
-            self.btn_toggle.setText(f"ARCHIVE ({len(self.marked_files)})")
+            self.btn_toggle.setText(f"폴더 정리 ({len(self.marked_files)})")
         
         # 헤더
         lbl = QLabel(f"📎 관련 파일 ({len(self.marked_files)}):")
@@ -818,180 +826,365 @@ class GroupCard(GlassFrame):
         export_files = [v for v in docs.values()]
         if not export_files:
             return
-        
+
         parent = self.parent_widget
         output_name = f"{self.data['company']}({self.text_id})수출신고필증.pdf"
         marked = list(self.marked_files)  # 마킹된 파일 복사
-        
-        # 마킹 파일 경로 재검증 (시간이 지나면 원래 경로에 파일이 없을 수 있음)
+
+        # 마킹 파일 경로 재검증
         if marked:
             export_docs_root = getattr(parent.archiver, 'export_docs_root', '') if hasattr(parent, 'archiver') else ''
-            search_dirs = [d for d in [export_docs_root, self.directory] if d and os.path.exists(d)]
-            
+            search_dirs = [sd for sd in [export_docs_root, self.directory] if sd and os.path.exists(sd)]
+
+            missing_files = []
             for mf in marked:
                 src_path = mf.get('path', '')
-                if not src_path or not os.path.exists(src_path):
-                    # 경로가 유효하지 않으면 다시 검색
-                    file_name = mf.get('name', '')
-                    if file_name:
-                        from core.open_file_detector import find_file_path
-                        found = find_file_path(file_name, search_dirs)
-                        if found:
-                            mf['path'] = found
-                            parent.emit_log(f"[마킹 경로 갱신] {file_name} → {found}")
-                        else:
-                            parent.emit_log(f"[마킹 경고] {file_name}: 경로 재검증 실패")
-        
+                if src_path and os.path.exists(src_path):
+                    continue
+                # 경로가 유효하지 않으면 자동 검색 시도
+                file_name = mf.get('name', '')
+                if file_name:
+                    from core.open_file_detector import find_file_path
+                    found = find_file_path(file_name, search_dirs)
+                    if found:
+                        mf['path'] = found
+                        parent.emit_log(f"[마킹 경로 갱신] {file_name} → {found}")
+                    else:
+                        missing_files.append(mf)
+
+            # 경로를 찾을 수 없는 파일이 있으면 경고 다이얼로그
+            if missing_files:
+                resolved = self._show_missing_files_dialog(missing_files, export_docs_root)
+                if not resolved:
+                    return  # 사용자가 취소
+
         def run_archive():
             export_docs_root = getattr(parent.archiver, 'export_docs_root', '') if hasattr(parent, 'archiver') else ''
-            self.renamer.execute_merge_task(self.directory, output_name, export_files, 
+            self.renamer.execute_merge_task(self.directory, output_name, export_files,
                                            export_docs_root=export_docs_root, marked_files=marked)
             parent.merge_complete_signal.emit()
-        
+
         threading.Thread(target=run_archive, daemon=True).start()
-        parent.emit_log(f"[수출] {self.text_id} 아카이빙 + 관련 파일 수집 중... (마킹 {len(marked)}개)")
+        parent.emit_log(f"[수출] {self.text_id} 폴더 정리 + 관련 파일 수집 중... (마킹 {len(marked)}개)")
         # 마킹 데이터 정리
         if hasattr(parent, 'marked_data') and self.text_id in parent.marked_data:
             del parent.marked_data[self.text_id]
         self.deleteLater()
 
+    def _show_missing_files_dialog(self, missing_files, export_docs_root=""):
+        """마킹 파일 경로를 찾을 수 없을 때 경고 다이얼로그 표시
+
+        Returns:
+            True: 모든 파일 해결됨 또는 사용자가 무시하고 진행
+            False: 사용자가 취소
+        """
+        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFileDialog
+        from PyQt6.QtCore import Qt
+        from core.open_file_detector import get_file_type_icon
+
+        from PyQt6.QtWidgets import QGraphicsDropShadowEffect
+        from PyQt6.QtGui import QFont
+
+        dlg = QDialog(self)
+        dlg.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        dlg.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        dlg.setMinimumWidth(480)
+
+        # 메인 컨테이너 (JarvisMessageBox와 동일한 Frosted Glass 스타일)
+        container = QWidget(dlg)
+        container.setObjectName("missing_files_container")
+        container.setStyleSheet("""
+            #missing_files_container {
+                background-color: rgba(45, 50, 60, 230);
+                border: 1px solid rgba(100, 110, 120, 0.5);
+                border-radius: 20px;
+            }
+        """)
+
+        shadow = QGraphicsDropShadowEffect(dlg)
+        shadow.setBlurRadius(30)
+        shadow.setXOffset(0)
+        shadow.setYOffset(5)
+        shadow.setColor(Qt.GlobalColor.black)
+        container.setGraphicsEffect(shadow)
+
+        outer = QVBoxLayout(dlg)
+        outer.setContentsMargins(10, 10, 10, 10)
+        outer.addWidget(container)
+
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(24, 28, 24, 20)
+        layout.setSpacing(12)
+
+        # 경고 헤더
+        lbl_warn = QLabel(f"파일 경로를 찾을 수 없습니다")
+        lbl_warn.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl_warn.setFont(QFont("Segoe UI", 14, QFont.Weight.Bold))
+        lbl_warn.setStyleSheet("color: #ffffff; background: transparent;")
+        lbl_warn.setWordWrap(True)
+        layout.addWidget(lbl_warn)
+
+        lbl_sub = QLabel(f"{len(missing_files)}개 마킹 파일의 위치를 확인해 주세요")
+        lbl_sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl_sub.setFont(QFont("Segoe UI", 10))
+        lbl_sub.setStyleSheet("color: rgba(255, 255, 255, 0.7); background: transparent;")
+        lbl_sub.setWordWrap(True)
+        layout.addWidget(lbl_sub)
+
+        layout.addSpacing(6)
+
+        # 파일 목록 + 개별 찾기 버튼
+        file_rows = {}
+        for mf in missing_files:
+            row = QHBoxLayout()
+            row.setSpacing(10)
+
+            icon = mf.get('icon', '📁')
+            name = mf.get('name', '?')
+            lbl_name = QLabel(f"{icon} {name}")
+            lbl_name.setFont(QFont("Segoe UI", 10))
+            lbl_name.setStyleSheet("color: #ff8888; background: transparent;")
+            lbl_name.setWordWrap(True)
+            row.addWidget(lbl_name, 1)
+
+            lbl_status = QLabel("❌")
+            lbl_status.setFont(QFont("Segoe UI", 10))
+            lbl_status.setStyleSheet("color: #ff6666; background: transparent;")
+            lbl_status.setFixedWidth(28)
+            row.addWidget(lbl_status)
+
+            btn_find = QPushButton("찾기")
+            btn_find.setFixedHeight(34)
+            btn_find.setMinimumWidth(70)
+            btn_find.setFont(QFont("Segoe UI", 10))
+            btn_find.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn_find.setStyleSheet("""
+                QPushButton {
+                    background-color: rgba(30, 35, 45, 200);
+                    border: 2px solid #00d4ff;
+                    border-radius: 12px;
+                    color: #00d4ff;
+                    padding: 4px 14px;
+                }
+                QPushButton:hover {
+                    background-color: rgba(0, 212, 255, 40);
+                    border: 2px solid #00ffff;
+                    color: #00ffff;
+                }
+            """)
+            row.addWidget(btn_find)
+
+            file_rows[mf['name']] = (lbl_status, lbl_name, mf)
+
+            def make_find_handler(target_mf, status_lbl, name_lbl):
+                def handler():
+                    start = export_docs_root if export_docs_root and os.path.exists(export_docs_root) else ""
+                    path, _ = QFileDialog.getOpenFileName(dlg, f"'{target_mf['name']}' 파일 선택", start)
+                    if path:
+                        target_mf['path'] = path
+                        status_lbl.setText("✅")
+                        status_lbl.setStyleSheet("color: #44ff44; background: transparent;")
+                        name_lbl.setStyleSheet("color: #44ff44; background: transparent;")
+                return handler
+
+            btn_find.clicked.connect(make_find_handler(mf, lbl_status, lbl_name))
+            layout.addLayout(row)
+
+        layout.addSpacing(10)
+
+        # 버튼 영역
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(12)
+
+        btn_cancel = QPushButton("취소")
+        btn_cancel.setFixedHeight(42)
+        btn_cancel.setMinimumWidth(100)
+        btn_cancel.setFont(QFont("Segoe UI", 10, QFont.Weight.Medium))
+        btn_cancel.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_cancel.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(100, 105, 115, 180);
+                border: 1px solid rgba(150, 155, 165, 0.5);
+                border-radius: 12px;
+                color: #ffffff;
+                padding: 8px 20px;
+            }
+            QPushButton:hover { background-color: rgba(120, 125, 135, 200); }
+            QPushButton:pressed { background-color: rgba(80, 85, 95, 200); }
+        """)
+        btn_cancel.clicked.connect(dlg.reject)
+        btn_row.addWidget(btn_cancel)
+
+        btn_ok = QPushButton("진행")
+        btn_ok.setFixedHeight(42)
+        btn_ok.setMinimumWidth(120)
+        btn_ok.setFont(QFont("Segoe UI", 10, QFont.Weight.Medium))
+        btn_ok.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_ok.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(30, 35, 45, 200);
+                border: 2px solid #00d4ff;
+                border-radius: 12px;
+                color: #00d4ff;
+                padding: 8px 20px;
+            }
+            QPushButton:hover {
+                background-color: rgba(0, 212, 255, 40);
+                border: 2px solid #00ffff;
+                color: #00ffff;
+            }
+            QPushButton:pressed { background-color: rgba(0, 212, 255, 80); }
+        """)
+
+        def on_ok():
+            # 경로가 여전히 없는 파일은 marked_files에서 제거
+            for name_key, (_, _, mf_ref) in file_rows.items():
+                p = mf_ref.get('path', '')
+                if not p or not os.path.exists(p):
+                    if mf_ref in self.marked_files:
+                        self.marked_files.remove(mf_ref)
+            dlg.accept()
+
+        btn_ok.clicked.connect(on_ok)
+        btn_row.addWidget(btn_ok)
+
+        layout.addLayout(btn_row)
+
+        result = dlg.exec()
+        return result == QDialog.DialogCode.Accepted
+
     def execute_merge(self):
         final_files = list(dict.fromkeys(m['filename'] for m in self.mapping if m['filename']))
         if not final_files: return
         output_name = f"{self.data['company']}({self.text_id})정산서.pdf"
-        
+
         parent = self.parent_widget
-        
+        marked = list(self.marked_files) if self.marked_files else None
+
+        # 마킹 파일 경로 재검증
+        if marked:
+            export_docs_root = getattr(parent.archiver, 'export_docs_root', '') if hasattr(parent, 'archiver') else ''
+            search_dirs = [sd for sd in [export_docs_root, self.directory] if sd and os.path.exists(sd)]
+
+            missing_files = []
+            for mf in marked:
+                src_path = mf.get('path', '')
+                if src_path and os.path.exists(src_path):
+                    continue
+                file_name = mf.get('name', '')
+                if file_name:
+                    from core.open_file_detector import find_file_path
+                    found = find_file_path(file_name, search_dirs)
+                    if found:
+                        mf['path'] = found
+                        parent.emit_log(f"[마킹 경로 갱신] {file_name} → {found}")
+                    else:
+                        missing_files.append(mf)
+
+            if missing_files:
+                resolved = self._show_missing_files_dialog(missing_files, export_docs_root)
+                if not resolved:
+                    return
+
         def run_merge():
             export_docs_root = getattr(parent.archiver, 'export_docs_root', '') if hasattr(parent, 'archiver') else ''
-            self.renamer.execute_merge_task(self.directory, output_name, final_files, export_docs_root=export_docs_root)
+            self.renamer.execute_merge_task(self.directory, output_name, final_files,
+                                           export_docs_root=export_docs_root, marked_files=marked)
             parent.merge_complete_signal.emit()
-        
+
         threading.Thread(target=run_merge, daemon=True).start()
-                         
+
         parent.emit_log(f"Merging {len(final_files)} files...")
+        # 마킹 데이터 정리
+        if marked and hasattr(parent, 'marked_data') and self.text_id in parent.marked_data:
+            del parent.marked_data[self.text_id]
         self.deleteLater()
 
     def _run_amount_validation(self):
-        """백그라운드에서 로컬 금액 추출 교차 검증을 실행"""
-        docs = self.data.get('docs', {})
-        main_key = next((k for k in docs if "정산서" in k or "청구서" in k), None)
-        if not main_key:
-            return
-            
-        main_filename = docs[main_key]
-        main_pdf_path = os.path.join(self.directory, main_filename)
-        
-        # 서브 파일들 수집 (매핑된 파일들 + 마킹 파일들)
-        sub_pdf_paths = []
-        if self.mapping:
-            for m in self.mapping:
-                fname = m.get('filename')
-                if fname and fname != main_filename:
-                    sub_pdf_paths.append(os.path.join(self.directory, fname))
-        else:
-            for k, v in docs.items():
-                if v and v != main_filename:
-                    sub_pdf_paths.append(os.path.join(self.directory, v))
-                    
-        for m in self.marked_files:
-            if isinstance(m, dict):
-                m_path = m.get('path', '')
-                if m_path and os.path.basename(m_path) != main_filename:
-                    sub_pdf_paths.append(m_path)
-            else:
-                if m != main_filename:
-                    sub_pdf_paths.append(os.path.join(self.directory, m))
-                    
-        # 중복 제거 및 pdf 필터링
-        sub_pdf_paths = list(set([p for p in sub_pdf_paths if p.lower().endswith('.pdf')]))
-        
-        if not sub_pdf_paths:
+        """항목별 1:1 금액 비교 + 전체 합산 비교 2단계 검증"""
+        if not self.mapping:
+            # 매핑 없으면 비용 항목이 있는 항목이 있는지만 간단 체크
+            has_expense = any('비용: ' in item.get('label', '') for item in self.mapping) if self.mapping else False
+            if not has_expense:
+                self.lbl_amount_check.hide()
+                return
+
+        # 비용 항목이 하나라도 있는지 확인
+        has_expense_items = any('비용: ' in item.get('label', '') for item in self.mapping)
+        if not has_expense_items:
             self.lbl_amount_check.hide()
             return
-            
-        self.lbl_amount_check.setText("⏳ 금액 교차 검증 중...")
+
+        self.lbl_amount_check.setText("⏳ 금액 검증 중...")
         self.lbl_amount_check.setStyleSheet("color: #aaaaaa; font-size: 9pt;")
         self.lbl_amount_check.show()
-        
-        # 이전 작업이 존재한다면 정리
+
         if hasattr(self, '_validator_worker'):
             try:
                 self._validator_worker.finished.disconnect()
             except:
                 pass
-            
+
         from PyQt6.QtCore import QThread, pyqtSignal
-        
-        # 내부에 임시 QThread 클래스 정의 (외부 import 없이 안전하게 실행)
+
         class ValidatorWorker(QThread):
             finished = pyqtSignal(dict)
-            def __init__(self, main_path, sub_paths, target_total=0):
+            def __init__(self, mapping, directory):
                 super().__init__()
-                self.main_pdf_path = main_path
-                self.sub_pdf_paths = sub_paths
-                self.target_total = target_total
-                
+                self.mapping = mapping
+                self.directory = directory
+
             def run(self):
                 import sys
                 core_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
                 if core_path not in sys.path:
                     sys.path.insert(0, core_path)
                 try:
-                    from core.validator import cross_check_with_totals
-                    res = cross_check_with_totals(self.main_pdf_path, self.sub_pdf_paths, self.target_total)
+                    from core.validator import validate_mapping_amounts
+                    res = validate_mapping_amounts(self.mapping, self.directory)
                 except Exception as e:
                     print("validator error:", e)
                     res = {}
                 self.finished.emit(res)
-                
-        # [NEW] 정산서 캐시를 활용한 합산 목표액(target_total) 계산
-        target_total = 0
-        statement_file = self.docs.get("자금정산서") or self.docs.get("정산서")
-        if statement_file:
-            try:
-                from auto_rename import gemini_ocr
-                sp = os.path.join(self.directory, statement_file)
-                cached = gemini_ocr._get_cached_result(sp)
-                if cached:
-                    expenses = cached.get('expense_items', [])
-                    if not expenses:
-                        expenses = cached.get('merge_info', {}).get('expense_items', [])
-                    
-                    for item in expenses:
-                        if isinstance(item, dict):
-                            amt = item.get('amount', 0)
-                            try:
-                                # 숫자 외 문자 제거 후 정수 합산
-                                target_total += int(re.sub(r'[^0-9]', '', str(amt)))
-                            except: pass
-            except: pass
 
-        self._validator_worker = ValidatorWorker(main_pdf_path, sub_pdf_paths, target_total)
-        
+        self._validator_worker = ValidatorWorker(list(self.mapping), self.directory)
+
         def _on_validated(res):
             try:
-                if res.get("is_all_matched"):
-                    self.lbl_amount_check.setText("🟢 금액 교차 검증 100% 완료")
+                item_all = res.get('item_all_matched', True)
+                sum_matched = res.get('sum_matched', True)
+                details = res.get('item_details', [])
+                sum_items = res.get('sum_items', 0)
+                sum_files = res.get('sum_files', 0)
+
+                if item_all and sum_matched:
+                    self.lbl_amount_check.setText("🟢 항목별/합산 금액 검증 완료")
                     self.lbl_amount_check.setStyleSheet("color: #00ff00; font-size: 9pt; font-weight: bold;")
+                elif not item_all and sum_matched:
+                    # 항목별 불일치이나 합산은 맞음 → OCR 오류 가능성
+                    mismatched = [d for d in details if not d.get('matched') and not d.get('no_file')]
+                    names = [d['label'].split('비용: ')[-1] for d in mismatched[:3]]
+                    names_str = ", ".join(names)
+                    if len(mismatched) > 3:
+                        names_str += f" 외 {len(mismatched)-3}건"
+                    self.lbl_amount_check.setText(f"🟡 {names_str} 금액 불일치 (합산은 일치)")
+                    self.lbl_amount_check.setStyleSheet("color: #ffaa00; font-size: 9pt; font-weight: bold;")
+                elif item_all and not sum_matched:
+                    diff = abs(sum_items - sum_files)
+                    self.lbl_amount_check.setText(f"🟡 합산 불일치 (차이: {diff:,}원)")
+                    self.lbl_amount_check.setStyleSheet("color: #ffaa00; font-size: 9pt; font-weight: bold;")
                 else:
-                    details = res.get("details", [])
-                    unmatched_files = [d.get("filename", "알 수 없는 파일") for d in details if not d.get("is_matched", False)]
-                    unmatched = len(unmatched_files)
-                    
-                    if unmatched > 0:
-                        # 텍스트가 너무 길어지는 것을 방지
-                        file_names_str = ", ".join(unmatched_files)
-                        if len(file_names_str) > 40:
-                            file_names_str = file_names_str[:37] + "..."
-                            
-                        self.lbl_amount_check.setText(f"🟡 금액 불일치 {unmatched}건: {file_names_str}")
-                        self.lbl_amount_check.setStyleSheet("color: #ffaa00; font-size: 9pt; font-weight: bold;")
-                    else:
-                        self.lbl_amount_check.hide()
+                    mismatched = [d for d in details if not d.get('matched') and not d.get('no_file')]
+                    diff = abs(sum_items - sum_files)
+                    names = [d['label'].split('비용: ')[-1] for d in mismatched[:2]]
+                    names_str = ", ".join(names)
+                    if len(mismatched) > 2:
+                        names_str += f" 외 {len(mismatched)-2}건"
+                    self.lbl_amount_check.setText(f"🔴 {names_str} 금액 불일치, 합산 차이 {diff:,}원")
+                    self.lbl_amount_check.setStyleSheet("color: #ff4444; font-size: 9pt; font-weight: bold;")
             except Exception:
                 pass
-                
+
         self._validator_worker.finished.connect(_on_validated)
         self._validator_worker.start()
 
@@ -1009,8 +1202,8 @@ class JarvisMessageBox(QDialog):
         super().__init__(parent)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setFixedWidth(340)
-        
+        self.setMinimumWidth(340)
+
         self.result_value = None
         self.icon_type = icon_type
         self.title_text = title
@@ -1572,20 +1765,20 @@ class MarkingPopup(QDialog):
         inner.addWidget(lbl_open)
         
         # 스크롤 영역 (체크박스 리스트)
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setMaximumHeight(250)
-        scroll.setStyleSheet("""
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setMaximumHeight(250)
+        self.scroll.setStyleSheet("""
             QScrollArea { background: transparent; border: none; }
             QScrollArea > QWidget > QWidget { background: transparent; }
         """)
-        
+
         self.check_container = QWidget()
         self.check_layout = QVBoxLayout(self.check_container)
         self.check_layout.setContentsMargins(4, 4, 4, 4)
         self.check_layout.setSpacing(4)
-        scroll.setWidget(self.check_container)
-        inner.addWidget(scroll)
+        self.scroll.setWidget(self.check_container)
+        inner.addWidget(self.scroll)
         
         self.checkboxes = []  # (QCheckBox, file_info_dict)
         
@@ -1709,6 +1902,11 @@ class MarkingPopup(QDialog):
                 idx = self.check_layout.count() - 1  # stretch 위치
                 self.check_layout.insertWidget(idx, cb)
                 self.checkboxes.append((cb, finfo))
+
+            # 추가된 파일이 보이도록 스크롤을 맨 아래로
+            from PyQt6.QtCore import QTimer
+            QTimer.singleShot(50, lambda: self.scroll.verticalScrollBar().setValue(
+                self.scroll.verticalScrollBar().maximum()))
     
     def _find_file_in_dirs(self, filename, search_dirs):
         """파일명으로 여러 디렉토리에서 실제 경로 찾기"""

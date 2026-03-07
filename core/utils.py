@@ -15,8 +15,6 @@ from .constants import PORT
 
 # --- Thread Locks ---
 pdf_lock = threading.Lock()
-kb_lock = threading.Lock()
-api_lock = threading.Lock()
 cache_lock = threading.Lock()  # 캐시 파일 쓰기 락
 
 # --- Regex Patterns (Compiled for Performance) ---
@@ -115,7 +113,7 @@ def check_single_instance() -> Optional[socket.socket]:
     except socket.error:
         print("\n" + "="*60)
         print(" [오류] 프로그램이 이미 실행 중입니다!")
-        print(" JARVIS는 한 번에 하나만 실행할 수 있습니다.")
+        print(" TRADIS MH는 한 번에 하나만 실행할 수 있습니다.")
         print("="*60 + "\n")
         return None
 

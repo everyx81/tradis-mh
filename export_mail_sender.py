@@ -151,11 +151,15 @@ class ExportMailSender:
             self.log(f"메일 발송 중... → {recipients_str}")
             
             smtp = smtplib.SMTP_SSL(self.config.smtp_server, self.config.smtp_port)
-            smtp.login(self.config.email, self.config.password)
-            # 명시적으로 수신자 목록(To+Cc)을 전달 (순수 이메일 주소만)
-            smtp.send_message(msg, to_addrs=real_recipients) 
-            smtp.quit()
-            self.log("메일 발송 완료!")
+            try:
+                smtp.login(self.config.email, self.config.password)
+                smtp.send_message(msg, to_addrs=real_recipients)
+                self.log("메일 발송 완료!")
+            finally:
+                try:
+                    smtp.quit()
+                except Exception:
+                    pass
         except Exception as e:
             self.log(f"메일 발송 실패: {e}")
             return False
@@ -173,19 +177,23 @@ class ExportMailSender:
     
     def _save_to_sent_folder(self, msg: MIMEMultipart):
         """IMAP으로 보낸 메일함에 저장"""
-        imap = imaplib.IMAP4_SSL(self.config.imap_server, self.config.imap_port)
-        imap.login(self.config.email, self.config.password)
-        
-        # 보낸 메일함 폴더명 확인 (한비로는 Sent, INBOX.Sent, 보낸편지함 등일 수 있음)
-        # 폴더 목록 조회하여 적절한 폴더 찾기
-        sent_folder = self._find_sent_folder(imap)
-        
-        if sent_folder:
-            imap.append(sent_folder, "\\Seen", None, msg.as_bytes())
-        else:
-            self.log("보낸 메일함 폴더를 찾을 수 없음")
-        
-        imap.logout()
+        imap = None
+        try:
+            imap = imaplib.IMAP4_SSL(self.config.imap_server, self.config.imap_port)
+            imap.login(self.config.email, self.config.password)
+
+            sent_folder = self._find_sent_folder(imap)
+
+            if sent_folder:
+                imap.append(sent_folder, "\\Seen", None, msg.as_bytes())
+            else:
+                self.log("보낸 메일함 폴더를 찾을 수 없음")
+        finally:
+            if imap:
+                try:
+                    imap.logout()
+                except Exception:
+                    pass
     
     def _find_sent_folder(self, imap: imaplib.IMAP4_SSL) -> Optional[str]:
         """보낸 메일함 폴더 찾기"""

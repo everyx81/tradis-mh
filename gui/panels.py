@@ -34,9 +34,11 @@ class FileManagerWidget(QWidget):
     start_monitoring_clicked = pyqtSignal()  # 모니터링 시작 버튼 클릭
     stop_monitoring_clicked = pyqtSignal()  # 모니터링 중지 버튼 클릭
     item_deleted = pyqtSignal()  # 항목 삭제 시그널
+    admin_unlocked = pyqtSignal()  # 관리자 잠금 해제 시그널
 
-    def __init__(self, parent=None, path_callback=None, archiver=None):
+    def __init__(self, parent=None, path_callback=None, archiver=None, license_tier="standard"):
         super().__init__(parent)
+        self.license_tier = license_tier
         self.path_callback = path_callback
         self.archiver = archiver
         self.target_subfolders = []
@@ -152,7 +154,7 @@ class FileManagerWidget(QWidget):
         self.lbl_search_icon = QLabel("🔍")
         self.lbl_search_icon.setStyleSheet("color: #00ffff; font-size: 12pt;")
         self.search_header_layout.addWidget(self.lbl_search_icon)
-        self.lbl_search_text = QLabel("JARVIS SEARCH")
+        self.lbl_search_text = QLabel("TRADIS SEARCH")
         self.lbl_search_text.setStyleSheet("color: #00ffff; font-weight: bold; font-size: 10pt;")
         self.search_header_layout.addWidget(self.lbl_search_text)
         self.search_header_layout.addStretch()
@@ -248,7 +250,14 @@ class FileManagerWidget(QWidget):
         self.tabs.addTab(mk3_tab, "MK3")
         self.mk3_tab_widget = mk3_tab
         
-        # TAB 3: VERONICA (통관) - 1분컷! 수출
+        # TAB 3: VERONICA (통관) - admin 전용
+        if self.license_tier != "admin":
+            # standard: VERONICA/REPORT 탭 없이 바로 SETTINGS로
+            self._setup_settings_tab()
+            layout.addWidget(self.tabs)
+            self.tabs.currentChanged.connect(self._on_tab_changed)
+            return
+
         tab_veronica = QWidget()
         tab_veronica.setStyleSheet("background-color: transparent;")
         veronica_layout = QVBoxLayout(tab_veronica)
@@ -422,13 +431,18 @@ class FileManagerWidget(QWidget):
         self.report_panel.log_signal.connect(self.emit_log)
         self.tabs.addTab(self.report_panel, "REPORT")
 
-        # TAB 5: Settings
+        self._setup_settings_tab()
+        layout.addWidget(self.tabs)
+        self.tabs.currentChanged.connect(self._on_tab_changed)
+
+    def _setup_settings_tab(self):
+        """SETTINGS 탭 생성"""
         tab4 = QWidget()
         tab4.setStyleSheet("background-color: transparent;")
         t4_layout = QVBoxLayout(tab4)
         t4_layout.setContentsMargins(10, 20, 10, 20)
         t4_layout.setSpacing(15)
-        t4_layout.addWidget(QLabel("ARCHIVE ROOTS SETTING"))
+        t4_layout.addWidget(QLabel("폴더 정리 경로 설정"))
         
         self.btn_set_imp = NeonButton("SET IMPORT ROOT")
         self.btn_set_imp.clicked.connect(lambda: self.set_root('import'))
@@ -518,11 +532,45 @@ class FileManagerWidget(QWidget):
         self.lbl_mail_status.setStyleSheet("color: #888; font-size: 8pt;")
         t4_layout.addWidget(self.lbl_mail_status)
         
+        # === 관리자 잠금 해제 섹션 ===
+        t4_layout.addSpacing(20)
+        lbl_admin_header = QLabel("ADMIN UNLOCK")
+        lbl_admin_header.setStyleSheet("color: #ff88ff; font-weight: bold;")
+        t4_layout.addWidget(lbl_admin_header)
+
+        admin_row = QHBoxLayout()
+        self.input_admin_pw = QLineEdit()
+        self.input_admin_pw.setEchoMode(QLineEdit.EchoMode.Password)
+        self.input_admin_pw.setPlaceholderText("관리자 비밀번호")
+        self.input_admin_pw.setStyleSheet("""
+            QLineEdit {
+                background-color: rgba(5, 15, 30, 200);
+                border: 1px solid #ff88ff;
+                border-radius: 5px;
+                color: #ffffff;
+                padding: 5px;
+            }
+        """)
+        admin_row.addWidget(self.input_admin_pw)
+
+        self.btn_admin_unlock = NeonButton("UNLOCK", color="magenta")
+        self.btn_admin_unlock.clicked.connect(self._on_admin_unlock)
+        admin_row.addWidget(self.btn_admin_unlock)
+        t4_layout.addLayout(admin_row)
+
+        self.lbl_admin_status = QLabel("Status: Standard")
+        self.lbl_admin_status.setStyleSheet("color: #888; font-size: 8pt;")
+        t4_layout.addWidget(self.lbl_admin_status)
+
+        # admin 상태면 UI 반영
+        if self.license_tier == "admin":
+            self.lbl_admin_status.setText("Status: Admin ✓")
+            self.lbl_admin_status.setStyleSheet("color: #ff88ff; font-size: 8pt;")
+            self.input_admin_pw.setEnabled(False)
+            self.btn_admin_unlock.setEnabled(False)
+
         t4_layout.addStretch()
         self.tabs.addTab(tab4, "SETTINGS")
-        
-        layout.addWidget(self.tabs)
-        self.tabs.currentChanged.connect(self._on_tab_changed)
     
     def _on_tab_changed(self, index):
         tab_name = self.tabs.tabText(index)
@@ -570,7 +618,7 @@ class FileManagerWidget(QWidget):
 
     def _animate_search_panel(self, show):
         anim_targets = [
-            (self.lbl_search_text, 200, 'typing', "JARVIS SEARCH"),
+            (self.lbl_search_text, 200, 'typing', "TRADIS SEARCH"),
             (self.lbl_search_icon, 700, 'fade', None),
             (self.lbl_browser_text, 1000, 'typing', "FOLDER TREE"),
             (self.lbl_browser_icon, 1500, 'fade', None),
@@ -818,17 +866,46 @@ class FileManagerWidget(QWidget):
         if not os.path.exists(dst_path):
             self.emit_log(f"[오류] 대상 폴더가 존재하지 않습니다: {dst_path}")
             return
-        
+
+        # 폴더가 포함되어 있으면 파일만 꺼낼지 물어보기
+        has_folder = any(os.path.isdir(p) for p in paths)
+        extract_files = False
+        if has_folder:
+            dlg = JarvisMessageBox(self, "폴더 이동", "폴더 안의 파일만 꺼내서 이동할까요?", JarvisMessageBox.Question)
+            dlg.add_button("폴더째로", "as_is", "gray")
+            dlg.add_button("파일만 꺼내기", "extract", "cyan")
+            dlg.exec()
+            extract_files = (dlg.result_value == "extract")
+
         moved_count = 0
+        empty_folders = []  # 파일 꺼낸 후 삭제할 빈 폴더
         for src in paths:
             try:
-                dest = os.path.join(dst_path, os.path.basename(src))
-                if os.path.exists(dest): dest = get_unique_filename(dest)
-                shutil.move(src, dest)
-                moved_count += 1
+                if extract_files and os.path.isdir(src):
+                    # 폴더 안의 파일만 이동
+                    for item in os.listdir(src):
+                        item_path = os.path.join(src, item)
+                        dest = os.path.join(dst_path, item)
+                        if os.path.exists(dest): dest = get_unique_filename(dest)
+                        shutil.move(item_path, dest)
+                        moved_count += 1
+                    empty_folders.append(src)
+                else:
+                    dest = os.path.join(dst_path, os.path.basename(src))
+                    if os.path.exists(dest): dest = get_unique_filename(dest)
+                    shutil.move(src, dest)
+                    moved_count += 1
             except Exception as e:
                 self.emit_log(f"[오류] 이동 실패: {os.path.basename(src)} - {e}")
-        
+
+        # 비어진 폴더 삭제
+        for folder in empty_folders:
+            try:
+                if os.path.exists(folder) and not os.listdir(folder):
+                    os.rmdir(folder)
+            except Exception:
+                pass
+
         if moved_count > 0:
             self._load_folder_contents(dst_path)
             self.emit_log(f"[완료] {moved_count}개 항목이 {os.path.basename(dst_path)}로 이동됨")
@@ -1027,7 +1104,7 @@ class FileManagerWidget(QWidget):
         if not root:
              JarvisMessageBox.warning(self, "오류", f"{'가져오기' if mode == 'import' else '내보내기'} 경로가 설정되지 않았습니다!")
              return
-             
+
         base_path = self.path_callback() if self.path_callback else ""
         if not base_path: return
 
@@ -1043,33 +1120,52 @@ class FileManagerWidget(QWidget):
             if os.path.isdir(path):
                  parts = folder_name.split('_')
                  if len(parts) >= 2: valid_folders.append((path, folder_name))
-        
+
         if not valid_folders:
             JarvisMessageBox.warning(self, "오류", "Company_ID 형식의 폴더가 선택되지 않았습니다.")
             return
+
+        # 중복 사전 검사
+        new_folders = []
+        dup_folders = []  # (src_path, folder_name, existing_full_path)
+        for src_path, folder_name in valid_folders:
+            parts = folder_name.split('_')
+            comp = parts[0]
+            fid = "_".join(parts[1:])
+            existing_rel = self._find_id_in_company_dir(root, comp, fid)
+            if existing_rel:
+                existing_full = os.path.join(root, existing_rel)
+                dup_folders.append((src_path, folder_name, existing_full))
+            else:
+                new_folders.append((src_path, folder_name))
+
+        # 중복이 있으면 사용자에게 물어보기
+        dup_action = None  # "merge" or "new"
+        if dup_folders:
+            dup_names = [fn for _, fn, _ in dup_folders]
+            dup_action = self._show_duplicate_merge_dialog(dup_names)
+            # result: "merge" = 병합, "new" = 새 폴더, None = 취소
+            if dup_action is None:
+                return
 
         def run_move():
             count = 0
             duplicates = []
             moved_dst_paths = []
             self.emit_log(f"[{mode.upper()} 이동 시작] 대상: {len(valid_folders)}개 폴더")
-            
-            for src_path, folder_name in valid_folders:
+
+            # 새 폴더 이동
+            for src_path, folder_name in new_folders:
                 parts = folder_name.split('_')
                 comp = parts[0]
                 fid = "_".join(parts[1:])
-                existing_path = self._find_id_in_company_dir(root, comp, fid)
-                if existing_path:
-                    self.emit_log(f" -> [중복 건너뜀] {comp}/{fid}")
-                    duplicates.append(f"{comp}/{fid}")
-                    continue
-                
+
                 existing_company_folder = self._find_company_folder(root, comp)
                 if existing_company_folder: dst_parent = existing_company_folder
                 else:
                     dst_parent = os.path.join(root, comp)
                     os.makedirs(dst_parent, exist_ok=True)
-                
+
                 dst = os.path.join(dst_parent, fid)
                 try:
                     shutil.move(src_path, dst)
@@ -1077,12 +1173,87 @@ class FileManagerWidget(QWidget):
                     moved_dst_paths.append(dst)
                     self.emit_log(f" -> [이동 성공] {folder_name} -> {comp}/{fid}")
                 except Exception as e: self.emit_log(f" -> [이동 실패] {folder_name}: {e}")
-            
+
+            # 중복 폴더 처리
+            for src_path, folder_name, existing_full in dup_folders:
+                parts = folder_name.split('_')
+                comp = parts[0]
+                fid = "_".join(parts[1:])
+                if dup_action == "merge":
+                    # 병합: 파일 단위로 복사 (동일 파일 덮어쓰기, 새 파일 추가)
+                    try:
+                        merged = 0
+                        for item in os.listdir(src_path):
+                            src_item = os.path.join(src_path, item)
+                            dst_item = os.path.join(existing_full, item)
+                            if os.path.isfile(src_item):
+                                shutil.copy2(src_item, dst_item)
+                                merged += 1
+                            elif os.path.isdir(src_item):
+                                if os.path.exists(dst_item):
+                                    # 하위 폴더도 파일 단위로 병합
+                                    for sub in os.listdir(src_item):
+                                        shutil.copy2(os.path.join(src_item, sub), os.path.join(dst_item, sub))
+                                        merged += 1
+                                else:
+                                    shutil.copytree(src_item, dst_item)
+                                    merged += 1
+                        # 원본 폴더 삭제
+                        shutil.rmtree(src_path)
+                        count += 1
+                        moved_dst_paths.append(existing_full)
+                        self.emit_log(f" -> [병합 완료] {folder_name} ({merged}개 파일)")
+                    except Exception as e:
+                        self.emit_log(f" -> [병합 실패] {folder_name}: {e}")
+                else:
+                    # 새 폴더로 생성: 폴더명(1), (2), ...
+                    dst_parent = os.path.dirname(existing_full)
+                    base_fid = fid
+                    n = 1
+                    while True:
+                        new_fid = f"{base_fid}({n})"
+                        new_dst = os.path.join(dst_parent, new_fid)
+                        if not os.path.exists(new_dst):
+                            break
+                        n += 1
+                    try:
+                        shutil.move(src_path, new_dst)
+                        count += 1
+                        moved_dst_paths.append(new_dst)
+                        self.emit_log(f" -> [새 폴더] {folder_name} -> {comp}/{new_fid}")
+                    except Exception as e:
+                        self.emit_log(f" -> [새 폴더 실패] {folder_name}: {e}")
+
             import time
             time.sleep(0.3)
             self.quick_export_complete_signal.emit(count, duplicates, valid_folders, moved_dst_paths)
-        
+
         threading.Thread(target=run_move, daemon=True).start()
+
+    def _show_duplicate_merge_dialog(self, dup_names):
+        """중복 폴더 발견 시 병합/새 폴더/취소 선택 다이얼로그
+
+        Returns:
+            "merge": 병합, "new": 새 폴더, None: 취소
+        """
+        names_text = "\n".join(f"  • {n}" for n in dup_names[:5])
+        if len(dup_names) > 5:
+            names_text += f"\n  ... 외 {len(dup_names) - 5}건"
+
+        msg = f"이미 동일한 폴더가 {len(dup_names)}건 있습니다.\n\n{names_text}"
+
+        dlg = JarvisMessageBox(self, "중복 폴더 발견", msg, JarvisMessageBox.Question)
+        dlg.add_button("취소", "reject", "gray")
+        dlg.add_button("새 폴더", "new", "gray")
+        dlg.add_button("병합", "merge", "cyan")
+        dlg.exec()
+
+        if dlg.result_value == "merge":
+            return "merge"
+        elif dlg.result_value == "new":
+            return "new"
+        else:
+            return None
 
     def _on_quick_export_complete(self, count, duplicates, moved_folders, moved_dst_paths=None):
         self.emit_log(f"[DEBUG] _on_quick_export_complete 호출됨: count={count}")
@@ -1198,6 +1369,26 @@ class FileManagerWidget(QWidget):
             self.archiver.log_callback(msg)
         else:
             print(f"[FileManager Log] {msg}")
+
+    def _on_admin_unlock(self):
+        """관리자 비밀번호 검증"""
+        from version import ADMIN_PASSWORD
+        pw = self.input_admin_pw.text().strip()
+        if not pw:
+            JarvisMessageBox.warning(self, "오류", "비밀번호를 입력해주세요.")
+            return
+
+        if pw == ADMIN_PASSWORD:
+            self.license_tier = "admin"
+            self.lbl_admin_status.setText("Status: Admin ✓")
+            self.lbl_admin_status.setStyleSheet("color: #ff88ff; font-size: 8pt;")
+            self.input_admin_pw.setEnabled(False)
+            self.btn_admin_unlock.setEnabled(False)
+            self.admin_unlocked.emit()
+            JarvisMessageBox.information(self, "관리자 모드", "관리자 모드가 활성화되었습니다.")
+        else:
+            JarvisMessageBox.warning(self, "오류", "비밀번호가 올바르지 않습니다.")
+            self.input_admin_pw.clear()
 
     def _save_hanbiro_settings(self):
         """한비로 메일 설정 저장"""
@@ -1411,7 +1602,7 @@ class FileManagerWidget(QWidget):
         from PyQt6.QtWidgets import QDialog, QVBoxLayout, QTextBrowser, QPushButton
         
         dlg = QDialog(self)
-        dlg.setWindowTitle("JARVIS 사용자 매뉴얼")
+        dlg.setWindowTitle("TRADIS MH 사용자 매뉴얼")
         dlg.resize(700, 800)
         dlg.setStyleSheet("background-color: #050f1e; color: #ffffff;")
         
@@ -1419,7 +1610,7 @@ class FileManagerWidget(QWidget):
         layout.setContentsMargins(20, 20, 20, 20)
         
         # 타이틀
-        title = QLabel("📘 JARVIS 통합 매뉴얼")
+        title = QLabel("📘 TRADIS MH 통합 매뉴얼")
         title.setStyleSheet("font-size: 18pt; font-weight: bold; color: #00ffff; margin-bottom: 15px;")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title)
@@ -1440,13 +1631,13 @@ class FileManagerWidget(QWidget):
         
         # 매뉴얼 내용 (코드 내장)
         manual_content = """
-# JARVIS AI Assistant 사용자 매뉴얼
+# TRADIS MH 사용자 매뉴얼
 
 ---
 
-## 📌 JARVIS란?
+## 📌 TRADIS MH란?
 
-**JARVIS**는 관세사무소 업무를 자동화하는 AI 어시스턴트입니다.
+**TRADIS MH**는 관세사무소 업무를 자동화하는 AI 어시스턴트입니다.
 
 주요 기능:
 - 📄 **파일 자동 분석/병합**: PDF 파일을 AI가 분석하고 같은 건의 서류를 자동 병합
@@ -1460,7 +1651,7 @@ class FileManagerWidget(QWidget):
 ## 🚀 처음 시작하기 (초기 설정)
 
 ### 1단계: 프로그램 실행
-- `JARVIS_AI_Assistant.exe` 파일을 더블클릭합니다.
+- `TRADIS_MH.exe` 파일을 더블클릭합니다.
 - 처음 실행 시 인트로 화면이 나타난 후 메인 화면이 표시됩니다.
 
 ### 2단계: API 키 설정 (필수)
@@ -1590,7 +1781,7 @@ class FileManagerWidget(QWidget):
 4. **선택 이동** 버튼 클릭
 
 #### 드래그 앤 드롭
-- Windows 탐색기에서 파일을 드래그하여 JARVIS 창에 드롭
+- Windows 탐색기에서 파일을 드래그하여 TRADIS MH 창에 드롭
 - 자동으로 FILES TO MOVE 목록에 추가됨
 
 #### 서버로 빠른 이동
@@ -1776,11 +1967,11 @@ class FileManagerWidget(QWidget):
 |--------|------|------------|------|-------------|
 
 - **확인**: 입금 확인 시 "확인" 또는 "O" 입력
-- **보고일자**: 메일 발송 시 JARVIS가 자동 기록 (직접 입력 불필요)
+- **보고일자**: 메일 발송 시 TRADIS MH가 자동 기록 (직접 입력 불필요)
 
 #### 동작 흐름
 1. 스프레드시트에서 "확인" 입력 (입금됨)
-2. JARVIS에서 "가져오기" → 확인된 항목 표시
+2. TRADIS MH에서 "가져오기" → 확인된 항목 표시
 3. 메일 발송 → 스프레드시트에 보고일자 자동 기록
 4. 다음 가져오기 시 보고일자가 있는 항목은 제외됨
 
@@ -1830,7 +2021,7 @@ A: 다음을 확인하세요:
 3. 수출 데이터가 파싱되어 버튼이 활성화되었는지
 
 ### Q: 미니 윈도우로 최소화했는데 복원이 안 돼요
-A: 화면 우측 하단에 작은 JARVIS 바가 있습니다. ◀ 버튼을 클릭하면 복원됩니다.
+A: 화면 우측 하단에 작은 TRADIS MH 바가 있습니다. ◀ 버튼을 클릭하면 복원됩니다.
 
 ### Q: 대납금 가져오기가 안 돼요
 A: 다음을 확인하세요:

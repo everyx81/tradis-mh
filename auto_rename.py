@@ -35,7 +35,7 @@ from core.config import (
 from core.utils import (
     sanitize_filename, get_unique_filename, cleanup_company_name,
     parse_renamed_filename, extract_text, check_single_instance,
-    pdf_lock, kb_lock, api_lock, cache_lock,
+    pdf_lock,
     RE_FILE_PATTERN, RE_INVALID_CHARS, RE_ID_PAREN, RE_DOC_MATCH,
     RE_COMPANY_CLEAN_1, RE_COMPANY_CLEAN_2, RE_COMPANY_CLEAN_3,
     RE_COMPANY_KOREAN, RE_COMPANY_SPLIT,
@@ -46,8 +46,7 @@ from core.utils import (
 
 # OCR
 from core.ocr import (
-    GeminiOCR, gemini_ocr, extract_document_info_ai,
-    KnowledgeBase, knowledge_base
+    GeminiOCR, gemini_ocr, extract_document_info_ai
 )
 
 # File Processor
@@ -63,7 +62,7 @@ if __name__ == "__main__":
     try:
         s = check_single_instance()
         if s:
-            print("JARVIS RE-INIT SUCCESSFUL")
+            print("TRADIS MH RE-INIT SUCCESSFUL")
             while True:
                 time.sleep(1)
     except KeyboardInterrupt:

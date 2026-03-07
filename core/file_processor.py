@@ -17,7 +17,7 @@ from watchdog.events import FileSystemEventHandler
 from .constants import (
     DOC_TYPE_IMPORT_DECLARATION, DOC_TYPE_EXPORT_DECLARATION,
     DOC_TYPE_PAYMENT_NOTICE, DOC_TYPE_IMPORT_TAX_INVOICE,
-    FEE_INVOICE_ITEMS, EXPENSE_SYNONYMS
+    FEE_INVOICE_ITEMS, EXPENSE_SYNONYMS, REQUIREMENT_DOC_KEYWORDS
 )
 from .utils import (
     sanitize_filename, get_unique_filename, cleanup_company_name,
@@ -181,9 +181,18 @@ class AutoRenamer:
                     comp_name = "알수없는상호"
                 
                 base_name = f"미분류_{doc_name}_{comp_name}"
-                
+
+                # 품목명이 있으면 금액 대신 품목명 사용 (요건 증빙서류)
+                product_name = res.get("product_name", "")
+                if product_name:
+                    product_clean = sanitize_filename(product_name).replace(" ", "")
+                    if len(product_clean) > 20:
+                        product_clean = product_clean[:20]
+
                 if amt_val > 0:
                     nn = f"{base_name}_{amt_val}.pdf"
+                elif product_name:
+                    nn = f"{base_name}_{product_clean}.pdf"
                 else:
                     nn = f"{base_name}_확인필요.pdf"
                 
@@ -487,6 +496,50 @@ class AutoRenamer:
             if pdf not in af:
                 m.append({'label': '[추가] 미분류 서류', 'filename': pdf})
                 af.append(pdf)
+
+        # ── 5단계: 요건 증빙서류 매칭 (맨 마지막 페이지) ──
+        # 정산서에 요건 수수료가 있고 수입자가 같은 미분류 요건 서류를 자동 매칭
+        if an and isinstance(an, dict):
+            group_company = cleanup_company_name(an.get("company_name", "")).replace(" ", "")
+
+            if group_company and group_company != "Unknown":
+                has_req_keywords = set()
+                for item_data in expense_list:
+                    if not item_data:
+                        continue
+                    item_name = item_data.get("name", "") if isinstance(item_data, dict) else str(item_data)
+                    item_clean = item_name.replace(" ", "")
+                    for kw in REQUIREMENT_DOC_KEYWORDS:
+                        if kw in item_clean:
+                            has_req_keywords.add(kw)
+
+                if has_req_keywords:
+                    try:
+                        for f in os.listdir(dr):
+                            if not f.startswith("미분류_") or not f.lower().endswith('.pdf'):
+                                continue
+                            if f in af:
+                                continue
+
+                            name_body = f[len("미분류_"):-4]
+                            parts = name_body.split("_")
+                            if len(parts) < 2:
+                                continue
+
+                            uncl_doc = parts[0]
+                            uncl_company = parts[1]
+
+                            if cleanup_company_name(uncl_company).replace(" ", "") != group_company:
+                                continue
+
+                            for kw in has_req_keywords:
+                                if kw in uncl_doc:
+                                    m.append({'label': f'[요건] {uncl_doc}', 'filename': f, 'requirement_doc': True})
+                                    af.append(f)
+                                    break
+                    except OSError:
+                        pass
+
         return m
 
     def execute_merge_task(self, dr, of, fo, export_docs_root=None, marked_files=None):
@@ -566,11 +619,10 @@ class AutoRenamer:
                     if not f or f == final_of: continue
                     src_path = os.path.join(dr, f)
                     if not os.path.exists(src_path): continue
-                    
+
                     _, _, d, _ = parse_renamed_filename(f)
                     # 파일명에 '신고필증'이 있으면 보존을 위해 이동, 그 외는 병합되었으므로 삭제
                     is_decl = ("신고필증" in d) if d else ("신고필증" in f)
-                    
                     if is_decl:
                         try:
                             shutil.move(src_path, os.path.join(archive_dir, f))

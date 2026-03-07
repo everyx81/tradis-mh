@@ -22,9 +22,9 @@ def diag():
                                 txt = e.window_text()
                                 if txt and ('.pdf' in txt.lower() or '.xlsx' in txt.lower()):
                                     print(f"  - Found File Text: '{txt}'")
-                            except:
+                            except Exception:
                                 continue
-                except:
+                except Exception:
                     continue
         except Exception as e:
             print(f"Backend {backend} Error: {e}")

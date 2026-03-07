@@ -119,9 +119,9 @@ def start_windows_shell_drag(paths, hwnd=None):
             win32clipboard.EmptyClipboard()
             win32clipboard.SetClipboardData(CF_HDROP, hdrop_data)
             win32clipboard.CloseClipboard()
-        except:
+        except OSError:
             pass
-        
+
         return True
         
     except Exception as e:
@@ -782,7 +782,7 @@ class DraggableTreeView(QTreeView):
     def _show_properties(self, path):
         try:
             ctypes.windll.shell32.ShellExecuteW(None, "properties", path, None, None, 1)
-        except:
+        except OSError:
             _get_jarvis_msgbox().information(self, "정보", f"경로: {path}")
 
     def _has_clipboard_files(self):

@@ -32,7 +32,7 @@ def deep_scan_acro():
                         # 하위 요소 탐색
                         for child in element.children():
                             recursive_find(child, depth + 1)
-                    except:
+                    except Exception:
                         pass
                 
                 recursive_find(w)

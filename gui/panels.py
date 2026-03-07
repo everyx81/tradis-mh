@@ -15,7 +15,7 @@ from PyQt6.QtGui import *
 
 from .widgets import (DropListWidget, JarvisPanel, DraggableSearchResultList,
                       DraggableTreeView, NeonButton, get_unique_filename, TargetListWidget)
-from .utils import resource_path
+from .utils import resource_path, get_run_dir
 from .styles import TARGET_LIST_STYLESHEET
 from .dialogs import JarvisMessageBox
 from .report_panel import ReportPanel
@@ -240,23 +240,17 @@ class FileManagerWidget(QWidget):
         self.search_panel.hide()
         
         t1_layout.addWidget(left_widget, stretch=2)
-        self.tabs.addTab(tab1, "MK1")
+        self.tabs.addTab(tab1, "정산")
         
-        # TAB 2: MK3 (일정관리) - 메모 위젯용 placeholder
+        # TAB 2: 일정 (일정관리) - 메모 위젯용 placeholder
         mk3_tab = QWidget()
         mk3_tab.setStyleSheet("background-color: transparent;")
         self.mk3_memo_layout = QVBoxLayout(mk3_tab)
         self.mk3_memo_layout.setContentsMargins(0, 0, 0, 0)
-        self.tabs.addTab(mk3_tab, "MK3")
         self.mk3_tab_widget = mk3_tab
-        
-        # TAB 3: VERONICA (통관) - admin 전용
-        if self.license_tier != "admin":
-            # standard: VERONICA/REPORT 탭 없이 바로 SETTINGS로
-            self._setup_settings_tab()
-            layout.addWidget(self.tabs)
-            self.tabs.currentChanged.connect(self._on_tab_changed)
-            return
+
+        # 일정/통관/REPORT 탭은 항상 생성 (navbar에서 접근 제어)
+        self.tabs.addTab(mk3_tab, "일정")
 
         tab_veronica = QWidget()
         tab_veronica.setStyleSheet("background-color: transparent;")
@@ -424,7 +418,7 @@ class FileManagerWidget(QWidget):
         veronica_layout.addWidget(self.rk_log)
         
         veronica_layout.addStretch()
-        self.tabs.addTab(tab_veronica, "VERONICA")
+        self.tabs.addTab(tab_veronica, "통관")
 
         # TAB 4: REPORT (일일 보고서)
         self.report_panel = ReportPanel()
@@ -605,7 +599,7 @@ class FileManagerWidget(QWidget):
                 x = rp_x - 480
                 y = rp_y
                 h = rp_h
-        except: pass
+        except (AttributeError, TypeError): pass
              
         if x < 10: x = 10
         return QRect(x, y, 480, h)
@@ -948,9 +942,9 @@ class FileManagerWidget(QWidget):
                 self.emit_log(f"[DEBUG] es.exe 경로: {es_path}")
                 result = subprocess.run([es_path, "-n", "100", query], capture_output=True, timeout=10, creationflags=subprocess.CREATE_NO_WINDOW)
                 try: output = result.stdout.decode('cp949')
-                except: output = result.stdout.decode('utf-8', errors='replace')
+                except UnicodeDecodeError: output = result.stdout.decode('utf-8', errors='replace')
                 try: stderr = result.stderr.decode('cp949')
-                except: stderr = result.stderr.decode('utf-8', errors='replace')
+                except UnicodeDecodeError: stderr = result.stderr.decode('utf-8', errors='replace')
                 
                 if stderr:
                     QTimer.singleShot(0, lambda: self._search_error(f"Everything 오류: {stderr}"))
@@ -1018,8 +1012,9 @@ class FileManagerWidget(QWidget):
 
     def load_config(self):
         try:
-            if os.path.exists('config.json'):
-                with open('config.json', 'r', encoding='utf-8') as f:
+            cfg_path = os.path.join(get_run_dir(), 'config.json')
+            if os.path.exists(cfg_path):
+                with open(cfg_path, 'r', encoding='utf-8') as f:
                     config = json.load(f)
                     self.browser_home_path = config.get('browser_home_path', "")
                     if self.browser_home_path and os.path.isdir(self.browser_home_path):
@@ -1031,10 +1026,12 @@ class FileManagerWidget(QWidget):
                     hanbiro = config.get('hanbiro_mail', {})
                     if hasattr(self, 'input_hanbiro_email'):
                         email = hanbiro.get('email', '')
-                        # 이메일에서 ID만 추출 (@raeon.co.kr 제거)
                         user_id = email.replace('@raeon.co.kr', '') if email else ''
                         self.input_hanbiro_email.setText(user_id)
-                        self.input_hanbiro_password.setText(hanbiro.get('password', ''))
+                        # 비밀번호는 keyring에서 로드
+                        import keyring
+                        saved_pw = keyring.get_password("TRADIS_MH", "email_password") or ''
+                        self.input_hanbiro_password.setText(saved_pw)
                         if email:
                             self.lbl_mail_status.setText(f"Status: Configured ({email})")
         except Exception as e:
@@ -1307,7 +1304,7 @@ class FileManagerWidget(QWidget):
                                 return os.path.join(parent_folder, sub_folder, target_id)
                 except PermissionError:
                     continue
-        except: pass
+        except (OSError, AttributeError): pass
         return None
 
     def _find_company_folder(self, root, company):
@@ -1332,7 +1329,7 @@ class FileManagerWidget(QWidget):
                         if clean_sub.upper() == clean_company.upper(): return sub_path
                 except PermissionError:
                     continue
-        except: pass
+        except (OSError, AttributeError): pass
         return None
 
     def _on_move_complete(self, count, duplicates, selected_folders, base_path):
@@ -1372,13 +1369,13 @@ class FileManagerWidget(QWidget):
 
     def _on_admin_unlock(self):
         """관리자 비밀번호 검증"""
-        from version import ADMIN_PASSWORD
+        from version import get_admin_password
         pw = self.input_admin_pw.text().strip()
         if not pw:
             JarvisMessageBox.warning(self, "오류", "비밀번호를 입력해주세요.")
             return
 
-        if pw == ADMIN_PASSWORD:
+        if pw == get_admin_password():
             self.license_tier = "admin"
             self.lbl_admin_status.setText("Status: Admin ✓")
             self.lbl_admin_status.setStyleSheet("color: #ff88ff; font-size: 8pt;")
@@ -1404,18 +1401,22 @@ class FileManagerWidget(QWidget):
         
         try:
             config = {}
-            if os.path.exists('config.json'):
-                with open('config.json', 'r', encoding='utf-8') as f:
+            cfg_path = os.path.join(get_run_dir(), 'config.json')
+            if os.path.exists(cfg_path):
+                with open(cfg_path, 'r', encoding='utf-8') as f:
                     config = json.load(f)
-            
+
+            # 비밀번호는 keyring에 저장 (config.json에 저장하지 않음)
+            import keyring
+            keyring.set_password("TRADIS_MH", "email_password", password)
+
             config['hanbiro_mail'] = {
                 'imap_server': 'raeon.hanbiro.net',
                 'imap_port': 993,
-                'email': email,
-                'password': password
+                'email': email
             }
-            
-            with open('config.json', 'w', encoding='utf-8') as f:
+
+            with open(cfg_path, 'w', encoding='utf-8') as f:
                 json.dump(config, f, ensure_ascii=False, indent=4)
             
             self.lbl_mail_status.setText(f"Status: Saved ({email})")
@@ -1572,7 +1573,7 @@ class FileManagerWidget(QWidget):
         try:
             file_count = sum(len(files) for _, _, files in os.walk(folder_path))
             subfolder_count = sum(len(dirs) for _, dirs, _ in os.walk(folder_path))
-        except:
+        except OSError:
             file_count = 0
             subfolder_count = 0
         
@@ -1635,454 +1636,75 @@ class FileManagerWidget(QWidget):
 
 ---
 
-## 📌 TRADIS MH란?
+## 기능 목록
 
-**TRADIS MH**는 관세사무소 업무를 자동화하는 AI 어시스턴트입니다.
+| 탭 | 기능 | 권한 |
+|-----|------|------|
+| **정산** | PDF 자동 이름변경 → 파일 매칭/병합 → 서버 이동 | 기본 |
+| **일정** | 캘린더 일정 관리 + 스마트 메모장 | 관리자 |
+| **통관** | 수출 메일 감지 → ReadyKorea 자동 입력 → 필증 발송 | 관리자 |
+| **보고** | 일일 업무 보고서 PDF 생성 및 메일 발송 | 관리자 |
+| **설정** | 경로/메일/관리자 설정 | 기본 |
 
-주요 기능:
-- 📄 **파일 자동 분석/병합**: PDF 파일을 AI가 분석하고 같은 건의 서류를 자동 병합
-- 📁 **파일 매니저**: 파일/폴더를 쉽게 정리하고 서버로 이동
-- 📧 **수출 메일 자동화**: 수출 요청 메일 감지 → 자동 처리 → 답장 발송
-- 📅 **일정 관리**: 업무 일정 등록 및 알림
-- 📊 **일일 보고서**: 일일 업무 보고서 생성 및 메일 발송
-
----
-
-## 🚀 처음 시작하기 (초기 설정)
-
-### 1단계: 프로그램 실행
-- `TRADIS_MH.exe` 파일을 더블클릭합니다.
-- 처음 실행 시 인트로 화면이 나타난 후 메인 화면이 표시됩니다.
-
-### 2단계: API 키 설정 (필수)
-파일 자동 이름 변경 기능을 사용하려면 Gemini API 키가 필요합니다.
-
-1. 좌측 사이드바 상단의 **"API KEY REQUIRED"** 부분을 클릭
-2. Gemini API 키를 입력하고 **저장** 클릭
-3. "AI STATUS: CONNECTED"로 변경되면 성공
-
-> 💡 API 키가 없으면 파일 자동 이름 변경 기능을 사용할 수 없습니다.
-
-### 3단계: 감시 폴더 설정
-1. 좌측 사이드바의 **SELECT** 버튼 클릭
-2. 파일을 감시할 폴더 선택 (예: 다운로드 폴더)
-3. 폴더가 설정되면 경로가 표시됩니다
-
-### 4단계: 모니터링 시작
-- **START** 버튼을 클릭하면 파일 감시가 시작됩니다
-- 새 PDF 파일이 해당 폴더에 들어오면 자동으로 분석됩니다
+> 💡 **일정**, **통관**, **보고** 탭은 설정 → ADMIN UNLOCK에서 비밀번호 입력 후 표시됩니다.
 
 ---
 
-## 🖥️ 화면 구성
+## 초기 설정 (필수)
 
-```
-┌────────────────────────────────────────────────────────────┐
-│  🔴🟡🟢  창 컨트롤                              ▼ ✕  │
-├──────────┬────────────────────────────────────┬────────────┤
-│          │                                    │            │
-│  좌측    │         중앙 패널                   │  우측      │
-│  사이드바 │      (분석 결과 표시)               │  NavBar    │
-│          │                                    │            │
-│ ▶ START  │                                    │  MK1       │
-│ ⏹ STOP   │    이름 변경 제안 카드들            │ VERONICA   │
-│ 📁 SET   │        표시 영역                   │  MK3       │
-│          │                                    │  REPORT    │
-├──────────┼────────────────────────────────────┴────────────┤
-│          │              하단 탭 영역                        │
-│          │    (MK1 / VERONICA / MK3 / REPORT / SETTINGS)  │
-└──────────┴─────────────────────────────────────────────────┘
-```
+### 1. Gemini API 키
+- 좌측 사이드바 **API** 영역 클릭 → API 키 입력 → 저장
+- API 키 발급: https://aistudio.google.com
 
-### 좌측 사이드바
-| 버튼 | 기능 |
-|------|------|
-| **START** | 파일 자동 이름 변경 모니터링 시작 |
-| **STOP** | 모니터링 중지 |
-| **SELECT** | 감시할 폴더 경로 설정 |
-| **API** | Gemini API 키 설정 |
+### 2. 감시 폴더
+- 좌측 사이드바 **SELECT** → 폴더 선택 (예: 다운로드 폴더)
 
-### 우측 NavBar (탭 전환)
-| 탭 | 기능 |
-|-----|------|
-| **MK1** | 파일 매니저 (파일 이동/정리) |
-| **VERONICA** | 수출 메일 자동화 (1분컷 수출) |
-| **MK3** | 일정 및 메모 관리 |
-| **REPORT** | 일일 업무 보고서 생성/발송 |
-| **⚙** | 환경 설정 |
+### 3. 서버 경로 (설정 탭)
+- **SET IMPORT ROOT**: 수입 서버 폴더
+- **SET EXPORT ROOT**: 수출 서버 폴더
+- **SET EXPORT DOCS SOURCE**: 수출 서류 소스 폴더
+
+### 4. 한비로 메일 (설정 탭, 통관/보고 사용 시)
+- ID 입력 (자동으로 @raeon.co.kr 추가) + 비밀번호 → SAVE
+- TEST CONNECTION으로 연결 확인
+
+### 5. 관리자 잠금 해제 (설정 탭)
+- ADMIN UNLOCK에서 비밀번호 입력 → UNLOCK
+- 통관/보고 탭 활성화 (한 번 해제 시 유지)
+
+### 6. 스프레드시트 연동 (보고 탭 사용 시)
+- `data/credentials.json` 파일 필요 (Google Sheets API)
+- 대납장에 **보고일자** 열 필요
+
+### 7. Everything 검색 (파일 매니저 검색 사용 시)
+- Everything 프로그램 설치 필요 (https://www.voidtools.com)
 
 ---
 
-## 📄 파일 자동 분석 및 병합 기능
-
-### 작동 원리
-1. 감시 폴더에 새 PDF 파일이 들어옴
-2. AI가 PDF 내용을 분석하여 문서 유형 파악
-3. 같은 ID의 문서들을 그룹으로 묶음
-4. 중앙 패널에 그룹 카드 표시
-5. **AI ANALYZE** 또는 **MATCH** 버튼으로 분석/병합 실행
-
-### 사용 방법
-1. **SELECT**로 감시 폴더 설정
-2. **START** 클릭하여 모니터링 시작
-3. PDF 파일을 해당 폴더에 복사/다운로드
-4. 잠시 후 중앙 패널에 그룹 카드 표시
-5. 카드에서 **AI ANALYZE** 또는 **MATCH** 버튼 클릭
-
-### 그룹 카드 설명
-```
-┌───────────────────────────────────────────┐
-│ ID: IV-123 (삼성전자)        [AI ANALYZE]  │
-│ 통관수수료, 정산서, 수입신고필증...        │
-├───────────────────────────────────────────┤
-│ ▲▼ [파일 선택 콤보박스] 🔍 ➡ 통관수수료   │
-│ ▲▼ [파일 선택 콤보박스] 🔍 ➡ 정산서       │
-│              [+ ADD ROW]                   │
-│            [MERGE EXECUTE]                 │
-└───────────────────────────────────────────┘
-```
-
-- **AI ANALYZE**: AI가 정산서를 분석하여 파일 순서 자동 결정
-- **MATCH**: 파일 유형별로 자동 매칭
-- **☰ (드래그 핸들)**: 마우스로 드래그하여 파일 순서를 변경
-- **🔍**: 파일 미리보기 (확대된 이미지 제공)
-- **+ ADD ROW**: 수동으로 병합할 파일 행 추가
-- **MERGE EXECUTE**: 선택된 파일들을 하나의 PDF로 병합
-
----
-
-## 📁 MK1 탭 - 파일 매니저
-
-### 화면 구성
-```
-┌─────────────────┬─────────────────────────────────────┐
-│  1. MOVE TARGET │           2. FILES TO MOVE          │
-│  (이동 대상)     │           (이동할 파일)             │
-│                 │                                     │
-│  📁 삼성전자    │  📄 파일1.pdf                        │
-│  📁 LG전자      │  📄 파일2.pdf                        │
-│  📁 현대차      │  📁 폴더1                            │
-│                 │                                     │
-├─────────────────┴─────────────────────────────────────┤
-│  [파일 추가] [폴더 추가] [선택 이동] [IMPORT] [EXPORT] │
-├───────────────────────────────────────────────────────┤
-│  3. FILE BROWSER (파일 탐색기)                         │
-│                                                       │
-│  📁 문서 > 📁 2024년 > ...                            │
-└───────────────────────────────────────────────────────┘
-```
-
-### 기본 사용법
-
-#### 파일 이동하기
-1. 좌측 **MOVE TARGET**에서 이동 대상 폴더 클릭
-2. 우측 **FILES TO MOVE**에 파일 드래그 앤 드롭
-3. 이동할 파일 선택 (클릭)
-4. **선택 이동** 버튼 클릭
-
-#### 드래그 앤 드롭
-- Windows 탐색기에서 파일을 드래그하여 TRADIS MH 창에 드롭
-- 자동으로 FILES TO MOVE 목록에 추가됨
-
-#### 서버로 빠른 이동
-- **IMPORT**: 선택된 폴더를 Import 서버 경로로 이동
-- **EXPORT**: 선택된 폴더를 Export 서버 경로로 이동
-
-> ⚠️ IMPORT/EXPORT 버튼을 사용하려면 먼저 SETTINGS에서 서버 경로를 설정해야 합니다.
-
-### Everything 검색
-1. **🔍 SEARCH** 버튼 클릭
-2. 검색창에 파일명 입력
-3. Enter 또는 검색 버튼 클릭
-4. 검색 결과에서 파일 클릭하면 해당 위치로 이동
-
-> 💡 Everything 검색을 사용하려면 Everything 프로그램이 설치되어 있어야 합니다.
-
----
-
-## 📧 VERONICA 탭 - 수출 메일 자동화
-
-> ⚠️ **주의**: 현재 이 기능은 **주식회사 와이에스씨** 수출 업무 전용입니다.
-
-### 기능 개요
-특정 형식의 수출 요청 메일을 자동 감지하고, 첨부된 엑셀 파일을 분석하여 ReadyKorea 프로그램에 자동 입력합니다.
-
-### 화면 구성
-```
-┌─────────────────────────────────────────────────────────┐
-│  📧 EXPORT MAIL MONITOR                                 │
-│  ● 모니터링 중 (IDLE - 실시간)     [START] [STOP]       │
-├───────────────────────────┬─────────────────────────────┤
-│  수출 요청 목록           │  파싱 결과                   │
-│                           │                             │
-│  [08:30:15] #292 ICN/BKK  │  품명: 반도체               │
-│  [08:25:10] #291 ICN/HKG  │  수량: 100                  │
-│                           │  총액: 10,000               │
-├───────────────────────────┴─────────────────────────────┤
-│  READYKOREA AUTOMATION                                  │
-│  [▶ 자동 입력 실행]  [📧 메일 발송]                     │
-└─────────────────────────────────────────────────────────┘
-```
-
-### 사용 방법
-
-#### 1. 메일 설정 (최초 1회)
-1. **SETTINGS** 탭으로 이동
-2. **한비로 메일 설정** 영역에서:
-   - ID 입력 (예: mhchoi)
-   - 비밀번호 입력
-3. **연결 테스트** 버튼으로 연결 확인
-4. **저장** 버튼 클릭
-
-#### 2. 메일 모니터링
-1. VERONICA 탭에서 **START** 버튼 클릭
-2. "모니터링 중 (IDLE - 실시간)" 상태 확인
-3. 수출 요청 메일이 오면 자동으로 목록에 표시
-4. 첨부된 엑셀 파일이 자동으로 다운로드 및 분석
-
-#### 3. ReadyKorea 자동 입력
-1. ReadyKorea 프로그램을 먼저 실행
-2. 파싱 결과가 표시되면 **▶ 자동 입력 실행** 버튼이 활성화
-3. 버튼 클릭 시 ReadyKorea에 데이터 자동 입력
-
-#### 4. 답장 메일 발송
-1. 수출신고필증이 감시 폴더에 저장되어 있어야 함
-2. **📧 메일 발송** 버튼 클릭
-3. 수출신고필증이 첨부된 답장 메일 자동 발송
-
----
-
-## 📅 MK3 탭 - 일정 및 메모 관리
-
-### 📅 일정 관리 (Schedule)
-- **일정 추가**: 날짜/시간 및 메모 입력하여 저장
-- **일정 알림**: 설정된 시간에 Windows 알림 및 팝업 표시
-- **일정 편집/삭제**: 리스트에서 선택하여 수정 또는 삭제
-
-### 📝 스마트 메모장 (Smart Memo)
-- **다중 탭 관리**: `[+]` 버튼으로 여러 메모를 탭으로 관리
-- **자동 저장**: 작성 내용은 실시간으로 자동 저장됨
-- **AI 정리**:
-    1. 메모 내용 작성 후 **[정리]** 버튼 클릭
-    2. AI가 내용을 깔끔하게 재구성 (불릿 포인트, 요약)
-    3. 결과가 마음에 들면 유지, 아니면 수정 가능
-
-### 화면 구성
-```
-┌─────────────────────────────────────────────────────────┐
-│  📅 SCHEDULE MANAGER                                    │
-├────────────────────────┬────────────────────────────────┤
-│      미니 캘린더       │         일정 목록              │
-│                        │                                │
-│    < 2026년 1월 >      │  📌 09:00 - 삼성 미팅          │
-│  일 월 화 수 목 금 토  │  📌 14:00 - 서류 제출 마감     │
-│     1  2  3  4  5  6   │  📌 16:30 - 통관 확인          │
-│  7  8  9 ...           │                                │
-├────────────────────────┴────────────────────────────────┤
-│  [일정 추가]  [선택 편집]  [선택 삭제]                   │
-└─────────────────────────────────────────────────────────┘
-```
-
-### 일정 추가하기
-1. **일정 추가** 버튼 클릭
-2. 일정 정보 입력:
-   - 제목
-   - 날짜
-   - 시간
-   - 메모 (선택)
-3. **저장** 클릭
-
-### 일정 알림
-- 설정된 시간에 Windows 알림 팝업이 표시됩니다
-- 화면 우측 하단에 토스트 알림으로 나타남
-- 알림 시간은 일정 시작 시간에 맞춰 발생
-
-### 일정 수정/삭제
-- **수정**: 일정 선택 후 **선택 편집** 클릭
-- **삭제**: 일정 선택 후 **선택 삭제** 클릭
-
----
-
-## 📊 REPORT 탭 - 일일 업무 보고서
-
-### 기능 개요
-일일 업무 보고서를 작성하고 PDF 저장 및 메일 발송을 지원합니다.
-
-### 화면 구성
-```
-┌──────────────────────────┬──────────────────────────────┐
-│     📝 데이터 입력       │      📄 서류 미리보기        │
-│                          │                              │
-│  보고 날짜: 2026-01-25   │  ┌────────────────────────┐ │
-│                          │  │ 일일 업무 보고서        │ │
-│  📈 통관 실적            │  │                        │ │
-│  당일 건수: 15           │  │ 통관 실적              │ │
-│  당일 수수료: 750,000    │  │ 미수금 현황            │ │
-│  월 누계 건수: 285       │  │ 대납금 현황            │ │
-│  월 누계 수수료: 14.25M  │  │ 특이사항               │ │
-│                          │  └────────────────────────┘ │
-│  💰 미수금               │                              │
-│  [+ 업체, 금액, 예정일]  │                              │
-│                          │                              │
-│  🏦 대납금       [가져오기]                              │
-│  [+ 업체, 금액, 예정일]  │                              │
-│                          │                              │
-│  📝 특이사항             │                              │
-│  [텍스트 입력 영역]       │                              │
-├──────────────────────────┴──────────────────────────────┤
-│      [📄 PDF 저장]    [📧 메일 발송]    [🗑️ 초기화]     │
-└─────────────────────────────────────────────────────────┘
-```
-
-### 사용 방법
-
-#### 1. 데이터 입력
-1. **보고 날짜** 선택
-2. **통관 실적** 입력 (건수, 수수료)
-3. **미수금/대납금** 항목 추가 (+버튼)
-4. **확인** 체크박스: 입금 확인된 항목 체크
-5. **특이사항** 입력
-
-#### 2. 대납금 데이터 가져오기
-1. **가져오기** 버튼 클릭
-2. Google Sheets 대납장에서 자동으로 데이터 로드
-3. 이미 보고된 항목(보고일자 있음)은 제외됨
-
-#### 3. PDF 저장
-- **📄 PDF 저장** 버튼 클릭
-- `일일보고` 폴더에 날짜별 PDF 파일 저장
-
-#### 4. 메일 발송
-1. **📧 메일 발송** 버튼 클릭
-2. 받는 사람, 참조 입력
-3. 발송 완료 시:
-   - **체크된 항목 자동 삭제**
-   - **스프레드시트 보고일자 자동 기록**
-
-### 스프레드시트 연동
-
-#### 필요 설정
-스프레드시트 대납장에 다음 열이 필요합니다:
-| 업체명 | 금액 | 입금예정일 | 확인 | **보고일자** |
-|--------|------|------------|------|-------------|
-
-- **확인**: 입금 확인 시 "확인" 또는 "O" 입력
-- **보고일자**: 메일 발송 시 TRADIS MH가 자동 기록 (직접 입력 불필요)
-
-#### 동작 흐름
-1. 스프레드시트에서 "확인" 입력 (입금됨)
-2. TRADIS MH에서 "가져오기" → 확인된 항목 표시
-3. 메일 발송 → 스프레드시트에 보고일자 자동 기록
-4. 다음 가져오기 시 보고일자가 있는 항목은 제외됨
-
----
-
-## ⚙ SETTINGS 탭 - 환경 설정
-
-### 설정 항목
-
-#### 1. Import/Export 경로 설정
-- **IMPORT 경로**: Import 서버 폴더 경로 설정
-- **EXPORT 경로**: Export 서버 폴더 경로 설정
-- MK1 탭의 빠른 이동 버튼에서 사용됨
-
-#### 2. 한비로 메일 설정
-- **ID**: 한비로 메일 ID (예: mhchoi)
-- **비밀번호**: 한비로 메일 비밀번호
-- **연결 테스트**: 설정이 올바른지 확인
-- **저장**: 설정 저장
-
-#### 3. 사용자 매뉴얼
-- 이 매뉴얼을 표시합니다
-
----
-
-## ❓ 자주 묻는 질문 (FAQ)
-
-### Q: API 키는 어디서 얻나요?
-A: Google AI Studio (https://aistudio.google.com)에서 무료로 발급받을 수 있습니다.
-
-### Q: 파일이 자동으로 분석되지 않아요
-A: 다음을 확인하세요:
-1. API 키가 설정되어 있는지 (AI STATUS: CONNECTED)
-2. START 버튼을 눌러 모니터링 중인지
-3. 감시 폴더 경로가 올바른지
-
-### Q: 메일 모니터링이 안 돼요
-A: 다음을 확인하세요:
-1. SETTINGS에서 한비로 메일 설정이 완료되었는지
-2. 연결 테스트가 성공했는지
-3. VERONICA 탭에서 START를 눌렀는지
-
-### Q: ReadyKorea 자동 입력이 안 돼요
-A: 다음을 확인하세요:
-1. ReadyKorea 프로그램이 실행 중인지
-2. ReadyKorea 창이 화면에 보이는지
-3. 수출 데이터가 파싱되어 버튼이 활성화되었는지
-
-### Q: 미니 윈도우로 최소화했는데 복원이 안 돼요
-A: 화면 우측 하단에 작은 TRADIS MH 바가 있습니다. ◀ 버튼을 클릭하면 복원됩니다.
-
-### Q: 대납금 가져오기가 안 돼요
-A: 다음을 확인하세요:
-1. credentials.json 파일이 프로젝트 폴더에 있는지
-2. 스프레드시트 대납장에 "보고일자" 열이 있는지
-3. 스프레드시트 공유 설정이 올바른지
-
----
-
-## 🔧 문제 해결
-
-### "API KEY REQUIRED" 오류
-→ 좌측 사이드바 상단을 클릭하여 Gemini API 키를 입력하세요.
-
-### "폴더를 찾을 수 없습니다" 오류
-→ SELECT 버튼으로 올바른 폴더 경로를 다시 설정하세요.
-
-### 프로그램이 느려졌어요
-→ 프로그램을 재시작하거나, 불필요한 로그를 정리하세요.
-
-### Everything 검색이 안 돼요
-→ Everything 프로그램이 설치되어 있고 실행 중인지 확인하세요.
-   (https://www.voidtools.com 에서 다운로드)
-
-### "스프레드시트에 '보고일자' 열이 없습니다" 오류
-→ Google Sheets 대납장에 "보고일자" 열을 추가하세요.
+## 🔄 자동 업데이트
+
+- 실행 시 자동으로 최신 버전 확인
+- 새 버전 감지 → 업데이트 다이얼로그 → 자동 다운로드 및 재시작
+- `data/` 폴더의 설정 및 데이터는 유지됩니다
 
 ---
 
 ## 📋 버전 정보
 
-**현재 버전**: 1.3
+**현재 버전**: v1.0.1
 
-### 변경 이력
+#### v1.0.1 (2026-03-07)
+- 🔒 관리자 잠금 시스템 추가
+- 📅 Apple Calendar 스타일 캘린더
+- 🎨 JARVIS → TRADIS MH 리브랜딩
+- 🔄 자동 업데이트 시스템
 
-#### v1.3 (2026-02-07)
-- 📝 **스마트 메모장**: 멀티 탭, AI 자동 정리 기능 추가
-- 🔄 **정산 병합 개선**: 드래그앤드롭 순서 변경, 미리보기 확대
-- 🎨 **UI 개선**: 다크 테마 및 HUD 스타일 최적화
-
-#### v1.2 (2026-01-25)
-- 📊 **REPORT 탭 추가**: 일일 업무 보고서 생성/발송 기능
-- 🔄 **스프레드시트 연동**: 메일 발송 시 보고일자 자동 기록
-- 🗑️ **자동 정리**: 메일 발송 후 체크된 항목 자동 삭제
-- 📖 사용자 매뉴얼 업데이트
-
-#### v1.1 (2026-01-17)
-- 📧 메일 발송 시 원본 메일의 받는 사람도 CC에 자동 추가
-- ⚡ ReadyKorea 자동 입력 속도 약 50% 향상
-- 📖 사용자 매뉴얼 전면 개편
-
-#### v1.0 (2026-01-02)
-- 🎉 최초 릴리즈
-- 파일 자동 이름 변경 기능
-- 파일 매니저 (MK1)
-- 수출 메일 자동화 (VERONICA)
-- 일정 관리 (MK3)
+#### v1.0.0 (2026-03-01)
+- 🎉 TRADIS MH 최초 릴리즈
 
 ---
 
-**문의**: 해도관세사무소 최명헌
+**TRADIS MH** by M.H. Choi | 해도관세사무소
 """
         
         browser.setMarkdown(manual_content)

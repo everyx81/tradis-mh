@@ -61,7 +61,7 @@ def diag_acrobat_windows():
                     with winreg.OpenKey(key, sub_key_name) as subkey:
                         file_path, _ = winreg.QueryValueEx(subkey, "tName")
                         print(f"  Recent {i}: {file_path}")
-                except:
+                except OSError:
                     break
     except Exception as e:
         print(f"  Registry check failed: {e}")

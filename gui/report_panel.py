@@ -450,7 +450,7 @@ class ReportPanel(QWidget):
                 try:
                     d = QDate.fromString(data['date'], "yyyy-MM-dd")
                     if d.isValid(): self.date_edit.setDate(d)
-                except: pass
+                except (ValueError, TypeError): pass
             
             # 메일 주소 로드
             self.last_mail_to = data.get('last_mail_to', "")
@@ -963,7 +963,7 @@ class ReportPanel(QWidget):
                 date_parts = data.report_date.split('-')
                 if len(date_parts) == 3:
                     self.date_edit.setDate(QDate(int(date_parts[0]), int(date_parts[1]), int(date_parts[2])))
-            except:
+            except (ValueError, AttributeError):
                 pass
             
             self._schedule_update()
@@ -1060,7 +1060,7 @@ class ReportPanel(QWidget):
                 from datetime import datetime
                 dt = datetime.strptime(report_date, '%Y-%m-%d')
                 formatted_date = f"{dt.month}/{dt.day}"
-            except:
+            except ValueError:
                 formatted_date = report_date
             
             # 스프레드시트 업데이트

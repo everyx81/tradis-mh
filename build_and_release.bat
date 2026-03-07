@@ -7,6 +7,10 @@ echo   TRADIS MH 빌드 및 GitHub 릴리즈
 echo ============================================
 echo.
 
+REM gh CLI 경로 설정
+set "GH=gh"
+if exist "C:\Program Files\GitHub CLI\gh.exe" set "GH=C:\Program Files\GitHub CLI\gh.exe"
+
 REM version.py에서 버전 읽기
 for /f "tokens=2 delims='= " %%a in ('findstr "__version__" version.py') do set VERSION=%%~a
 echo [1/3] 현재 버전: v%VERSION%
@@ -28,7 +32,7 @@ echo [3/3] GitHub Release 생성 중...
 set /p NOTES="릴리즈 노트 (Enter로 건너뛰기): "
 if "%NOTES%"=="" set NOTES=v%VERSION% 릴리즈
 
-gh release create v%VERSION% "dist\TRADIS_MH.exe" --title "v%VERSION%" --notes "%NOTES%"
+"%GH%" release create v%VERSION% "dist\TRADIS_MH.exe" --title "v%VERSION%" --notes "%NOTES%"
 if errorlevel 1 (
     echo GitHub 릴리즈 실패! gh CLI가 설치되어 있고 로그인되어 있는지 확인하세요.
     echo   설치: winget install GitHub.cli

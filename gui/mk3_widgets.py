@@ -539,7 +539,7 @@ class ScheduleCardWidget(QFrame):
                 wd = weekdays[dt_obj.weekday()]
                 # "3월 3일 (화) · 11:00 AM" 형식 만들기
                 time_str = f"{dt_obj.month}월 {dt_obj.day}일 ({wd}) · {dt_obj.strftime('%I:%M %p')}"
-            except: time_str = dt_str
+            except ValueError: time_str = dt_str
         else:
             time_str = "하루 종일"
             
@@ -595,53 +595,6 @@ class ScheduleCardWidget(QFrame):
                     note=data["note"]
                 )
             self.main_widget.refresh_schedules()
-
-
-class DraggableTaskList(QListWidget):
-    """드래그 앤 드롭으로 캘린더에 일정을 던져 넣을 수 있는 할 일 목록"""
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setDragEnabled(True)
-        self.setAcceptDrops(False)
-        self.setDropIndicatorShown(True)
-        self.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
-        self.setDefaultDropAction(Qt.DropAction.MoveAction)
-        self.setStyleSheet("""
-            QListWidget {
-                background-color: transparent;
-                border: none;
-                color: #ffffff;
-                font-size: 11pt;
-                font-family: -apple-system;
-                outline: none;
-            }
-            QListWidget::item {
-                padding: 10px;
-                background-color: rgba(44, 44, 46, 180);
-                border-radius: 8px;
-                margin-bottom: 5px;
-            }
-            QListWidget::item:hover {
-                background-color: rgba(58, 58, 60, 200);
-            }
-        """)
-
-    def startDrag(self, supportedActions):
-        item = self.currentItem()
-        if not item: return
-        
-        from PyQt6.QtCore import QMimeData
-        from PyQt6.QtGui import QDrag
-        
-        drag = QDrag(self)
-        mimeData = QMimeData()
-        mimeData.setText(item.text())
-        drag.setMimeData(mimeData)
-        
-        result = drag.exec(supportedActions)
-        if result == Qt.DropAction.MoveAction:
-            # 드롭 성공 시 (캘린더로 이동) 할 일 목록에서 제거
-            self.takeItem(self.row(item))
 
 
 class MK3ScheduleOnlyWidget(QWidget):
@@ -742,29 +695,10 @@ class MK3ScheduleOnlyWidget(QWidget):
         self.calendar.scheduleDropped.connect(self._on_schedule_dropped) # 드래그 앤 드롭 연결
         cal_container.addWidget(self.calendar)
         
-        # --- 할 일 (To-Do) 뷰 반투명 영역 ---
-        todo_header = QLabel("미정 할 일 (달력으로 끌어다 일정 확정)")
-        todo_header.setStyleSheet("color: #8e8e93; font-size: 10pt; font-weight: bold; margin-top: 15px;")
-        todo_header.setFixedWidth(HUDStyleCalendar.CELL_WIDTH * 7)
-        cal_container.addWidget(todo_header)
-        
-        self.todo_list = DraggableTaskList()
-        self.todo_list.setFixedWidth(HUDStyleCalendar.CELL_WIDTH * 7)
-        self.todo_list.setFixedHeight(140)  # 리스트가 보여질 충분한 높이
-        
-        # 샘플 진행 예정 할 일들 (시연용)
-        self.todo_list.addItems([
-            "📝 주간 보고서 초안 작성",
-            "🏃 퇴근 후 헬스 트레이닝",
-            "📖 영어 단어 30개 암기",
-            "🛍️ 장보기 (저녁 식사 준비)"
-        ])
-        cal_container.addWidget(self.todo_list)
-        
         # 좌측 레이아웃(달력)에 컨테이너 배치 (위쪽으로 밀착)
         left_layout.addLayout(cal_container, stretch=0)
-        left_layout.addStretch(1) # 달력을 위로 밀착시키기 위해 아래 공간 채움
-        
+        left_layout.addStretch(1)
+
         # 네비게이션 버튼 연결
         self.btn_prev_month.clicked.connect(self.calendar.showPreviousMonth)
         self.btn_next_month.clicked.connect(self.calendar.showNextMonth)
@@ -879,7 +813,7 @@ class MK3ScheduleOnlyWidget(QWidget):
                     date_obj = QDate(s_dt.year, s_dt.month, s_dt.day)
                     if not is_completed:
                         event_dates.add(date_obj)
-                except: pass
+                except (ValueError, KeyError): pass
                 
             # 현재 필터링 상태면 해당 날짜만 리스트업
             if self.current_filter_date and date_obj != self.current_filter_date:

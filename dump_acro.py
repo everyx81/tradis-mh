@@ -37,7 +37,7 @@ def dump_acro():
                     f.write("  " * depth + f"- [{ctype}] Name: '{name}'\n")
                     for child in element.children():
                         crawl(child, depth + 1)
-                except:
+                except Exception:
                     pass
             
             crawl(main_win)

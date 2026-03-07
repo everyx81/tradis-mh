@@ -29,7 +29,7 @@ def diag_by_process():
                             txt = e.window_text()
                             if txt and ('.pdf' in txt.lower()):
                                 print(f"      * Found PDF: '{txt}'")
-                        except:
+                        except Exception:
                             continue
             except Exception as e:
                 print(f"    Error: {e}")

@@ -223,7 +223,7 @@ class ReadyKoreaAutomation:
                     if "레디코리아" in title or "ReadyKorea" in title or "READYKOREA" in title:
                         readykorea_window = w
                         break
-                except:
+                except Exception:
                     continue
             
             if not readykorea_window:
@@ -262,9 +262,9 @@ class ReadyKoreaAutomation:
                     
                     if str(elem_id) == str_id:
                         return element
-                except:
+                except Exception:
                     continue
-        except:
+        except Exception:
             pass
         
         # 방법 2: child_window (일반 컨트롤용)
@@ -272,9 +272,9 @@ class ReadyKoreaAutomation:
             element = self.main_window.child_window(auto_id=str_id)
             if element.exists():
                 return element
-        except:
+        except Exception:
             pass
-        
+
         return None
     
     def _click_by_coords(self, automation_id: int, wait: float = 0.15) -> bool:
@@ -296,7 +296,7 @@ class ReadyKoreaAutomation:
                         rect = self.main_window.rectangle()
                         # 윈도우가 (0, 0)이 아니면 오프셋 적용
                         # 참고: 좌표가 이미 절대좌표라면 보정 불필요
-                    except:
+                    except Exception:
                         pass
                 
                 click(coords=(center_x, center_y))

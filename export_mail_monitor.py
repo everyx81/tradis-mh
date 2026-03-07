@@ -103,7 +103,7 @@ class HanbiroMailMonitor:
         if self.mail_connection:
             try:
                 self.mail_connection.logout()
-            except:
+            except Exception:
                 pass
             self.mail_connection = None
     
@@ -344,10 +344,10 @@ class HanbiroMailMonitor:
                                         leftover = sock.recv(1024)
                                         if not leftover:
                                             break
-                                    except:
+                                    except (OSError, Exception):
                                         break
                                 sock.setblocking(True)
-                            except:
+                            except (OSError, Exception):
                                 pass
                             
                             # 연결 재설정 후 메일 체크 (깨끗한 상태)

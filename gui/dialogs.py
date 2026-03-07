@@ -471,7 +471,7 @@ class GroupCard(GlassFrame):
         self.btn_toggle.setText("COLLAPSE")
         self.btn_toggle.setEnabled(True)
         try: self.btn_toggle.clicked.disconnect()
-        except: pass
+        except (RuntimeError, TypeError): pass
         self.btn_toggle.clicked.connect(self.toggle_view)
         
         # AI 분석 결과로 체크리스트 갱신 (비용 항목 포함)
@@ -1122,7 +1122,7 @@ class GroupCard(GlassFrame):
         if hasattr(self, '_validator_worker'):
             try:
                 self._validator_worker.finished.disconnect()
-            except:
+            except (RuntimeError, TypeError):
                 pass
 
         from PyQt6.QtCore import QThread, pyqtSignal
@@ -1595,7 +1595,9 @@ class SendMailDialog(QDialog):
                     self.smtp_server = hanbiro.get('imap_server', 'raeon.hanbiro.net')  # SMTP도 같은 서버
                     self.smtp_port = 465  # SSL 포트
                     self.smtp_user = hanbiro.get('email', '')
-                    self.smtp_password = hanbiro.get('password', '')
+                    # 비밀번호는 keyring에서 로드
+                    import keyring
+                    self.smtp_password = keyring.get_password("TRADIS_MH", "email_password") or ''
         except Exception:
             self.smtp_server = 'raeon.hanbiro.net'
             self.smtp_port = 465
@@ -2015,7 +2017,7 @@ class MarkingPopup(QDialog):
                             break
                 try:
                     win32gui.EnumWindows(enum_generic, None)
-                except: pass
+                except OSError: pass
             
         # 3. PDF (Acrobat) - 탭 순회 종료 (마킹된 페이지만 닫기)
         if marked_pdfs:
@@ -2063,14 +2065,14 @@ class MarkingPopup(QDialog):
                                 wb.Close(False)
                                 if matched in targets:
                                     targets.remove(matched)
-                            except:
+                            except Exception:
                                 # 폴백: 직접 Close 호출 시도
                                 try:
                                     getattr(unk, "Close")(False)
                                     if matched in targets:
                                         targets.remove(matched)
-                                except: pass
-                except: continue
+                                except Exception: pass
+                except Exception: continue
                 if not targets: break
         except Exception:
             pass
@@ -2088,7 +2090,7 @@ class MarkingPopup(QDialog):
                             # 윈도우 단에서 강제 닫기 신호
                             win32gui.PostMessage(hwnd, win32con.WM_CLOSE, 0, 0)
                             try: targets.remove(t)
-                            except: pass
+                            except ValueError: pass
                             break
             try:
                 win32gui.EnumWindows(force_close_excel, None)
@@ -2112,7 +2114,7 @@ class MarkingPopup(QDialog):
                 acro_hwnds.append(h)
         try:
             win32gui.EnumWindows(find_acro, None)
-        except: pass
+        except OSError: pass
         
         for hwnd in acro_hwnds:
             # 한 창에서 최대 15번 탭 전환 시도 (무한 루프 방지)
@@ -2141,7 +2143,7 @@ class MarkingPopup(QDialog):
                         win32api.keybd_event(ord('W'), 0, win32con.KEYEVENTF_KEYUP, 0)
                         win32api.keybd_event(win32con.VK_CONTROL, 0, win32con.KEYEVENTF_KEYUP, 0)
                         time.sleep(0.3) # 탭이 닫히고 다음 탭이 로드될 때까지 대기
-                    except: break
+                    except OSError: break
                 else:
                     # 마킹 안 된 파일이면 다음 탭으로 이동 (Ctrl+Tab)
                     try:
@@ -2151,7 +2153,7 @@ class MarkingPopup(QDialog):
                         win32api.keybd_event(win32con.VK_TAB, 0, win32con.KEYEVENTF_KEYUP, 0)
                         win32api.keybd_event(win32con.VK_CONTROL, 0, win32con.KEYEVENTF_KEYUP, 0)
                         time.sleep(0.1)
-                    except: break
+                    except OSError: break
 
     def _smart_close_excel_windows(self, targets):
         """엑셀 창들을 하나씩 확인하며 마킹된 파일만 종료 (Ctrl+W 활용)"""
@@ -2170,7 +2172,7 @@ class MarkingPopup(QDialog):
                 excel_hwnds.append(h)
         try:
             win32gui.EnumWindows(find_excel, None)
-        except: pass
+        except OSError: pass
         
         for hwnd in excel_hwnds:
             if not targets: break
@@ -2193,7 +2195,7 @@ class MarkingPopup(QDialog):
                     win32api.keybd_event(ord('W'), 0, win32con.KEYEVENTF_KEYUP, 0)
                     win32api.keybd_event(win32con.VK_CONTROL, 0, win32con.KEYEVENTF_KEYUP, 0)
                     time.sleep(0.3)
-                except:
+                except OSError:
                     continue
 
     @property

@@ -16,10 +16,11 @@ import subprocess
 import keyboard  # 글로벌 단축키
 import pyperclip  # 클립보드 + 붙여넣기
 
-from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QGridLayout, 
-                             QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QGridLayout,
+                             QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
                              QFrame, QLineEdit, QTextEdit, QDialog,
-                             QFileDialog, QMessageBox, QScrollArea, QGraphicsOpacityEffect)
+                             QFileDialog, QMessageBox, QScrollArea, QGraphicsOpacityEffect,
+                             QStackedWidget, QSizePolicy)
 from PyQt6.QtCore import (Qt, QTimer, pyqtSignal, QPropertyAnimation, QEasingCurve, 
                           QPoint, QParallelAnimationGroup, QEvent)
 from PyQt6.QtGui import QPixmap, QFont
@@ -99,6 +100,9 @@ class JarvisGUI(QMainWindow):
         self.mail_sender = None       # 메일 발송기 (나중에 초기화)
 
         
+        # 기존 config.json 민감정보를 keyring으로 마이그레이션
+        self._migrate_credentials_to_keyring()
+
         # 라이선스 등급 (admin: 전체, standard: 통관/보고 제외)
         self.license_tier = self._load_license_tier()
 
@@ -143,6 +147,42 @@ class JarvisGUI(QMainWindow):
         QTimer.singleShot(3000, self._check_update_async)
 
     
+    def _migrate_credentials_to_keyring(self):
+        """기존 config.json의 민감정보를 Windows Credential Manager로 이동 (최초 1회)"""
+        try:
+            import keyring
+            cfg_path = os.path.join(get_run_dir(), "config.json")
+            if not os.path.exists(cfg_path):
+                return
+            with open(cfg_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+
+            changed = False
+
+            # 이메일 비밀번호 마이그레이션
+            hanbiro = data.get('hanbiro_mail', {})
+            if 'password' in hanbiro and hanbiro['password']:
+                if not keyring.get_password("TRADIS_MH", "email_password"):
+                    keyring.set_password("TRADIS_MH", "email_password", hanbiro['password'])
+                del hanbiro['password']
+                data['hanbiro_mail'] = hanbiro
+                changed = True
+
+            # API 키 마이그레이션 (core/config.py에서도 처리하지만 여기서도 확인)
+            if 'api_key' in data and data['api_key']:
+                from core.config import _decode_api_key
+                actual_key = _decode_api_key(data['api_key'])
+                if actual_key and not keyring.get_password("TRADIS_MH", "gemini_api_key"):
+                    keyring.set_password("TRADIS_MH", "gemini_api_key", actual_key)
+                del data['api_key']
+                changed = True
+
+            if changed:
+                with open(cfg_path, 'w', encoding='utf-8') as f:
+                    json.dump(data, f, ensure_ascii=False, indent=4)
+        except Exception:
+            pass  # 마이그레이션 실패 시 기존 동작 유지
+
     def _load_license_tier(self):
         """config.json에서 라이선스 등급 로드"""
         try:
@@ -151,7 +191,7 @@ class JarvisGUI(QMainWindow):
                 with open(cfg_path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                 return data.get("license_tier", "standard")
-        except:
+        except (OSError, json.JSONDecodeError):
             pass
         return "standard"
 
@@ -185,51 +225,37 @@ class JarvisGUI(QMainWindow):
         
         tb_layout.addStretch()
         
-        # 최소화 버튼 (JARVIS HUD 스타일)
-        self.btn_minimize = QPushButton("─")
-        self.btn_minimize.setFixedSize(36, 36)
+        # 최소화 버튼 (macOS 스타일 원형)
+        self.btn_minimize = QPushButton("")
+        self.btn_minimize.setFixedSize(14, 14)
         self.btn_minimize.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_minimize.setStyleSheet("""
             QPushButton {
-                background-color: rgba(0, 255, 255, 10);
-                border: 1px solid rgba(0, 255, 255, 80);
-                border-radius: 8px;
-                color: #80f0ff;
-                font-size: 14pt;
-                font-weight: bold;
+                background-color: #febc2e;
+                border: none;
+                border-radius: 7px;
             }
             QPushButton:hover {
-                background-color: rgba(0, 255, 255, 40);
-                border: 2px solid #00ffff;
-                color: #00ffff;
-            }
-            QPushButton:pressed {
-                background-color: rgba(0, 255, 255, 60);
+                background-color: #e5a520;
             }
         """)
         self.btn_minimize.clicked.connect(self._show_mini_window)
         tb_layout.addWidget(self.btn_minimize)
-        
-        # 닫기 버튼 (JARVIS HUD 스타일 - 레드)
-        self.btn_close = QPushButton("✕")
-        self.btn_close.setFixedSize(36, 36)
+
+        tb_layout.addSpacing(8)
+
+        # 닫기 버튼 (macOS 스타일 원형)
+        self.btn_close = QPushButton("")
+        self.btn_close.setFixedSize(14, 14)
         self.btn_close.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_close.setStyleSheet("""
             QPushButton {
-                background-color: rgba(255, 80, 80, 10);
-                border: 1px solid rgba(255, 80, 80, 80);
-                border-radius: 8px;
-                color: #ff8888;
-                font-size: 14pt;
-                font-weight: bold;
+                background-color: #ff5f57;
+                border: none;
+                border-radius: 7px;
             }
             QPushButton:hover {
-                background-color: rgba(255, 80, 80, 50);
-                border: 2px solid #ff5050;
-                color: #ff5050;
-            }
-            QPushButton:pressed {
-                background-color: rgba(255, 50, 50, 80);
+                background-color: #e04640;
             }
         """)
         self.btn_close.clicked.connect(self.close)
@@ -237,63 +263,56 @@ class JarvisGUI(QMainWindow):
         
         total_layout.addWidget(self.title_bar)
         
-        # 1. Main Content Grid
+        # 1. Main Content Grid (3 Columns: LeftStack, Right, NavBar)
         content_widget = QWidget()
         self.main_layout = QGridLayout(content_widget)
         self.main_layout.setContentsMargins(2, 10, 2, 10)
-        self.main_layout.setHorizontalSpacing(0)
+        self.main_layout.setHorizontalSpacing(2)
         self.main_layout.setVerticalSpacing(20)
-        
-        # 7 Columns (Left, S1, Middle, S2, Right, NavBar, SearchPanel-Overlay)
-        self.main_layout.setColumnStretch(0, 5)  # Left (가로 확장)
-        self.main_layout.setColumnStretch(1, 0)  # Spacer 1
-        self.main_layout.setColumnStretch(2, 15) # Middle (유지)
-        self.main_layout.setColumnStretch(3, 0)  # Spacer 2
-        self.main_layout.setColumnStretch(4, 5)  # Right (가로 확장)
-        self.main_layout.setColumnStretch(5, 0)  # NavBar
-        self.main_layout.setColumnStretch(6, 0)  # Search Panel
-        
-        # --- 1. LEFT PANEL (Control) ---
+
+        self.main_layout.setColumnStretch(0, 15)  # Left content stack
+        self.main_layout.setColumnStretch(1, 5)   # Right panel
+        self.main_layout.setColumnStretch(2, 0)   # NavBar
+
+        # --- LEFT CONTENT STACK (QStackedWidget) ---
+        self.left_content_stack = QStackedWidget()
+
+        # Page 0: 정산 (left_panel + middle_panel)
+        mk1_page = QWidget()
+        mk1_layout = QHBoxLayout(mk1_page)
+        mk1_layout.setContentsMargins(0, 0, 0, 0)
+        mk1_layout.setSpacing(2)
+
         self.left_panel = GlassFrame()
         self.setup_left_panel()
-        self.main_layout.addWidget(self.left_panel, 0, 0)
-        
-        # --- SPACER 1 ---
-        self.spacer1 = QWidget()
-        self.spacer1.setFixedWidth(2)
-        self.spacer1.setStyleSheet("background: transparent;")
-        self.main_layout.addWidget(self.spacer1, 0, 1)
+        mk1_layout.addWidget(self.left_panel)
 
-        # --- 2. MIDDLE PANEL (Merge) ---
         self.middle_panel = GlassFrame()
         self.setup_middle_panel()
-        self.main_layout.addWidget(self.middle_panel, 0, 2)
-        
-        # --- SPACER 2 ---
-        self.spacer2 = QWidget()
-        self.spacer2.setFixedWidth(2)
-        self.spacer2.setStyleSheet("background: transparent;")
-        self.main_layout.addWidget(self.spacer2, 0, 3)
-        
-        # --- 3. RIGHT PANEL (Files) ---
+        mk1_layout.addWidget(self.middle_panel, stretch=1)
+
+        self.left_content_stack.addWidget(mk1_page)  # index 0
+        self.main_layout.addWidget(self.left_content_stack, 0, 0)
+
+        # --- RIGHT PANEL (FileManager) ---
         self.right_panel = GlassFrame()
         self.setup_right_panel()
-        self.main_layout.addWidget(self.right_panel, 0, 4)
-        
-        # --- 4. VERTICAL NAV BAR ---
+        self.main_layout.addWidget(self.right_panel, 0, 1)
+
+        # --- VERTICAL NAV BAR ---
         self._create_vertical_navbar()
-        
+
         # file_manager.search_panel을 오버레이로 가져옴
         self.search_panel = self.file_manager.search_panel
         self.search_panel.setParent(self)
         self.search_panel.hide()
         self.search_panel.raise_()
-        
+
         # file_manager의 탭 바 숨기기
         self.file_manager.tabs.tabBar().hide()
-        
-        # VERONICA, MK3 탭용 placeholder 패널 생성
-        self._create_placeholder_panels()
+
+        # 콘텐츠 페이지 생성 (일정, 통관, REPORT, SETTINGS)
+        self._create_content_pages()
         
         total_layout.addWidget(content_widget)
     
@@ -317,15 +336,15 @@ class JarvisGUI(QMainWindow):
         
         self.nav_buttons = {}
         tab_defs = [
-            ("MK1", "정\n산", "#00ffff"),
-            ("MK3", "일\n정", "#00ff88"),
-            ("VERONICA", "통\n관", "#ffa500"),
+            ("정산", "정\n산", "#00ffff"),
+            ("일정", "일\n정", "#00ff88"),
+            ("통관", "통\n관", "#ffa500"),
             ("REPORT", "보\n고", "#ff88ff"),
             ("SETTINGS", "설\n정", "#aaaaaa"),
         ]
 
         # admin 전용 탭
-        admin_only_tabs = {"VERONICA", "REPORT"}
+        admin_only_tabs = {"일정", "통관", "REPORT"}
 
         for tab_name, label, color in tab_defs:
             if tab_name in admin_only_tabs and self.license_tier != "admin":
@@ -365,149 +384,133 @@ class JarvisGUI(QMainWindow):
             self.nav_buttons[tab_name] = btn
         
         navbar_layout.addStretch()
-        self.nav_buttons["MK1"].setChecked(True)
-        self.current_nav_tab = "MK1"
-        self.main_layout.addWidget(self.navbar, 0, 5)
+        self.nav_buttons["정산"].setChecked(True)
+        self.current_nav_tab = "정산"
+        self.main_layout.addWidget(self.navbar, 0, 2)
     
     def _on_navbar_clicked(self, tab_name):
         for name, btn in self.nav_buttons.items():
             btn.setChecked(name == tab_name)
-        
         self.current_nav_tab = tab_name
-        # 동적 탭 인덱스: 탭 이름으로 인덱스 찾기
+
+        # 1) QStackedWidget 페이지 전환
+        page_idx = self.PAGE_INDEX.get(tab_name, 0)
+        # 모든 페이지 sizePolicy를 Ignored로 → 현재 페이지만 Preferred로
+        for i in range(self.left_content_stack.count()):
+            w = self.left_content_stack.widget(i)
+            if i == page_idx:
+                w.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+            else:
+                w.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
+        self.left_content_stack.setCurrentIndex(page_idx)
+
+        # 2) file_manager 탭 전환 (이름으로 찾기)
         for i in range(self.file_manager.tabs.count()):
             if self.file_manager.tabs.tabText(i) == tab_name:
                 self.file_manager.tabs.setCurrentIndex(i)
                 break
-        
-        self._on_main_tab_changed(0, tab_name)
-    
-    def _create_placeholder_panels(self):
-        # VERONICA (통관) - admin 전용
-        self.veronica_panel = QWidget()
-        if self.license_tier == "admin":
-            veronica_layout = QVBoxLayout(self.veronica_panel)
-            veronica_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            lbl_veronica = QLabel("📦 VERONICA - 통관 자동화\n\n(Coming Soon)")
-            lbl_veronica.setStyleSheet("color: #ffa500; font-size: 16pt; font-weight: bold;")
-            lbl_veronica.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            veronica_layout.addWidget(lbl_veronica)
-        self.veronica_panel.hide()
-        self.main_layout.addWidget(self.veronica_panel, 0, 0, 1, 5)
 
-        # MK3 (일정)
+        # 3) 레이아웃 조정
+        self.left_content_stack.setMaximumWidth(16777215)
+        if tab_name == "REPORT":
+            # REPORT: 전체화면 (right_panel 숨김)
+            self.left_content_stack.show()
+            self.right_panel.hide()
+            self.main_layout.setColumnStretch(0, 1)
+            self.main_layout.setColumnStretch(1, 0)
+        elif tab_name == "SETTINGS":
+            # SETTINGS: 빈 좌측 + 기존 크기 right_panel
+            self.left_content_stack.show()
+            self.right_panel.show()
+            self.right_panel.setMaximumWidth(500)
+            self.main_layout.setColumnStretch(0, 15)
+            self.main_layout.setColumnStretch(1, 5)
+        elif tab_name == "정산":
+            # 정산: 좌측 넓게 + 우측 제한
+            self.left_content_stack.show()
+            self.right_panel.show()
+            self.right_panel.setMaximumWidth(500)
+            self.main_layout.setColumnStretch(0, 15)
+            self.main_layout.setColumnStretch(1, 5)
+        elif tab_name == "일정":
+            # 일정: 캘린더 넓게 + 메모 제한
+            self.left_content_stack.show()
+            self.left_content_stack.setMaximumWidth(16777215)
+            self.right_panel.show()
+            self.right_panel.setMaximumWidth(600)
+            self.main_layout.setColumnStretch(0, 1)
+            self.main_layout.setColumnStretch(1, 0)
+        else:
+            # 통관: 좌측 넓게 + 우측 기존 크기
+            self.left_content_stack.show()
+            self.right_panel.show()
+            self.right_panel.setMaximumWidth(500)
+            self.main_layout.setColumnStretch(0, 12)
+            self.main_layout.setColumnStretch(1, 6)
+    
+    # 페이지 인덱스 매핑
+    PAGE_INDEX = {"정산": 0, "일정": 1, "통관": 2, "REPORT": 3, "SETTINGS": 4}
+
+    def _create_content_pages(self):
+        """QStackedWidget에 일정/통관/REPORT/SETTINGS 페이지 추가"""
+        # --- 공유 리소스 (라이선스 무관하게 항상 생성) ---
         self.shared_schedule_manager = LocalScheduleManager()
-        
-        # [NEW] 스케줄 매니저에 커스텀 토스트 어댑터 주입
-        # 이렇게 하면 백그라운드 일정 알림도 커스텀 UI로 뜹니다.
+
         class CustomNotifierAdapter:
             def show_toast(self, title, message, duration=10, icon_path=None):
                 return show_custom_toast(title, message, duration)
-                
+
         self.shared_schedule_manager.notifier = CustomNotifierAdapter()
-        self.shared_notifier = self.shared_schedule_manager.notifier # 공유 notifier도 업데이트
-        
-        
-        self.mk3_panel = GlassFrame()
-        mk3_layout = QVBoxLayout(self.mk3_panel)
+        self.shared_notifier = self.shared_schedule_manager.notifier
+
+        # --- Page 1: 일정 (캘린더) ---
+        mk3_page = GlassFrame()
+        mk3_layout = QVBoxLayout(mk3_page)
         mk3_layout.setContentsMargins(15, 15, 15, 15)
         mk3_layout.setSpacing(10)
-        
         self.mk3_schedule_widget = MK3ScheduleOnlyWidget(
             schedule_manager=self.shared_schedule_manager,
             notifier=self.shared_notifier
         )
         mk3_layout.addWidget(self.mk3_schedule_widget)
-        
-        self.mk3_panel.hide()
-        self.main_layout.addWidget(self.mk3_panel, 0, 0, 1, 4)
-        
-        # MK3 메모 위젯 -> file_manager 내부 레이아웃에 추가
+        self.left_content_stack.addWidget(mk3_page)  # index 1
+
+        # 일정 메모 위젯 -> file_manager 내부 레이아웃에 추가
         self.mk3_memo_widget = MK3MemoOnlyWidget(
             schedule_manager=self.shared_schedule_manager
         )
         self.mk3_memo_widget.hotkey_settings_clicked.connect(self.show_hotkey_settings)
         if hasattr(self.file_manager, 'mk3_memo_layout'):
             self.file_manager.mk3_memo_layout.addWidget(self.mk3_memo_widget)
-        
-        # REPORT (일일 보고서) - admin 전용
-        self.report_panel = GlassFrame()
-        if self.license_tier == "admin":
-            from gui.report_panel import ReportPanel
-            report_layout = QVBoxLayout(self.report_panel)
-            report_layout.setContentsMargins(0, 0, 0, 0)
-            self.report_widget = ReportPanel()
-            self.report_widget.log_signal.connect(self.emit_log)
-            report_layout.addWidget(self.report_widget)
-        self.report_panel.hide()
-        self.main_layout.addWidget(self.report_panel, 0, 0, 1, 5)
-            
-        # 초기 탭 설정 (레이아웃 적용을 위해 명시적 호출)
-        self._on_navbar_clicked("MK1")
+
+        # --- Page 2: 통관 (placeholder) ---
+        veronica_page = GlassFrame()
+        veronica_page_layout = QVBoxLayout(veronica_page)
+        veronica_page_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl_veronica = QLabel("통관 자동화\n\n(Coming Soon)")
+        lbl_veronica.setStyleSheet("color: #ffa500; font-size: 16pt; font-weight: bold;")
+        lbl_veronica.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        veronica_page_layout.addWidget(lbl_veronica)
+        self.left_content_stack.addWidget(veronica_page)  # index 2
+
+        # --- Page 3: REPORT ---
+        from gui.report_panel import ReportPanel
+        report_page = GlassFrame()
+        report_layout = QVBoxLayout(report_page)
+        report_layout.setContentsMargins(0, 0, 0, 0)
+        self.report_widget = ReportPanel()
+        self.report_widget.log_signal.connect(self.emit_log)
+        report_layout.addWidget(self.report_widget)
+        self.left_content_stack.addWidget(report_page)  # index 3
+
+        # --- Page 4: SETTINGS (빈 페이지, right_panel만 사용) ---
+        settings_page = QWidget()
+        self.left_content_stack.addWidget(settings_page)  # index 4
+
+        # 초기 탭 설정
+        self.left_content_stack.setCurrentIndex(0)
+        self._on_navbar_clicked("정산")
     
-    def _on_main_tab_changed(self, index, tab_name):
-        # 레이아웃 비율 및 크기 동적 조정
-        if tab_name == "MK1":
-            # MK1: 오른쪽 패널 확장 (최대 500px), 중간 패널 유지
-            self.right_panel.setMaximumWidth(500)
-            self.main_layout.setColumnStretch(2, 15)
-            self.main_layout.setColumnStretch(4, 5)
-            
-            self.left_panel.show()
-            self.spacer1.show()
-            self.middle_panel.show()
-            self.spacer2.show()
-            self.right_panel.show()
-            self.veronica_panel.hide()
-            self.mk3_panel.hide()
-            self.report_panel.hide()
-        else:
-            # 그 외: 오른쪽 패널 제한 해제, 기존 비율 복구
-            self.right_panel.setMaximumWidth(16777215) # QWIDGETSIZE_MAX
-            self.main_layout.setColumnStretch(2, 12)
-            self.main_layout.setColumnStretch(4, 6)
-            
-            if tab_name == "SETTINGS":
-                self.left_panel.hide()
-                self.spacer1.hide()
-                self.middle_panel.hide()
-                self.spacer2.hide()
-                self.right_panel.show()
-                self.veronica_panel.hide()
-                self.mk3_panel.hide()
-                self.report_panel.hide()
-            elif tab_name == "VERONICA":
-                # VERONICA는 오른쪽 탭에서 표시되므로 왼쪽/중간 패널 숨김
-                self.left_panel.hide()
-                self.spacer1.hide()
-                self.middle_panel.hide()
-                self.spacer2.hide()
-                self.right_panel.show()
-                self.veronica_panel.hide()
-                self.mk3_panel.hide()
-                self.report_panel.hide()
-            elif tab_name == "MK3":
-                # MK3: 메모 패널 가로 확장
-                self.main_layout.setColumnStretch(0, 8)   # 일정 패널
-                self.main_layout.setColumnStretch(4, 10)   # 메모 패널 (더 넓게)
-                self.left_panel.hide()
-                self.spacer1.hide()
-                self.middle_panel.hide()
-                self.spacer2.hide()
-                self.right_panel.show()
-                self.veronica_panel.hide()
-                self.mk3_panel.show()
-                self.report_panel.hide()
-            elif tab_name == "REPORT":
-                # REPORT: 전체 화면 표시
-                self.left_panel.hide()
-                self.spacer1.hide()
-                self.middle_panel.hide()
-                self.spacer2.hide()
-                self.right_panel.hide()
-                self.veronica_panel.hide()
-                self.mk3_panel.hide()
-                self.report_panel.show()
 
     def closeEvent(self, event):
         try:
@@ -597,25 +600,20 @@ class JarvisGUI(QMainWindow):
         QTimer.singleShot(0, self._show_memo_tab)
     
     def _show_memo_tab(self):
-        """MK3 메모 탭 표시 (메인 스레드)"""
-        # 창 복원 및 활성화
+        """일정 메모 탭 표시 (메인 스레드)"""
         self.showNormal()
         self.activateWindow()
         self.raise_()
-        
-        # Windows API로 창 포커스 강제 설정
         try:
             import ctypes
             hwnd = int(self.winId())
             ctypes.windll.user32.SetForegroundWindow(hwnd)
-        except:
+        except (ValueError, OSError):
             pass
-        
-        # MK3 탭으로 직접 전환 (인덱스 1)
-        if hasattr(self.file_manager, 'tabs'):
-            self.file_manager.tabs.setCurrentIndex(1)  # MK3 탭 선택
-        
-        # 메모 입력 영역에 포커스
+
+        # navbar를 통해 일정 전환
+        self._on_navbar_clicked("일정")
+
         if hasattr(self, 'mk3_memo_widget'):
             QTimer.singleShot(100, self.mk3_memo_widget.focus_current_memo)
         
@@ -1088,9 +1086,7 @@ class JarvisGUI(QMainWindow):
         title_box = QVBoxLayout()
         title_box.setSpacing(0)
         lbl_title = QLabel("TRADIS MH")
-        lbl_title.setFont(QFont("Impact", 36))
-        lbl_title.setProperty("heading", True)
-        lbl_title.setStyleSheet("color: #00ffff; letter-spacing: 3px;")
+        lbl_title.setStyleSheet("color: #00ffff; font-family: Impact; font-size: 38pt; letter-spacing: 3px;")
         title_box.addWidget(lbl_title)
 
         lbl_by = QLabel("by M.H. Choi")
@@ -1200,12 +1196,6 @@ class JarvisGUI(QMainWindow):
         info_row.addWidget(self.lbl_location)
         info_row.addStretch()
         
-        btn_collect = NeonButton("COLLECT FILES", color="cyan")
-        btn_collect.setFixedSize(130, 32)
-        btn_collect.setToolTip("송품장번호와 일치하는 파일/폴더를 정리 폴더로 수집")
-        btn_collect.clicked.connect(self._collect_related_files_all)
-        info_row.addWidget(btn_collect)
-        
         btn_rescan = NeonButton("RESCAN FOLDER", color="cyan")
         btn_rescan.setFixedSize(140, 32)
         btn_rescan.clicked.connect(self.run_intelligent_merge)
@@ -1244,7 +1234,7 @@ class JarvisGUI(QMainWindow):
         # self.right_panel.setMaximumWidth(380) # 동적 제어를 위해 제거
         layout = QVBoxLayout(self.right_panel)
         self.file_manager = FileManagerWidget(path_callback=lambda: self.line_path.text(), archiver=self.archiver, license_tier=self.license_tier)
-        # VERONICA (수출 자동화) 시그널 연결
+        # 통관 (수출 자동화) 시그널 연결
         self.file_manager.rk_auto_input_clicked.connect(self._run_readykorea_automation)
         self.file_manager.rk_test_clicked.connect(self._test_readykorea_connection)
         self.file_manager.send_mail_clicked.connect(self._send_reply_email)
@@ -1327,42 +1317,6 @@ class JarvisGUI(QMainWindow):
         if hasattr(self, 'file_manager'):
             self.file_manager.refresh_targets()
 
-    def _collect_related_files_all(self):
-        """모든 정리 폴더에 대해 관련 파일/폴더 수집"""
-        path = self.line_path.text()
-        if not path or not os.path.exists(path):
-            from gui.dialogs import JarvisMessageBox
-            JarvisMessageBox.warning(self, "오류", "대상 폴더가 선택되지 않았습니다.")
-            return
-
-        # 수출 서류 소스 폴더 (설정된 경우 사용)
-        export_docs_root = self.archiver.export_docs_root if self.archiver.export_docs_root else None
-
-        self.emit_log("[수집 시작] 관련 파일/폴더 수집 중...")
-
-        def run_collect():
-            try:
-                for item in os.listdir(path):
-                    item_path = os.path.join(path, item)
-                    if not os.path.isdir(item_path):
-                        continue
-                    # {회사명}_{ID} 형식 폴더 찾기
-                    parts = item.split('_')
-                    if len(parts) >= 2:
-                        target_id = '_'.join(parts[1:])
-                        # 기본: merge 대상 폴더에서 수집
-                        self.renamer._collect_related_items(path, item_path, target_id)
-                        # 수출 서류 소스 폴더에서도 수집
-                        if export_docs_root and os.path.exists(export_docs_root):
-                            self.renamer._collect_related_items(export_docs_root, item_path, target_id)
-            except Exception as e:
-                self.log_signal.emit(f"[수집 오류] {e}")
-            self.log_signal.emit("[수집 완료] 관련 파일/폴더 수집이 끝났습니다.")
-            self.merge_complete_signal.emit()
-
-        import threading
-        threading.Thread(target=run_collect, daemon=True).start()
-            
     def _debounced_refresh(self):
         # 불필요한 반복 로그 제거 (상태 갱신 시마다 로그가 찍혀 리소스 낭비)
         path = self.line_path.text()
@@ -1378,21 +1332,10 @@ class JarvisGUI(QMainWindow):
         from gui.widgets import GlassFrame # Assuming GlassFrame is in gui.widgets
         from PyQt6.QtCore import Qt
         
-        # 현재 저장된 키 로드 (디코딩)
-        current_key = ""
-        try:
-            cfg = os.path.join(get_run_dir(), "config.json")
-            if os.path.exists(cfg):
-                with open(cfg, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    import base64
-                    encoded = data.get("api_key", "")
-                    try:
-                        current_key = base64.b64decode(encoded).decode('utf-8') if encoded else ""
-                    except:
-                        current_key = encoded  # 기존 평문 키 호환
-        except: pass
-        
+        # 현재 저장된 키 로드 (keyring에서)
+        from core.config import get_api_key
+        current_key = get_api_key()
+
         # 커스텀 HUD 스타일 다이얼로그 생성
         dlg = QDialog(self)
         dlg.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
@@ -1555,10 +1498,9 @@ class JarvisGUI(QMainWindow):
                 if "export_docs_root" in data:
                     self.archiver.export_docs_root = data["export_docs_root"]
                     self.file_manager.lbl_exp_docs_root.setText(data["export_docs_root"])
-                if "api_key" in data:
-                    key = data["api_key"]
-                    set_api_key(key)
-                    self.emit_log("API Key loaded." if key else "API Key missing.")
+                # API 키는 keyring에서 로드 (core/config.py에서 자동 처리)
+                from core.config import api_key as loaded_api_key
+                self.emit_log("API Key loaded." if loaded_api_key else "API Key missing.")
                 if "browser_home_path" in data:
                     self.file_manager.browser_home_path = data["browser_home_path"]
                 # 미니 윈도우 위치 로드
@@ -1623,46 +1565,37 @@ class JarvisGUI(QMainWindow):
         layout.addWidget(lbl)
         layout.addStretch()
         
-        # 복원 버튼 (컴팩트)
-        btn_restore = QPushButton("◀")
-        btn_restore.setFixedSize(22, 22)
+        # 복원 버튼 (macOS 스타일 원형 - 초록)
+        btn_restore = QPushButton("")
+        btn_restore.setFixedSize(12, 12)
         btn_restore.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_restore.setToolTip("복원")
         btn_restore.setStyleSheet("""
-            QPushButton { 
-                background: transparent;
-                color: #00ffff; 
-                font-size: 9pt; 
-                font-weight: bold;
-                border: 1px solid rgba(0, 255, 255, 80); 
-                border-radius: 4px; 
+            QPushButton {
+                background-color: #28c840;
+                border: none;
+                border-radius: 6px;
             }
             QPushButton:hover {
-                background: rgba(0, 255, 255, 30);
-                border: 1px solid #00ffff;
+                background-color: #1fa834;
             }
         """)
         btn_restore.clicked.connect(self._restore_from_mini)
         layout.addWidget(btn_restore)
-        
-        # 닫기 버튼 (컴팩트)
-        btn_close = QPushButton("✕")
-        btn_close.setFixedSize(22, 22)
+
+        # 닫기 버튼 (macOS 스타일 원형 - 빨강)
+        btn_close = QPushButton("")
+        btn_close.setFixedSize(12, 12)
         btn_close.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_close.setToolTip("종료")
         btn_close.setStyleSheet("""
-            QPushButton { 
-                background: transparent;
-                color: #ff6666; 
-                font-size: 9pt; 
-                font-weight: bold;
-                border: 1px solid rgba(255, 80, 80, 80); 
-                border-radius: 4px; 
+            QPushButton {
+                background-color: #ff5f57;
+                border: none;
+                border-radius: 6px;
             }
             QPushButton:hover {
-                background: rgba(255, 80, 80, 30);
-                border: 1px solid #ff5050;
-                color: #ff5050;
+                background-color: #e04640;
             }
         """)
         btn_close.clicked.connect(self._close_from_mini)
@@ -1725,7 +1658,7 @@ class JarvisGUI(QMainWindow):
         try:
             self.stop_monitoring()
             self.save_settings()
-        except:
+        except Exception:
             pass
         # 앱 전체 종료
         QApplication.quit()
@@ -1744,7 +1677,7 @@ class JarvisGUI(QMainWindow):
                 if os.path.exists(path):
                     subprocess.Popen([path, "-startup"], creationflags=subprocess.CREATE_NO_WINDOW)
                     return
-        except: pass
+        except (FileNotFoundError, OSError): pass
 
     # 메일 모니터링 기능 완전히 제거됨
     
@@ -1852,20 +1785,24 @@ class JarvisGUI(QMainWindow):
                 config = json.load(f)
             
             hanbiro = config.get('hanbiro_mail', {})
-            if not hanbiro.get('email') or not hanbiro.get('password'):
+            email_addr = hanbiro.get('email', '')
+            # 이메일 비밀번호는 keyring에서 로드
+            import keyring
+            email_pw = keyring.get_password("TRADIS_MH", "email_password") or ''
+            if not email_addr or not email_pw:
                 JarvisMessageBox.warning(self, "설정 오류", "한비로 메일 설정이 없습니다.")
                 return
-                
+
             # 사용자 요청에 따라 발신자 주소 동적 생성 (ID + @ihaedo.com)
-            user_id = hanbiro.get('email', '').split('@')[0]
-            
+            user_id = email_addr.split('@')[0]
+
             email_config = EmailConfig(
                 smtp_server=hanbiro.get('smtp_server', 'raeon.hanbiro.net'),
                 smtp_port=int(hanbiro.get('smtp_port', 465)),
                 imap_server=hanbiro.get('imap_server', 'raeon.hanbiro.net'),
                 imap_port=int(hanbiro.get('imap_port', 993)),
-                email=hanbiro.get('email'),
-                password=hanbiro.get('password'),
+                email=email_addr,
+                password=email_pw,
                 sender_email=f"{user_id}@ihaedo.com"
             )
         except Exception as e:
@@ -2037,24 +1974,18 @@ class JarvisGUI(QMainWindow):
     # ── 관리자 모드 ──────────────────────────────────────────
 
     def _on_admin_unlocked(self):
-        """관리자 잠금 해제 → 통관/보고 탭 동적 추가"""
+        """관리자 잠금 해제 → navbar에 일정/통관/보고 버튼 추가"""
         self.license_tier = "admin"
-
-        # config에 저장
         self._save_license_tier("admin")
 
-        # navbar에 통관/보고 버튼 추가 (SETTINGS 앞에 삽입)
+        # navbar에 버튼 추가 (SETTINGS 앞에 삽입)
         admin_tabs = [
-            ("VERONICA", "통\n관", "#ffa500"),
+            ("일정", "일\n정", "#00ff88"),
+            ("통관", "통\n관", "#ffa500"),
             ("REPORT", "보\n고", "#ff88ff"),
         ]
-        # navbar layout에서 stretch 제거 → 탭 추가 → stretch 다시 추가
         navbar_layout = self.navbar.layout()
-
-        # 기존 stretch 제거 (마지막 아이템)
-        navbar_layout.takeAt(navbar_layout.count() - 1)
-
-        # SETTINGS 버튼 제거 (마지막 버튼)
+        navbar_layout.takeAt(navbar_layout.count() - 1)  # stretch 제거
         settings_item = navbar_layout.takeAt(navbar_layout.count() - 1)
         settings_btn = settings_item.widget()
 
@@ -2093,56 +2024,9 @@ class JarvisGUI(QMainWindow):
             navbar_layout.addWidget(btn)
             self.nav_buttons[tab_name] = btn
 
-        # SETTINGS 버튼 다시 추가
         navbar_layout.addWidget(settings_btn)
-        # stretch 다시 추가
         navbar_layout.addStretch()
-
-        # VERONICA 패널 내용 초기화
-        if not self.veronica_panel.layout():
-            veronica_layout = QVBoxLayout(self.veronica_panel)
-            veronica_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            lbl_veronica = QLabel("📦 VERONICA - 통관 자동화\n\n(Coming Soon)")
-            lbl_veronica.setStyleSheet("color: #ffa500; font-size: 16pt; font-weight: bold;")
-            lbl_veronica.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            veronica_layout.addWidget(lbl_veronica)
-
-        # REPORT 패널 내용 초기화
-        if not self.report_panel.layout():
-            from gui.report_panel import ReportPanel
-            report_layout = QVBoxLayout(self.report_panel)
-            report_layout.setContentsMargins(0, 0, 0, 0)
-            self.report_widget = ReportPanel()
-            self.report_widget.log_signal.connect(self.emit_log)
-            report_layout.addWidget(self.report_widget)
-
-        # file_manager 탭에도 VERONICA/REPORT 추가
-        tabs = self.file_manager.tabs
-        # SETTINGS 탭 앞에 삽입
-        settings_idx = None
-        for i in range(tabs.count()):
-            if tabs.tabText(i) == "SETTINGS":
-                settings_idx = i
-                break
-
-        if settings_idx is not None:
-            # VERONICA 탭 (없으면 추가)
-            has_veronica = any(tabs.tabText(i) == "VERONICA" for i in range(tabs.count()))
-            if not has_veronica:
-                tab_veronica = QWidget()
-                tab_veronica.setStyleSheet("background-color: transparent;")
-                tabs.insertTab(settings_idx, tab_veronica, "VERONICA")
-                settings_idx += 1
-
-            # REPORT 탭 (없으면 추가)
-            has_report = any(tabs.tabText(i) == "REPORT" for i in range(tabs.count()))
-            if not has_report:
-                from gui.report_panel import ReportPanel
-                report_tab = ReportPanel()
-                report_tab.log_signal.connect(self.emit_log)
-                tabs.insertTab(settings_idx, report_tab, "REPORT")
-
-        self.emit_log("[관리자] 통관/보고 탭이 활성화되었습니다.")
+        self.emit_log("[관리자] 일정/통관/보고 탭이 활성화되었습니다.")
 
     def _save_license_tier(self, tier):
         """config.json에 라이선스 등급 저장"""

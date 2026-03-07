@@ -1,0 +1,48 @@
+{
+  "date": "2026-03-07",
+  "daily_count": 0,
+  "daily_fee": 0,
+  "monthly_count": 0,
+  "monthly_fee": 0,
+  "receivables": [],
+  "advances": [
+    {
+      "company": "이오에스",
+      "bl_no": "SDL2601035",
+      "amount": 724500,
+      "expected_date": "2026.01.30",
+      "is_confirmed": true
+    },
+    {
+      "company": "이오에스",
+      "bl_no": "SDL2601034",
+      "amount": 1119200,
+      "expected_date": "2026.01.30",
+      "is_confirmed": true
+    },
+    {
+      "company": "이오에스",
+      "bl_no": "SDL2601043",
+      "amount": 1023750,
+      "expected_date": "2026.02.03",
+      "is_confirmed": false
+    },
+    {
+      "company": "신영허브",
+      "bl_no": "KMTCSUB2455627",
+      "amount": 1004834,
+      "expected_date": "2026.02.06",
+      "is_confirmed": false
+    },
+    {
+      "company": "이오에스",
+      "bl_no": "I222839",
+      "amount": 167670,
+      "expected_date": "2026.02.06",
+      "is_confirmed": false
+    }
+  ],
+  "last_mail_to": "mhchoi@ihaedo.com",
+  "last_mail_cc": "",
+  "issues": "\n\n\n\n"
+}

@@ -1,0 +1,192 @@
+227 INFO: PyInstaller: 6.17.0, contrib hooks: 2025.10
+227 INFO: Python: 3.12.10
+258 INFO: Platform: Windows-10-10.0.19045-SP0
+258 INFO: Python environment: C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0
+430 INFO: UPX is available and will be used if enabled on build targets.
+430 INFO: Module search paths (PYTHONPATH):
+['C:\\Users\\√÷∏Ì«Â\\Desktop\\test',
+ 'C:\\Program '
+ 'Files\\WindowsApps\\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\\python312.zip',
+ 'C:\\Program '
+ 'Files\\WindowsApps\\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\\DLLs',
+ 'C:\\Program '
+ 'Files\\WindowsApps\\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\\Lib',
+ 'C:\\Program '
+ 'Files\\WindowsApps\\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0',
+ 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages',
+ 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\win32',
+ 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\win32\\lib',
+ 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\Pythonwin',
+ 'C:\\Program '
+ 'Files\\WindowsApps\\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\\Lib\\site-packages',
+ 'C:\\Users\\√÷∏Ì«Â\\Desktop\\test']
+1158 INFO: Appending 'datas' from .spec
+1158 INFO: checking Analysis
+1221 INFO: Building because excludes changed
+1221 INFO: Looking for Python shared library...
+1221 INFO: Using Python shared library: C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\python312.dll
+1221 INFO: Running Analysis Analysis-00.toc
+1221 INFO: Target bytecode optimization level: 0
+1221 INFO: Initializing module dependency graph...
+1221 INFO: Initializing module graph hook caches...
+1315 INFO: Analyzing modules for base_library.zip ...
+3441 INFO: Processing standard module hook 'hook-encodings.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\PyInstaller\\hooks'
+4417 INFO: Processing standard module hook 'hook-heapq.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\PyInstaller\\hooks'
+5677 INFO: Processing standard module hook 'hook-pickle.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\PyInstaller\\hooks'
+7653 INFO: Caching module dependency graph...
+7731 INFO: Analyzing C:\Users\√÷∏Ì«Â\Desktop\test\gui_jarvis.py
+7975 INFO: Processing standard module hook 'hook-platform.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\PyInstaller\\hooks'
+8136 INFO: Processing standard module hook 'hook-_ctypes.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\PyInstaller\\hooks'
+8386 INFO: Processing standard module hook 'hook-PyQt6.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\PyInstaller\\hooks'
+9566 INFO: Processing standard module hook 'hook-PyQt6.QtWidgets.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\PyInstaller\\hooks'
+13828 INFO: Processing standard module hook 'hook-PyQt6.QtCore.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\PyInstaller\\hooks'
+18580 INFO: Processing standard module hook 'hook-PyQt6.QtGui.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\PyInstaller\\hooks'
+41050 INFO: Processing pre-safe-import-module hook 'hook-typing_extensions.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+41075 INFO: SetuptoolsInfo: initializing cached setuptools info...
+50852 INFO: Processing standard module hook 'hook-multiprocessing.util.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\PyInstaller\\hooks'
+51118 INFO: Processing standard module hook 'hook-xml.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\PyInstaller\\hooks'
+52116 INFO: Processing standard module hook 'hook-pydantic.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+54364 INFO: Processing standard module hook 'hook-zoneinfo.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+54424 INFO: Processing standard module hook 'hook-sysconfig.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\PyInstaller\\hooks'
+56444 INFO: Processing standard module hook 'hook-anyio.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+59601 INFO: Processing standard module hook 'hook-certifi.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+63957 INFO: Processing standard module hook 'hook-cryptography.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+67521 INFO: hook-cryptography: cryptography does not seem to be using dynamically linked OpenSSL.
+69643 INFO: Processing standard module hook 'hook-difflib.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\PyInstaller\\hooks'
+70661 INFO: Processing standard module hook 'hook-urllib3.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+70830 INFO: Processing pre-safe-import-module hook 'hook-backports.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+70841 INFO: Setuptools: 'backports' appears to be a full setuptools-vendored copy - creating alias to 'setuptools._vendor.backports'!
+70866 INFO: Processing standard module hook 'hook-setuptools.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\PyInstaller\\hooks'
+70956 INFO: Processing pre-safe-import-module hook 'hook-distutils.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+71084 INFO: Processing pre-safe-import-module hook 'hook-jaraco.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+71093 INFO: Setuptools: 'jaraco' appears to be a full setuptools-vendored copy - creating alias to 'setuptools._vendor.jaraco'!
+71127 INFO: Processing pre-safe-import-module hook 'hook-more_itertools.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+71140 INFO: Setuptools: 'more_itertools' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.more_itertools'!
+71667 INFO: Processing pre-safe-import-module hook 'hook-packaging.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+72211 INFO: Processing standard module hook 'hook-setuptools._vendor.jaraco.text.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\PyInstaller\\hooks'
+72223 INFO: Processing pre-safe-import-module hook 'hook-importlib_resources.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+72891 INFO: Processing pre-safe-import-module hook 'hook-importlib_metadata.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+72899 INFO: Setuptools: 'importlib_metadata' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.importlib_metadata'!
+73063 INFO: Processing standard module hook 'hook-setuptools._vendor.importlib_metadata.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\PyInstaller\\hooks'
+73075 INFO: Processing pre-safe-import-module hook 'hook-zipp.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+73087 INFO: Setuptools: 'zipp' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.zipp'!
+74179 INFO: Processing pre-safe-import-module hook 'hook-tomli.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+74191 INFO: Setuptools: 'tomli' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.tomli'!
+75516 INFO: Processing pre-safe-import-module hook 'hook-wheel.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+75528 INFO: Setuptools: 'wheel' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.wheel'!
+76595 INFO: Processing standard module hook 'hook-charset_normalizer.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+77993 INFO: Processing standard module hook 'hook-pycparser.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+79904 INFO: Processing standard module hook 'hook-websockets.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+81011 INFO: Processing standard module hook 'hook-PIL.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\PyInstaller\\hooks'
+81211 INFO: Processing standard module hook 'hook-PIL.Image.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\PyInstaller\\hooks'
+82117 INFO: Processing standard module hook 'hook-numpy.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\PyInstaller\\hooks'
+84399 INFO: Processing standard module hook 'hook-psutil.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+88228 INFO: Processing standard module hook 'hook-xml.etree.cElementTree.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\PyInstaller\\hooks'
+88583 INFO: Processing standard module hook 'hook-PIL.ImageFilter.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\PyInstaller\\hooks'
+90640 INFO: Processing standard module hook 'hook-pdfminer.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+92381 INFO: Processing standard module hook 'hook-pypdfium2.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+92493 INFO: Processing standard module hook 'hook-pypdfium2_raw.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+93291 INFO: Processing pre-find-module-path hook 'hook-tkinter.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\PyInstaller\\hooks\\pre_find_module_path'
+93301 INFO: TclTkInfo: initializing cached Tcl/Tk info...
+94107 INFO: Processing standard module hook 'hook-_tkinter.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\PyInstaller\\hooks'
+94246 INFO: Processing standard module hook 'hook-cv2.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+C:\Users\√÷∏Ì«Â\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\pyautogui\_pyautogui_x11.py:284: SyntaxWarning: invalid escape sequence '\e'
+  '\e': _display.keysym_to_keycode(Xlib.XK.string_to_keysym('Escape')),
+100679 INFO: Processing standard module hook 'hook-pythoncom.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+100994 INFO: Processing standard module hook 'hook-pywintypes.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+101381 INFO: Processing standard module hook 'hook-comtypes.client.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+C:\Users\√÷∏Ì«Â\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\pywinauto\keyboard.py:105: SyntaxWarning: invalid escape sequence '\;'
+  option only affects the behavior of keys matching [-=[]\;',./a-zA-Z0-9 ].  Note
+C:\Users\√÷∏Ì«Â\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\pywinauto\linux\keyboard.py:55: SyntaxWarning: invalid escape sequence '\e'
+  '\e': "Escape",
+104045 INFO: Processing pre-safe-import-module hook 'hook-win32com.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\_pyinstaller_hooks_contrib\\pre_safe_import_module'
+104234 INFO: Processing standard module hook 'hook-win32com.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+105635 INFO: Processing standard module hook 'hook-reportlab.lib.utils.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+105905 INFO: Processing standard module hook 'hook-reportlab.pdfbase._fontdata.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+110666 INFO: Processing standard module hook 'hook-xml.dom.domreg.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\PyInstaller\\hooks'
+110893 INFO: Processing standard module hook 'hook-openpyxl.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+117608 INFO: Analyzing hidden import 'google.generativeai'
+117609 ERROR: Hidden import 'google.generativeai' not found
+117609 INFO: Analyzing hidden import 'google.ai.generativelanguage'
+117760 INFO: Processing standard module hook 'hook-google.api_core.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+119410 INFO: Processing standard module hook 'hook-grpc.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+126082 INFO: Analyzing hidden import 'pdf2image'
+126084 ERROR: Hidden import 'pdf2image' not found
+126084 INFO: Processing module hooks (post-graph stage)...
+127734 WARNING: Hidden import "tzdata" not found!
+128697 INFO: Processing standard module hook 'hook-PIL.SpiderImagePlugin.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\PyInstaller\\hooks'
+129134 INFO: Processing standard module hook 'hook-_tkinter.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\PyInstaller\\hooks'
+129177 INFO: Performing binary vs. data reclassification (1229 entries)
+132630 INFO: Looking for ctypes DLLs
+133198 INFO: Analyzing run-time hooks ...
+133213 INFO: Including run-time hook 'pyi_rth_inspect.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\PyInstaller\\hooks\\rthooks'
+133228 INFO: Including run-time hook 'pyi_rth_pkgutil.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\PyInstaller\\hooks\\rthooks'
+133256 INFO: Including run-time hook 'pyi_rth_multiprocessing.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\PyInstaller\\hooks\\rthooks'
+133272 INFO: Including run-time hook 'pyi_rth_cryptography_openssl.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\_pyinstaller_hooks_contrib\\rthooks'
+133285 INFO: Including run-time hook 'pyi_rth_setuptools.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\PyInstaller\\hooks\\rthooks'
+133300 INFO: Including run-time hook 'pyi_rth__tkinter.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\PyInstaller\\hooks\\rthooks'
+133315 INFO: Including run-time hook 'pyi_rth_pywintypes.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\_pyinstaller_hooks_contrib\\rthooks'
+133329 INFO: Including run-time hook 'pyi_rth_pythoncom.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\_pyinstaller_hooks_contrib\\rthooks'
+133333 INFO: Including run-time hook 'pyi_rth_pyqt6.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\PyInstaller\\hooks\\rthooks'
+133348 INFO: Processing pre-find-module-path hook 'hook-_pyi_rth_utils.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\PyInstaller\\hooks\\pre_find_module_path'
+133373 INFO: Processing standard module hook 'hook-_pyi_rth_utils.py' from 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\PyInstaller\\hooks'
+133570 INFO: Creating base_library.zip...
+133608 INFO: Looking for dynamic libraries
+C:\Users\ÏµúÎ™ÖÌóå\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\pywinauto\__init__.py:80: UserWarning: Revert to STA COM threading mode
+  warnings.warn("Revert to STA COM threading mode", UserWarning)
+154659 INFO: Extra DLL search directories (AddDllDirectory): ['C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\PyQt6\\Qt6\\bin', 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\numpy.libs', 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\cv2\\../../x64/vc17/bin']
+154659 INFO: Extra DLL search directories (PATH): ['C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\cv2\\../../x64/vc17/bin', 'C:\\Users\\√÷∏Ì«Â\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\PyQt6\\Qt6\\bin']
+157978 INFO: Warnings written to C:\Users\√÷∏Ì«Â\Desktop\test\build\JARVIS_AI_Assistant\warn-JARVIS_AI_Assistant.txt
+158369 INFO: Graph cross-reference written to C:\Users\√÷∏Ì«Â\Desktop\test\build\JARVIS_AI_Assistant\xref-JARVIS_AI_Assistant.html
+158599 INFO: checking PYZ
+158643 INFO: Building because toc changed
+158643 INFO: Building PYZ (ZlibArchive) C:\Users\√÷∏Ì«Â\Desktop\test\build\JARVIS_AI_Assistant\PYZ-00.pyz
+161040 INFO: Building PYZ (ZlibArchive) C:\Users\√÷∏Ì«Â\Desktop\test\build\JARVIS_AI_Assistant\PYZ-00.pyz completed successfully.
+161179 INFO: checking PKG
+161206 INFO: Building because toc changed
+161206 INFO: Building PKG (CArchive) JARVIS_AI_Assistant.pkg
+161237 INFO: Disabling UPX for C:\Users\√÷∏Ì«Â\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\pypdfium2_raw\pdfium.dll due to CFG!
+161351 INFO: Disabling UPX for C:\Users\√÷∏Ì«Â\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\numpy.libs\msvcp140-263139962577ecda4cd9469ca360a746.dll due to CFG!
+162361 INFO: Disabling UPX for C:\Users\√÷∏Ì«Â\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\PyQt6\Qt6\plugins\imageformats\qgif.dll due to CFG!
+162361 INFO: Disabling UPX for C:\Users\√÷∏Ì«Â\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\PyQt6\Qt6\plugins\imageformats\qsvg.dll due to CFG!
+162371 INFO: Disabling UPX for C:\Users\√÷∏Ì«Â\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\PyQt6\Qt6\plugins\imageformats\qtga.dll due to CFG!
+162371 INFO: Disabling UPX for C:\Users\√÷∏Ì«Â\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\PyQt6\Qt6\plugins\imageformats\qwbmp.dll due to CFG!
+162376 INFO: Disabling UPX for C:\Users\√÷∏Ì«Â\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\PyQt6\Qt6\plugins\imageformats\qwebp.dll due to CFG!
+162376 INFO: Disabling UPX for C:\Users\√÷∏Ì«Â\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\PyQt6\Qt6\plugins\platforms\qwindows.dll due to CFG!
+162376 INFO: Disabling UPX for C:\Users\√÷∏Ì«Â\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\PyQt6\Qt6\plugins\imageformats\qicns.dll due to CFG!
+162381 INFO: Disabling UPX for C:\Users\√÷∏Ì«Â\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\PyQt6\Qt6\plugins\platforms\qoffscreen.dll due to CFG!
+162381 INFO: Disabling UPX for C:\Users\√÷∏Ì«Â\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\PyQt6\Qt6\plugins\imageformats\qpdf.dll due to CFG!
+162381 INFO: Disabling UPX for C:\Users\√÷∏Ì«Â\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\PyQt6\Qt6\plugins\iconengines\qsvgicon.dll due to CFG!
+162381 INFO: Disabling UPX for C:\Users\√÷∏Ì«Â\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\PyQt6\Qt6\plugins\imageformats\qtiff.dll due to CFG!
+162381 INFO: Disabling UPX for C:\Users\√÷∏Ì«Â\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\PyQt6\Qt6\plugins\generic\qtuiotouchplugin.dll due to CFG!
+162381 INFO: Disabling UPX for C:\Users\√÷∏Ì«Â\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\PyQt6\Qt6\plugins\imageformats\qico.dll due to CFG!
+162391 INFO: Disabling UPX for C:\Users\√÷∏Ì«Â\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\PyQt6\Qt6\plugins\imageformats\qjpeg.dll due to CFG!
+162391 INFO: Disabling UPX for C:\Users\√÷∏Ì«Â\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\PyQt6\Qt6\plugins\platforms\qminimal.dll due to CFG!
+162391 INFO: Disabling UPX for C:\Users\√÷∏Ì«Â\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\PyQt6\Qt6\plugins\styles\qmodernwindowsstyle.dll due to CFG!
+164631 INFO: Disabling UPX for C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\VCRUNTIME140.dll due to CFG!
+164633 INFO: Disabling UPX for C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\VCRUNTIME140_1.dll due to CFG!
+164635 INFO: Disabling UPX for C:\Users\√÷∏Ì«Â\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\PyQt6\Qt6\bin\Qt6Gui.dll due to CFG!
+164636 INFO: Disabling UPX for C:\Users\√÷∏Ì«Â\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\PyQt6\Qt6\bin\Qt6Core.dll due to CFG!
+164638 INFO: Disabling UPX for C:\Users\√÷∏Ì«Â\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\PyQt6\Qt6\bin\Qt6Svg.dll due to CFG!
+164640 INFO: Disabling UPX for C:\Users\√÷∏Ì«Â\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\PyQt6\Qt6\bin\MSVCP140.dll due to CFG!
+164641 INFO: Disabling UPX for C:\Users\√÷∏Ì«Â\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\PyQt6\Qt6\bin\Qt6Pdf.dll due to CFG!
+164644 INFO: Disabling UPX for C:\Users\√÷∏Ì«Â\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\PyQt6\Qt6\bin\Qt6Network.dll due to CFG!
+164646 INFO: Disabling UPX for C:\Users\√÷∏Ì«Â\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\PyQt6\Qt6\bin\Qt6Widgets.dll due to CFG!
+164833 INFO: Disabling UPX for C:\Users\√÷∏Ì«Â\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\Pythonwin\mfc140u.dll due to CFG!
+165440 INFO: Disabling UPX for C:\Users\√÷∏Ì«Â\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\PyQt6\Qt6\bin\MSVCP140_2.dll due to CFG!
+165441 INFO: Disabling UPX for C:\Users\√÷∏Ì«Â\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\PyQt6\Qt6\bin\MSVCP140_1.dll due to CFG!
+165444 INFO: Disabling UPX for C:\Users\√÷∏Ì«Â\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\PyQt6\Qt6\bin\VCRUNTIME140_1.dll due to CFG!
+165446 INFO: Disabling UPX for C:\Users\√÷∏Ì«Â\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\PyQt6\Qt6\bin\VCRUNTIME140.dll due to CFG!
+213009 INFO: Building PKG (CArchive) JARVIS_AI_Assistant.pkg completed successfully.
+213061 INFO: Bootloader C:\Users\√÷∏Ì«Â\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\PyInstaller\bootloader\Windows-64bit-intel\runw.exe
+213061 INFO: checking EXE
+213087 INFO: Rebuilding EXE-00.toc because JARVIS_AI_Assistant.exe missing
+213087 INFO: Building EXE from EXE-00.toc
+213087 INFO: Copying bootloader EXE to C:\Users\√÷∏Ì«Â\Desktop\test\dist\JARVIS_AI_Assistant.exe
+213212 INFO: Copying icon to EXE
+213276 INFO: Copying 0 resources to EXE
+213277 INFO: Embedding manifest in EXE
+213344 INFO: Appending PKG archive to EXE
+213576 INFO: Fixing EXE headers
+214980 INFO: Building EXE from EXE-00.toc completed successfully.
+215038 INFO: Build complete! The results are available in: C:\Users\√÷∏Ì«Â\Desktop\test\dist

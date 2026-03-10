@@ -229,9 +229,14 @@ if ($ok) {{
     # PyInstaller 임시 폴더(_MEI*) 정리
     # os._exit()로 강제 종료 시 _MEI 폴더가 불완전하게 남아
     # 새 EXE 실행 시 python312.dll 로드 실패를 유발할 수 있음
-    $tempDir = [System.IO.Path]::GetTempPath()
-    Get-ChildItem -Path $tempDir -Directory -Filter "_MEI*" -ErrorAction SilentlyContinue | ForEach-Object {{
-        try {{ Remove-Item $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }} catch {{}}
+    # runtime_tmpdir = C:\ProgramData\TRADIS_TMP (spec 설정)
+    $meiDirs = @('C:\ProgramData\TRADIS_TMP', [System.IO.Path]::GetTempPath())
+    foreach ($d in $meiDirs) {{
+        if (Test-Path $d) {{
+            Get-ChildItem -Path $d -Directory -Filter "_MEI*" -ErrorAction SilentlyContinue | ForEach-Object {{
+                try {{ Remove-Item $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }} catch {{}}
+            }}
+        }}
     }}
     Start-Sleep -Seconds 2
 
@@ -294,6 +299,7 @@ if errorlevel 1 (
     goto retry
 )
 echo   Cleaning up temp files...
+for /d %%D in ("C:\\ProgramData\\TRADIS_TMP\\_MEI*") do rd /s /q "%%D" 2>nul
 for /d %%D in ("%TEMP%\\_MEI*") do rd /s /q "%%D" 2>nul
 timeout /t 2 /nobreak >nul
 echo   Update complete! Restarting...

@@ -1,6 +1,8 @@
 import re
 import os
 
+from .constants import EXPENSE_SYNONYMS
+
 
 def validate_mapping_amounts(mapping, directory):
     """
@@ -31,7 +33,8 @@ def validate_mapping_amounts(mapping, directory):
         'sum_matched': False,
     }
 
-    fee_file_amount_used = False  # 수수료계산서 파일 금액 중복 합산 방지
+    _summed_files = set()          # 파일별 sum_files 중복 합산 방지
+    _used_bi_indices = {}          # {filename: set(idx)} - billing_item 사용 추적
 
     for item in mapping:
         label = item.get('label', '')
@@ -42,16 +45,18 @@ def validate_mapping_amounts(mapping, directory):
         if '비용: ' not in label:
             continue
 
-        # 수수료계산서 포함 항목은 파일이 없으므로 건너뜀 (합산에만 포함)
-        is_fee_included = '수수료계산서 포함' in label or '(추가)' in label
+        # "포함" 또는 "(추가)" 항목은 파일 없이 부모에 포함된 항목
+        is_fee_included = '포함' in label or '(추가)' in label
 
         item_amt = _parse_amount(raw_item_amt)
         result['sum_items'] += item_amt
 
-        if not filename or is_fee_included:
-            if is_fee_included:
-                # 수수료계산서 포함 항목은 검증 불필요 (같은 파일에 포함)
-                continue
+        if is_fee_included:
+            # [Bug 1 수정] 포함 항목: sum_items에만 합산
+            # sum_files에는 미포함 (부모 파일의 total_amount에 이미 포함됨)
+            continue
+
+        if not filename:
             # 파일 없는 항목은 불일치
             result['item_details'].append({
                 'label': label, 'item_amount': item_amt,
@@ -65,15 +70,80 @@ def validate_mapping_amounts(mapping, directory):
         file_amt = 0
         cached = gemini_ocr._get_cached_result(file_path)
         if cached:
-            file_amt = _parse_amount(cached.get('total_amount', 0))
+            billing_items = cached.get('billing_items', [])
+            item_name_from_label = label.replace('비용: ', '').split(' (')[0]
+            bi_matched = False
 
-        # 수수료계산서/추가 파일은 파일 금액을 1번만 합산
-        if not fee_file_amount_used or '수수료' not in label:
-            result['sum_files'] += file_amt
-            if '수수료' in label:
-                fee_file_amount_used = True
+            if billing_items:
+                search_kws = _build_search_kws(item_name_from_label)
+                used_indices = _used_bi_indices.setdefault(filename, set())
 
-        matched = (item_amt == file_amt) if item_amt > 0 and file_amt > 0 else True
+                # [Bug 4 수정] 1차: 정확 매칭 우선, 부분 매칭 폴백
+                exact_bi = None
+                partial_bi = None
+                exact_idx = None
+                partial_idx = None
+
+                for idx, bi in enumerate(billing_items):
+                    # [Bug 5 수정] 이미 사용된 billing_item 건너뛰기
+                    if idx in used_indices:
+                        continue
+                    bi_name = bi.get('name', '').upper().replace(' ', '')
+                    for kw in search_kws:
+                        if kw == bi_name:  # 정확 매칭
+                            exact_bi = bi
+                            exact_idx = idx
+                            break
+                        elif partial_bi is None and (kw in bi_name or bi_name in kw):
+                            partial_bi = bi
+                            partial_idx = idx
+                    if exact_bi:
+                        break
+
+                matched_bi = exact_bi or partial_bi
+                matched_idx = exact_idx if exact_bi else partial_idx
+
+                if matched_bi:
+                    file_amt = _parse_amount(matched_bi.get('amount', 0))
+                    bi_matched = True
+                    if matched_idx is not None:
+                        used_indices.add(matched_idx)
+
+                # 2차: 금액 일치 항목 탐색 (복수 항목, 키워드 매칭 실패 시)
+                if not bi_matched and len(billing_items) > 1:
+                    for idx, bi in enumerate(billing_items):
+                        if idx in used_indices:
+                            continue
+                        bi_amt = _parse_amount(bi.get('amount', 0))
+                        if bi_amt > 0 and bi_amt == item_amt:
+                            file_amt = bi_amt
+                            bi_matched = True
+                            used_indices.add(idx)
+                            break
+
+            # [Bug 2 수정] total_amount 폴백: 단일 항목이거나 billing_items 없을 때만
+            if not bi_matched:
+                if not billing_items or len(billing_items) == 1:
+                    file_amt = _parse_amount(cached.get('total_amount', 0))
+                # 복수 항목인데 매칭 실패 → file_amt = 0 유지 (불일치로 표시)
+
+        # [Bug 1 수정] sum_files: 파일당 1번만 합산 (파일 total_amount 사용)
+        if filename not in _summed_files:
+            if cached:
+                file_total = _parse_amount(cached.get('total_amount', 0))
+                result['sum_files'] += file_total if file_total > 0 else file_amt
+            else:
+                result['sum_files'] += file_amt
+            _summed_files.add(filename)
+
+        # [Bug 3 수정] 개별 항목 매칭 판정
+        if item_amt > 0 and file_amt > 0:
+            matched = (item_amt == file_amt)
+        elif item_amt == 0 and file_amt == 0:
+            matched = True  # 양쪽 다 0이면 검증 불필요
+        else:
+            matched = False  # 한쪽만 0이면 불일치 (OCR 실패 등)
+
         if not matched:
             result['item_all_matched'] = False
 
@@ -89,8 +159,48 @@ def validate_mapping_amounts(mapping, directory):
     return result
 
 
+# [Bug 6+7 수정] 음수, 소수점, 숫자 타입 올바르게 처리
 def _parse_amount(raw):
+    """금액을 정수로 변환 (음수, 소수점, 콤마 등 처리)"""
     try:
-        return int(re.sub(r'[^0-9]', '', str(raw)))
+        if isinstance(raw, (int, float)):
+            return round(raw)
+        s = str(raw).strip()
+        if not s:
+            return 0
+        # 음수 판정: '-' 접두사 또는 (금액) 형식
+        negative = s.startswith('-') or (s.startswith('(') and s.endswith(')'))
+        # 숫자와 소수점만 추출
+        s_clean = re.sub(r'[^\d.]', '', s)
+        if not s_clean:
+            return 0
+        result = round(float(s_clean))
+        return -result if negative else result
     except (ValueError, TypeError):
         return 0
+
+
+# [Bug 8 수정] 양방향 EXPENSE_SYNONYMS 검색
+def _build_search_kws(item_name):
+    """항목명에서 검색 키워드 생성 (양방향 EXPENSE_SYNONYMS 확장)"""
+    item_upper = item_name.upper().replace(" ", "")
+    kws = {item_upper}
+
+    for key, synonyms in EXPENSE_SYNONYMS.items():
+        key_upper = key.upper().replace(" ", "")
+        syn_uppers = [s.upper().replace(" ", "") for s in synonyms]
+
+        # 정방향: key가 항목명에 포함
+        if key_upper in item_upper or item_upper in key_upper:
+            kws.add(key_upper)
+            kws.update(syn_uppers)
+            continue
+
+        # 역방향: 동의어 중 하나가 항목명에 포함
+        for su in syn_uppers:
+            if su in item_upper or item_upper in su:
+                kws.add(key_upper)
+                kws.update(syn_uppers)
+                break
+
+    return list(kws)

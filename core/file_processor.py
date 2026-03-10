@@ -376,6 +376,29 @@ class AutoRenamer:
                     candidates.append(pdf)
             return candidates
 
+        # ── billing_items 맵 + 공급자 맵 구축 ──
+        file_billing_map = {}  # {filename: [{"name": ..., "amount": ...}, ...]}
+        file_supplier_map = {}  # {filename: supplier_name}
+        for pdf in allp:
+            fp = os.path.join(dr, pdf)
+            cached = gemini_ocr._get_cached_result(fp)
+            if cached:
+                bi = cached.get('billing_items', [])
+                if bi:
+                    file_billing_map[pdf] = bi
+                sn = cached.get('supplier_name', '')
+                if sn:
+                    file_supplier_map[pdf] = sn
+
+        def _get_comparable_amount(filename, item_search_kws):
+            """파일의 비교 금액 반환 (billing_items 우선, 없으면 total_amount)"""
+            if filename in file_billing_map:
+                for bi in file_billing_map[filename]:
+                    bi_name = bi.get('name', '').upper().replace(' ', '')
+                    if any(kw in bi_name or bi_name in kw for kw in item_search_kws):
+                        return _parse_item_amount(bi.get('amount', 0))
+            return _get_file_amount(filename)
+
         # ── 2-1단계: 금액 우선 1:1 매칭 ──
         fee_invoice_added = False
         matched_kws = []  # 매칭된 항목의 키워드 기록 (2-2단계용)
@@ -418,9 +441,9 @@ class AutoRenamer:
 
             if candidates:
                 if item_amt > 0:
-                    # 금액 일치하는 파일 우선 선택
+                    # 금액 일치하는 파일 우선 선택 (billing_items 개별 금액 우선 비교)
                     for c in candidates:
-                        if _get_file_amount(c) == item_amt:
+                        if _get_comparable_amount(c, search_kws) == item_amt:
                             picked = c
                             break
                 # 금액 매칭 실패 또는 금액 없음 → 첫 번째 후보
@@ -435,31 +458,88 @@ class AutoRenamer:
                 m.append({'label': f'비용: {item_name}', 'filename': '', 'item_amount': item_amount})
                 matched_kws.append(search_kws)
 
-        # ── 2-2단계: 남은 파일 추가 편입 ──
+        # ── 2-1.5단계: billing_items 기반 콘텐츠 매칭 ──
+        for idx, item in enumerate(m):
+            if item.get('filename') or '비용: ' not in item.get('label', ''):
+                continue
+            if '포함' in item['label'] or '(추가)' in item['label']:
+                continue
+
+            item_name = item['label'].replace('비용: ', '').split(' (')[0]
+            search_kws = _build_search_kws(item_name)
+            item_amt = _parse_item_amount(item.get('item_amount', 0))
+
+            for pdf, bi_list in file_billing_map.items():
+                matched_bi = False
+                for bi in bi_list:
+                    bi_name = bi.get('name', '').upper().replace(' ', '')
+                    if any(kw in bi_name or bi_name in kw for kw in search_kws):
+                        # 금액 비교
+                        bi_amt = _parse_item_amount(bi.get('amount', 0))
+                        if item_amt > 0 and bi_amt > 0 and item_amt != bi_amt:
+                            continue
+
+                        if pdf in af:
+                            # 이미 할당된 파일 → "(계산서 포함)" 라벨
+                            parent_label = next(
+                                (x['label'] for x in m if x.get('filename') == pdf), ''
+                            )
+                            parent_short = parent_label.replace('비용: ', '').split(' (')[0]
+                            m[idx] = {
+                                'label': f'비용: {item_name} ({parent_short}계산서 포함)',
+                                'filename': '', 'item_amount': item['item_amount']
+                            }
+                        else:
+                            # 미할당 파일 → 직접 할당
+                            m[idx]['filename'] = pdf
+                            af.append(pdf)
+                        matched_bi = True
+                        break
+                if matched_bi:
+                    break
+
+        # ── 2-2단계: 남은 파일 추가 편입 (공급자 우선) ──
         for pdf in allp:
             if pdf in af:
                 continue
             pdf_upper = pdf.upper().replace(" ", "")
+            pdf_supplier = file_supplier_map.get(pdf, '')
             absorbed = False
             for kws in matched_kws:
                 if any(kw in pdf_upper for kw in kws):
-                    # 이 파일과 키워드가 맞는 비용 항목 이름 찾기
-                    for item in m:
+                    # 키워드 매칭되는 비용 항목 후보 수집
+                    candidates = []
+                    for mi, item in enumerate(m):
                         if item.get('filename') and '비용: ' in item['label']:
                             label_kws = _build_search_kws(item['label'].split('비용: ')[-1].split(' (')[0])
                             if any(kw in pdf_upper for kw in label_kws):
-                                short_name = item['label'].split('비용: ')[-1].split(' (')[0]
-                                m.append({'label': f'비용: {short_name} (추가)', 'filename': pdf, 'item_amount': 0})
-                                af.append(pdf)
-                                absorbed = True
-                                break
+                                candidates.append((mi, item))
+
+                    if candidates:
+                        # 같은 공급자 파일 우선 선택
+                        picked = None
+                        if pdf_supplier:
+                            for ci, (mi, item) in enumerate(candidates):
+                                item_supplier = file_supplier_map.get(item['filename'], '')
+                                if item_supplier and item_supplier == pdf_supplier:
+                                    picked = (mi, item)
+                                    break
+                        # 공급자 매칭 실패 → 첫 번째 후보
+                        if not picked:
+                            picked = candidates[0]
+
+                        mi, item = picked
+                        short_name = item['label'].split('비용: ')[-1].split(' (')[0]
+                        m.insert(mi + 1, {'label': f'비용: {short_name} (추가)', 'filename': pdf, 'item_amount': 0})
+                        af.append(pdf)
+                        absorbed = True
                 if absorbed:
                     break
 
         # ── 3단계: 금액 기반 보정 매칭 (미분류 파일 포함) ──
         unmatched_items = [idx for idx, x in enumerate(m)
                           if x['filename'] == '' and '비용: ' in x['label']
-                          and '수수료계산서 포함' not in x['label'] and '(추가)' not in x['label']]
+                          and '포함' not in x['label'] and '(추가)' not in x['label']]
 
         if unmatched_items:
             uncl_files = [f for f in allp if f not in af]

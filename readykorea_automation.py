@@ -205,34 +205,37 @@ class ReadyKoreaAutomation:
         if not _lazy_import_pywinauto():
             self._update_status(AutomationStatus.ERROR, "pywinauto 패키지가 설치되지 않았습니다")
             return False
-        
+
         self._update_status(AutomationStatus.CONNECTING, "ReadyKorea 프로그램 검색 중...")
-        
+
         try:
-            Desktop = _pywinauto_modules['Desktop']
             Application = _pywinauto_modules['Application']
-            
-            # 실행 중인 ReadyKorea 찾기
-            desktop = Desktop(backend="uia")
-            windows = desktop.windows()
-            
-            readykorea_window = None
-            for w in windows:
-                try:
-                    title = w.window_text()
-                    if "레디코리아" in title or "ReadyKorea" in title or "READYKOREA" in title:
-                        readykorea_window = w
-                        break
-                except Exception:
-                    continue
-            
-            if not readykorea_window:
+
+            # win32gui로 ReadyKorea 창 찾기 (Desktop(backend="uia") 사용 금지)
+            # Desktop(backend="uia")는 모든 창의 접근성 트리에 접근하여
+            # Chrome/Edge 등에 심각한 메모리 누수를 유발하므로 win32gui로 대체
+            import win32gui
+
+            target_hwnd = None
+            def enum_callback(hwnd, _):
+                nonlocal target_hwnd
+                if target_hwnd:
+                    return
+                if not win32gui.IsWindowVisible(hwnd):
+                    return
+                title = win32gui.GetWindowText(hwnd)
+                if title and ("레디코리아" in title or "ReadyKorea" in title or "READYKOREA" in title):
+                    target_hwnd = hwnd
+
+            win32gui.EnumWindows(enum_callback, None)
+
+            if not target_hwnd:
                 self._update_status(AutomationStatus.ERROR, "ReadyKorea 프로그램을 찾을 수 없습니다")
                 return False
-            
-            # 연결
-            self.app = Application(backend="uia").connect(handle=readykorea_window.handle)
-            self.main_window = self.app.window(handle=readykorea_window.handle)
+
+            # 찾은 핸들로 직접 연결 (UIA 전체 스캔 없이 대상 창에만 접근)
+            self.app = Application(backend="uia").connect(handle=target_hwnd)
+            self.main_window = self.app.window(handle=target_hwnd)
             
             # 포커스
             self.main_window.set_focus()

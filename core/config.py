@@ -14,16 +14,37 @@ from google import genai
 SERVICE_NAME = "TRADIS_MH"
 
 def get_config_path():
-    """설정 파일 경로 반환 (루트 config.json)"""
+    """설정 파일 경로 반환 (data/config.json)"""
     if getattr(sys, 'frozen', False):
         base_path = os.path.dirname(sys.executable)
     else:
         base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-    return os.path.join(base_path, 'config.json')
+    data_dir = os.path.join(base_path, 'data')
+    os.makedirs(data_dir, exist_ok=True)
+    return os.path.join(data_dir, 'config.json')
+
+def _migrate_root_config():
+    """루트 config.json → data/config.json 마이그레이션"""
+    if getattr(sys, 'frozen', False):
+        base_path = os.path.dirname(sys.executable)
+    else:
+        base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    old_path = os.path.join(base_path, 'config.json')
+    new_path = get_config_path()
+
+    if os.path.exists(old_path) and not os.path.exists(new_path):
+        try:
+            import shutil
+            shutil.move(old_path, new_path)
+            print(f"[설정] config.json 마이그레이션: {old_path} → {new_path}")
+        except OSError as e:
+            print(f"[설정] 마이그레이션 실패: {e}")
 
 def load_config():
     """설정 파일 로드"""
+    _migrate_root_config()
     try:
         cp = get_config_path()
         if os.path.exists(cp):

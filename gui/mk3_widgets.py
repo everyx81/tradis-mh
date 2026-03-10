@@ -21,16 +21,13 @@ from .widgets import NeonButton
 
 class HUDStyleCalendar(QCalendarWidget):
     """JARVIS HUD 스타일 테마가 적용되고 일정이 있는 날짜에 뱃지를 그려주는 커스텀 달력"""
-    scheduleDropped = pyqtSignal(QDate, str)
-    
     CELL_WIDTH = 78  # 둥근 직사각형 가로 크기 (72와 83의 중간)
     CELL_HEIGHT = 62 # 둥근 직사각형 세로 크기 (57과 66의 중간)
-    
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.event_dates = set()  # 일정이 있는 QDate 집합
         self._cell_rects = {}
-        self.setAcceptDrops(True)
         
         # 1. 왼쪽의 주 번호(Week number) 열 제거
         self.setVerticalHeaderFormat(QCalendarWidget.VerticalHeaderFormat.NoVerticalHeader)
@@ -175,28 +172,6 @@ class HUDStyleCalendar(QCalendarWidget):
         """일정이 존재하는 날짜들의 set(QDate)을 받아 갱신하고 다시 그림"""
         self.event_dates = dates_set
         self.updateCells()
-        
-    def dragEnterEvent(self, event):
-        if event.mimeData().hasText():
-            event.acceptProposedAction()
-            
-    def dragMoveEvent(self, event):
-        if event.mimeData().hasText():
-            event.acceptProposedAction()
-
-    def dropEvent(self, event):
-        if event.mimeData().hasText():
-            from PyQt6.QtWidgets import QTableView
-            text = event.mimeData().text()
-            table = self.findChild(QTableView)
-            if table:
-                viewport_pos = table.viewport().mapFrom(self, event.position().toPoint())
-                for date, rect in self._cell_rects.items():
-                    if rect.contains(viewport_pos):
-                        self.scheduleDropped.emit(date, text)
-                        event.acceptProposedAction()
-                        return
-        event.ignore()
         
     def paintCell(self, painter, rect, date):
         from PyQt6.QtCore import Qt, QRect, QPoint, QDate
@@ -547,14 +522,39 @@ class ScheduleCardWidget(QFrame):
         alert_str = f"알림 {len(alerts)}개" if (alerts and alerts != [0]) else ""
         repeat = self.schedule.get("repeat", "None")
         repeat_str = "" if repeat == "None" else "반복됨"
-        
+
+        # 스누즈 상태 표시
+        snooze_str = ""
+        snooze_until = self.schedule.get("snooze_until")
+        if snooze_until and not is_completed:
+            try:
+                snooze_dt = datetime.fromisoformat(snooze_until)
+                snooze_str = f"스누즈 {snooze_dt.strftime('%H:%M')}"
+            except ValueError:
+                pass
+
+        # 기한 경과 확인
+        is_overdue = False
+        if dt_str and not is_completed:
+            try:
+                if datetime.fromisoformat(dt_str) < datetime.now():
+                    is_overdue = True
+            except ValueError:
+                pass
+
         # 디테일 라벨 조합
-        parts = [p for p in [time_str, alert_str, repeat_str] if p]
+        parts = [p for p in [time_str, snooze_str, alert_str, repeat_str] if p]
         desc = " · ".join(parts)
-        
+
         self.lbl_desc = QLabel(desc)
-        # 서브 텍스트 크기 증가 (9pt -> 10pt), 완료 시 대비되는 색상도 밝게
-        desc_color = "#8e8e93" if not is_completed else "#6e6e73"
+        if is_overdue:
+            desc_color = "#ff6b6b"  # 기한 경과: 빨간색
+        elif snooze_str:
+            desc_color = "#ffa500"  # 스누즈 중: 주황색
+        elif is_completed:
+            desc_color = "#6e6e73"
+        else:
+            desc_color = "#8e8e93"
         self.lbl_desc.setStyleSheet(f"font-size: 10pt; color: {desc_color}; font-family: -apple-system;")
         text_layout.addWidget(self.lbl_desc)
         
@@ -605,7 +605,12 @@ class MK3ScheduleOnlyWidget(QWidget):
         self.schedule_manager = schedule_manager if schedule_manager else LocalScheduleManager()
         self.notifier = notifier if notifier else WindowsNotifier()
         self.init_ui()
-        
+
+        # 스누즈/완료/반복 등 데이터 변경 시 UI 자동 갱신 (스레드 안전)
+        self.schedule_manager.register_ui_callback(
+            lambda: QTimer.singleShot(0, self.refresh_schedules)
+        )
+
         self.schedule_manager.start_reminder_loop(1)
     
     def init_ui(self):
@@ -692,7 +697,6 @@ class MK3ScheduleOnlyWidget(QWidget):
         self.calendar = HUDStyleCalendar()
         self.calendar.clicked.connect(self._on_calendar_clicked)
         self.calendar.activated.connect(self._on_calendar_activated) # 더블클릭/엔터
-        self.calendar.scheduleDropped.connect(self._on_schedule_dropped) # 드래그 앤 드롭 연결
         cal_container.addWidget(self.calendar)
         
         # 좌측 레이아웃(달력)에 컨테이너 배치 (위쪽으로 밀착)
@@ -767,29 +771,6 @@ class MK3ScheduleOnlyWidget(QWidget):
         
         self.refresh_schedules()
     
-    def _on_schedule_dropped(self, date, text):
-        from datetime import datetime
-        
-        # 캘린더에 드롭된 할 일은 기본적으로 오전 10시 일정으로 할당 (후에 타임 블로킹 고도화 가능)
-        schedule_dt = datetime(date.year(), date.month(), date.day(), 10, 0, 0)
-        
-        data = {
-            "title": text,
-            "datetime": schedule_dt.strftime("%Y-%m-%d %H:%M:%S"),
-            "repeat": "none",
-            "alerts": [0],
-            "note": "",
-            "is_completed": False
-        }
-        self.schedule_manager.add_schedule(data)
-        
-        # 토스트 메시지 알림 및 일정 갱신
-        self.notifier.show_toast("일정 배정", f"'{text}' 항목이 {date.month()}월 {date.day()}일에 추가되었습니다.", duration=2000)
-        self.refresh_schedules()
-        
-        # 드롭한 날짜를 현재 필터로 지정하여 바로 시각적 피드백 제공
-        self._on_calendar_clicked(date)
-        
     def refresh_schedules(self):
         self.schedule_list.clear()
         

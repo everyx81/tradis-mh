@@ -9,6 +9,12 @@ import os
 os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
 os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
 os.environ["QT_LOGGING_RULES"] = "qt.qpa.window=false"
+
+# Chrome/Edge 메모리 누수 방지: PyQt의 Windows UI Automation 접근성 비활성화
+# PyQt6 앱이 실행되면 Windows가 UI Automation 제공자로 등록하고,
+# 같은 세션의 Chrome이 접근성 이벤트를 수신하여 내부 Accessibility Tree가
+# 지속적으로 확장되며 메모리가 증가하는 현상을 차단합니다.
+os.environ["QT_ACCESSIBILITY"] = "0"
 import json
 import threading
 import datetime
@@ -28,6 +34,7 @@ from PyQt6.QtGui import QPixmap, QFont
 # Internal Modules (Logic)
 from auto_rename import AutoRenamer, check_single_instance, set_api_key, Archiver
 from calendar_manager import LocalScheduleManager, WindowsNotifier
+from core.config import get_config_path
 
 # Export Automation Modules
 from export_mail_monitor import HanbiroMailMonitor
@@ -58,6 +65,8 @@ class JarvisGUI(QMainWindow):
     export_update_signal = pyqtSignal(object)  # 수출 자동화 UI 업데이트용
     marking_request_signal = pyqtSignal(str, str, str)  # 수출신고필증 마킹 요청 (company, invoice_id, filepath)
     update_check_done = pyqtSignal(dict)  # 업데이트 확인 완료 시그널
+    download_progress_signal = pyqtSignal(int)  # 다운로드 진행률 시그널
+    download_complete_signal = pyqtSignal(object)  # 다운로드 완료 시그널 (path or None)
 
     def __init__(self):
         super().__init__()
@@ -144,6 +153,8 @@ class JarvisGUI(QMainWindow):
 
         # [NEW] 앱 시작 시 자동 업데이트 확인 (3초 후, 비동기)
         self.update_check_done.connect(self._on_update_check_result)
+        self.download_progress_signal.connect(self._update_download_progress)
+        self.download_complete_signal.connect(self._on_download_complete)
         QTimer.singleShot(3000, self._check_update_async)
 
     
@@ -151,7 +162,7 @@ class JarvisGUI(QMainWindow):
         """기존 config.json의 민감정보를 Windows Credential Manager로 이동 (최초 1회)"""
         try:
             import keyring
-            cfg_path = os.path.join(get_run_dir(), "config.json")
+            cfg_path = get_config_path()
             if not os.path.exists(cfg_path):
                 return
             with open(cfg_path, 'r', encoding='utf-8') as f:
@@ -186,7 +197,7 @@ class JarvisGUI(QMainWindow):
     def _load_license_tier(self):
         """config.json에서 라이선스 등급 로드"""
         try:
-            cfg_path = os.path.join(get_run_dir(), "config.json")
+            cfg_path = get_config_path()
             if os.path.exists(cfg_path):
                 with open(cfg_path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
@@ -553,7 +564,7 @@ class JarvisGUI(QMainWindow):
             ]
         }
         try:
-            cfg_path = os.path.join(get_run_dir(), "config.json")
+            cfg_path = get_config_path()
             if os.path.exists(cfg_path):
                 with open(cfg_path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
@@ -566,7 +577,7 @@ class JarvisGUI(QMainWindow):
     def _save_hotkey_settings(self):
         """단축키 설정 저장"""
         try:
-            cfg_path = os.path.join(get_run_dir(), "config.json")
+            cfg_path = get_config_path()
             data = {}
             if os.path.exists(cfg_path):
                 with open(cfg_path, 'r', encoding='utf-8') as f:
@@ -1156,8 +1167,8 @@ class JarvisGUI(QMainWindow):
         layout.addSpacing(10)
         
         # 초기 API 상태 확인
-        from auto_rename import api_key
-        self.update_api_status(bool(api_key))
+        from core.config import get_api_key
+        self.update_api_status(bool(get_api_key()))
         
         # Monitoring
         layout.addWidget(QLabel("MONITORING"))
@@ -1295,8 +1306,9 @@ class JarvisGUI(QMainWindow):
                 docs = data.get('docs', {})
                 has_statement = '자금정산서' in docs or '정산서' in docs
                 is_export = any('수출신고필증' in v for v in docs.values())
-                if not has_statement and not is_export:
-                    self.emit_log(f"[건너뜀] {text_id}: 자금정산서/수출신고필증 없음")
+                is_import = any('수입신고필증' in v for v in docs.values())
+                if not has_statement and not is_export and not is_import:
+                    self.emit_log(f"[건너뜀] {text_id}: 자금정산서/신고필증 없음")
                     continue
                 try:
                     card = GroupCard(self, self.renamer, directory, text_id, data, unclassified)
@@ -1316,6 +1328,8 @@ class JarvisGUI(QMainWindow):
         self.emit_log("[상태] 병합 완료. 파일 이동 리스트를 갱신합니다.")
         if hasattr(self, 'file_manager'):
             self.file_manager.refresh_targets()
+        # 병합/폴더 정리 후 카드 + 미분류 목록 재스캔
+        self._debounced_refresh()
 
     def _debounced_refresh(self):
         # 불필요한 반복 로그 제거 (상태 갱신 시마다 로그가 찍혀 리소스 낭비)
@@ -1422,8 +1436,8 @@ class JarvisGUI(QMainWindow):
             self.run_intelligent_merge()
 
     def start_monitoring(self):
-        from auto_rename import api_key
-        if not api_key:
+        from core.config import get_api_key
+        if not get_api_key():
             QMessageBox.critical(self, "API 키 누락", "모니터링을 사용하려면 API 키가 필요합니다.")
             return
         path = self.line_path.text()
@@ -1453,8 +1467,8 @@ class JarvisGUI(QMainWindow):
 
     def run_intelligent_merge(self):
         if hasattr(self, 'is_analyzing') and self.is_analyzing: return
-        from auto_rename import api_key
-        if not api_key:
+        from core.config import get_api_key
+        if not get_api_key():
             QMessageBox.critical(self, "API 키 누락", "API 키가 필요합니다.")
             return
         path = self.line_path.text()
@@ -1479,7 +1493,7 @@ class JarvisGUI(QMainWindow):
         threading.Thread(target=_run_wrapper, daemon=True).start()
 
     def load_settings(self):
-        cfg = os.path.join(get_run_dir(), "config.json")
+        cfg = get_config_path()
         if os.path.exists(cfg):
             try:
                 with open(cfg, 'r', encoding='utf-8') as f: data = json.load(f)
@@ -1511,7 +1525,7 @@ class JarvisGUI(QMainWindow):
             except Exception as e: print(f"Settings Load Error: {e}")
 
     def save_settings(self):
-        cfg = os.path.join(get_run_dir(), "config.json")
+        cfg = get_config_path()
         try:
             if os.path.exists(cfg):
                 with open(cfg, 'r', encoding='utf-8') as f: data = json.load(f)
@@ -1780,7 +1794,7 @@ class JarvisGUI(QMainWindow):
         
         # 2. config에서 한비로 설정 로드
         try:
-            config_path = os.path.join(get_run_dir(), 'config.json')
+            config_path = get_config_path()
             with open(config_path, 'r', encoding='utf-8') as f:
                 config = json.load(f)
             
@@ -2031,7 +2045,7 @@ class JarvisGUI(QMainWindow):
     def _save_license_tier(self, tier):
         """config.json에 라이선스 등급 저장"""
         try:
-            cfg = os.path.join(get_run_dir(), "config.json")
+            cfg = get_config_path()
             if os.path.exists(cfg):
                 with open(cfg, 'r', encoding='utf-8') as f:
                     data = json.load(f)
@@ -2071,40 +2085,126 @@ class JarvisGUI(QMainWindow):
         self._start_download(download_url, new_ver)
 
     def _start_download(self, url, new_ver):
-        """업데이트 다운로드 시작 (진행 다이얼로그)"""
-        from PyQt6.QtWidgets import QProgressDialog
+        """업데이트 다운로드 시작 (커스텀 진행 다이얼로그)"""
+        from PyQt6.QtWidgets import QProgressBar, QGraphicsDropShadowEffect
         from PyQt6.QtCore import Qt
 
-        self._update_progress = QProgressDialog(
-            f"TRADIS MH v{new_ver} 다운로드 중...", "취소", 0, 100, self
-        )
-        self._update_progress.setWindowTitle("업데이트")
-        self._update_progress.setWindowModality(Qt.WindowModality.WindowModal)
-        self._update_progress.setMinimumWidth(350)
-        self._update_progress.setAutoClose(False)
-        self._update_progress.show()
+        dlg = QDialog(self)
+        dlg.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        dlg.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        dlg.setMinimumWidth(380)
+
+        container = QWidget(dlg)
+        container.setObjectName("update_dlg")
+        container.setStyleSheet("""
+            #update_dlg {
+                background-color: rgba(45, 50, 60, 230);
+                border: 1px solid rgba(100, 110, 120, 0.5);
+                border-radius: 20px;
+            }
+        """)
+        shadow = QGraphicsDropShadowEffect(dlg)
+        shadow.setBlurRadius(30)
+        shadow.setXOffset(0)
+        shadow.setYOffset(5)
+        shadow.setColor(Qt.GlobalColor.black)
+        container.setGraphicsEffect(shadow)
+
+        outer = QVBoxLayout(dlg)
+        outer.setContentsMargins(10, 10, 10, 10)
+        outer.addWidget(container)
+
+        inner = QVBoxLayout(container)
+        inner.setContentsMargins(24, 28, 24, 20)
+        inner.setSpacing(12)
+
+        title_row = QHBoxLayout()
+        title_row.setContentsMargins(0, 0, 0, 0)
+        lbl_title = QLabel("업데이트")
+        lbl_title.setFont(QFont("Segoe UI", 14, QFont.Weight.Bold))
+        lbl_title.setStyleSheet("color: #ffffff; background: transparent;")
+        title_row.addStretch()
+        title_row.addWidget(lbl_title)
+        title_row.addStretch()
+
+        btn_close = QPushButton("✕")
+        btn_close.setFixedSize(28, 28)
+        btn_close.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_close.setStyleSheet("""
+            QPushButton {
+                background: transparent; border: none;
+                color: rgba(255,255,255,0.5); font-size: 14px;
+            }
+            QPushButton:hover { color: #ff6b6b; }
+        """)
+        btn_close.clicked.connect(lambda: self._cancel_update())
+        title_row.addWidget(btn_close)
+        inner.addLayout(title_row)
+
+        lbl_msg = QLabel(f"TRADIS MH v{new_ver} 다운로드 중...")
+        lbl_msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl_msg.setFont(QFont("Segoe UI", 10))
+        lbl_msg.setStyleSheet("color: rgba(255,255,255,0.7); background: transparent;")
+        inner.addWidget(lbl_msg)
+
+        progress = QProgressBar()
+        progress.setRange(0, 100)
+        progress.setValue(0)
+        progress.setFixedHeight(8)
+        progress.setTextVisible(False)
+        progress.setStyleSheet("""
+            QProgressBar {
+                background-color: rgba(30, 35, 45, 200);
+                border: 1px solid rgba(100, 110, 120, 0.5);
+                border-radius: 4px;
+            }
+            QProgressBar::chunk {
+                background-color: #00d4ff;
+                border-radius: 3px;
+            }
+        """)
+        inner.addWidget(progress)
+
+        self._update_progress = dlg
+        self._update_progress_bar = progress
+        dlg.setWindowModality(Qt.WindowModality.WindowModal)
+        dlg.show()
 
         self._download_url = url
         self._new_ver = new_ver
+        self._update_cancelled = False
 
         def _do_download():
             def on_progress(downloaded, total):
+                if self._update_cancelled:
+                    raise Exception("취소됨")
                 if total > 0:
                     pct = int(downloaded * 100 / total)
-                    # 메인 스레드에서 UI 업데이트
-                    QTimer.singleShot(0, lambda p=pct: self._update_download_progress(p))
+                    self.download_progress_signal.emit(pct)
 
-            path = download_update(url, progress_callback=on_progress)
-            QTimer.singleShot(0, lambda: self._on_download_complete(path))
+            try:
+                path = download_update(url, progress_callback=on_progress)
+            except Exception as e:
+                print(f"[업데이트 다운로드 예외] {e}")
+                path = None
+            if not self._update_cancelled:
+                self.download_complete_signal.emit(path)
 
         threading.Thread(target=_do_download, daemon=True).start()
 
+    def _cancel_update(self):
+        """업데이트 다운로드 취소"""
+        self._update_cancelled = True
+        if hasattr(self, '_update_progress') and self._update_progress:
+            self._update_progress.close()
+            self._update_progress = None
+            self._update_progress_bar = None
+        self.emit_log("[업데이트] 다운로드가 취소되었습니다.")
+
     def _update_download_progress(self, pct):
         """다운로드 진행률 업데이트"""
-        if hasattr(self, '_update_progress') and self._update_progress:
-            if self._update_progress.wasCanceled():
-                return
-            self._update_progress.setValue(pct)
+        if hasattr(self, '_update_progress_bar') and self._update_progress_bar:
+            self._update_progress_bar.setValue(pct)
 
     def _on_download_complete(self, tmp_path):
         """다운로드 완료 처리"""
@@ -2117,11 +2217,11 @@ class JarvisGUI(QMainWindow):
             JarvisMessageBox.warning(self, "업데이트 실패", "다운로드에 실패했습니다.\n다음에 다시 시도해주세요.")
             return
 
-        self.emit_log(f"[업데이트] v{self._new_ver} 다운로드 완료. 재시작합니다...")
+        self.emit_log(f"[업데이트] v{self._new_ver} 다운로드 완료. 업데이트를 설치합니다...")
 
         if apply_update(tmp_path):
-            # EXE 교체 bat가 시작됨 → 현재 앱 종료
-            QApplication.quit()
+            # PowerShell 업데이트 창이 표시될 시간을 주고 종료
+            QTimer.singleShot(800, lambda: (QApplication.quit(), os._exit(0)))
         else:
             from gui.dialogs import JarvisMessageBox
             JarvisMessageBox.warning(self, "업데이트", "개발 모드에서는 자동 업데이트가 지원되지 않습니다.")

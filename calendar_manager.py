@@ -68,7 +68,8 @@ class LocalScheduleManager:
         self._reminder_thread = None
         self._stop_reminder = threading.Event()
         self._data_changed = threading.Event() # [NEW] 데이터 변경 감지용 이벤트
-        
+        self._ui_callbacks = []  # UI 갱신 콜백 리스트
+
         # 데이터 파일 초기화
         self._ensure_data_file()
     
@@ -124,6 +125,18 @@ class LocalScheduleManager:
     def _trigger_update(self):
         """데이터 변경 시 대기 중인 스레드를 깨움"""
         self._data_changed.set()
+
+    def register_ui_callback(self, callback):
+        """UI 갱신 콜백 등록 (스누즈/완료/반복 등 데이터 변경 시 호출됨)"""
+        self._ui_callbacks.append(callback)
+
+    def _notify_ui(self):
+        """등록된 UI 콜백 호출"""
+        for cb in self._ui_callbacks:
+            try:
+                cb()
+            except Exception as e:
+                print(f"[UI callback error] {e}")
     
     # ========== 일정 관리 ==========
     
@@ -180,6 +193,7 @@ class LocalScheduleManager:
                             schedule[key] = value
                 if self._save_data(data):
                     self._trigger_update()
+                    self._notify_ui()
                 return schedule
         return None
     
@@ -207,9 +221,10 @@ class LocalScheduleManager:
                 now = datetime.now()
                 new_snooze = now + timedelta(minutes=minutes)
                 schedule["snooze_until"] = new_snooze.isoformat()
-                
+
                 if self._save_data(data):
                     self._trigger_update()
+                    self._notify_ui()
                 return True
         return False
     
@@ -374,19 +389,28 @@ class LocalScheduleManager:
                         schedule["reminded_alerts"] = []
                         schedule["snooze_until"] = None
                         is_modified = True
-                        
-                        self.notifier.show_toast(
-                            "⏰ 다음 일정 반복 예약됨",
-                            f"📅 {next_dt.strftime('%m/%d')} {next_dt.strftime('%H:%M')}",
-                            duration=5
-                        )
+
+                        try:
+                            from gui.jarvis_toast import show_custom_toast
+                            show_custom_toast(
+                                title="⏰ 다음 일정 반복 예약됨",
+                                message=f"📅 {title}\n{next_dt.strftime('%m/%d')} {next_dt.strftime('%H:%M')}",
+                                duration=5
+                            )
+                        except Exception:
+                            self.notifier.show_toast(
+                                "⏰ 다음 일정 반복 예약됨",
+                                f"📅 {next_dt.strftime('%m/%d')} {next_dt.strftime('%H:%M')}",
+                                duration=5
+                            )
                         
             except Exception as e:
                 print(f"[알림 확인 오류] {e}")
                 
         if is_modified:
             self._save_data(data)
-            
+            self._notify_ui()
+
         return triggered
 
     def _get_next_reminder_time(self) -> Optional[datetime]:

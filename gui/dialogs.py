@@ -18,6 +18,7 @@ from PyQt6.QtGui import QPixmap, QImage, QCursor
 
 from .widgets import GlassFrame, NeonButton
 from .utils import resource_path, generate_pdf_thumbnail
+from core.config import get_config_path
 
 
 class IntroWindow(QWidget):
@@ -196,18 +197,20 @@ class GroupCard(GlassFrame):
         docs = self.data['docs']
         has_statement = "자금정산서" in docs or "정산서" in docs
         is_export_only = not has_statement and any('수출신고필증' in v for v in docs.values())
+        is_import_no_settlement = not has_statement and not is_export_only and any('수입신고필증' in v for v in docs.values())
         self.is_export_only = is_export_only
-        
-        if is_export_only:
+        self.is_archive_only = is_export_only or is_import_no_settlement
+
+        if self.is_archive_only:
             btn_text = "폴더 정리"
         elif has_statement:
             btn_text = "AI ANALYZE"
         else:
             btn_text = "MATCH"
-        
+
         self.btn_toggle = NeonButton(btn_text, color="cyan")
         self.btn_toggle.setFixedSize(100, 30)
-        if is_export_only:
+        if self.is_archive_only:
             self.btn_toggle.clicked.connect(self._archive_export_only)
         else:
             self.btn_toggle.clicked.connect(self.start_analysis)
@@ -223,6 +226,9 @@ class GroupCard(GlassFrame):
         
         if is_export_only:
             self.lbl_checklist.setText("✅ 수출신고필증 (정산서 없음 → 바로 폴더 정리)")
+        elif is_import_no_settlement:
+            doc_list = "\n".join(f"  ✅ {v}" for v in docs.values())
+            self.lbl_checklist.setText(f"수입신고필증 (정산서 없음 → 바로 폴더 정리)\n{doc_list}")
         elif has_statement:
             self._update_checklist_basic()
         else:
@@ -370,6 +376,20 @@ class GroupCard(GlassFrame):
                                 found = True
                                 used_files.append(v)
                                 break
+
+                        # billing_items 기반 콘텐츠 매칭 (파일명 키워드 실패 시)
+                        if not found:
+                            for v in docs.values():
+                                fp = os.path.join(self.directory, v)
+                                f_cached = gemini_ocr._get_cached_result(fp)
+                                if f_cached:
+                                    for bi in f_cached.get('billing_items', []):
+                                        bi_upper = bi.get('name', '').upper().replace(' ', '')
+                                        if any(kw in bi_upper or bi_upper in kw for kw in search_kws):
+                                            found = True
+                                            break
+                                if found:
+                                    break
 
                         # 금액 기반 보정 매칭 (위에서 못 찾은 경우)
                         if not found:
@@ -821,14 +841,21 @@ class GroupCard(GlassFrame):
         popup.exec()
         
     def _archive_export_only(self):
-        """정산서 없는 수출건: 수출신고필증만 아카이빙 + 관련 파일 수집"""
+        """정산서 없는 수출/수입건: 신고필증 아카이빙 + 관련 파일 수집"""
         docs = self.data['docs']
-        export_files = [v for v in docs.values()]
-        if not export_files:
+        archive_files = [v for v in docs.values()]
+        if not archive_files:
             return
 
         parent = self.parent_widget
-        output_name = f"{self.data['company']}({self.text_id})수출신고필증.pdf"
+        # 수입/수출 자동 구분
+        if any('수입신고필증' in v for v in docs.values()):
+            doc_label = "수입신고필증"
+            log_prefix = "수입"
+        else:
+            doc_label = "수출신고필증"
+            log_prefix = "수출"
+        output_name = f"{self.data['company']}({self.text_id}){doc_label}.pdf"
         marked = list(self.marked_files)  # 마킹된 파일 복사
 
         # 마킹 파일 경로 재검증
@@ -860,12 +887,12 @@ class GroupCard(GlassFrame):
 
         def run_archive():
             export_docs_root = getattr(parent.archiver, 'export_docs_root', '') if hasattr(parent, 'archiver') else ''
-            self.renamer.execute_merge_task(self.directory, output_name, export_files,
+            self.renamer.execute_merge_task(self.directory, output_name, archive_files,
                                            export_docs_root=export_docs_root, marked_files=marked)
             parent.merge_complete_signal.emit()
 
         threading.Thread(target=run_archive, daemon=True).start()
-        parent.emit_log(f"[수출] {self.text_id} 폴더 정리 + 관련 파일 수집 중... (마킹 {len(marked)}개)")
+        parent.emit_log(f"[{log_prefix}] {self.text_id} 폴더 정리 + 관련 파일 수집 중... (마킹 {len(marked)}개)")
         # 마킹 데이터 정리
         if hasattr(parent, 'marked_data') and self.text_id in parent.marked_data:
             del parent.marked_data[self.text_id]
@@ -1585,7 +1612,7 @@ class SendMailDialog(QDialog):
         import json
         from .utils import get_run_dir
         
-        config_path = os.path.join(get_run_dir(), 'config.json')
+        config_path = get_config_path()
         try:
             if os.path.exists(config_path):
                 with open(config_path, 'r', encoding='utf-8') as f:

@@ -11,12 +11,11 @@ from PyQt6.QtGui import QFont, QColor, QPixmap
 
 class JarvisToast(QWidget):
     """JARVIS 커스텀 토스트 알림 (한비로 스타일)"""
-    
+
     _active_toasts = []
-    
-    
-    
-    def __init__(self, title: str, message: str, duration: int = 10, position: str = "bottom-center", 
+    MAX_TOASTS = 5  # 화면에 동시 표시 가능한 최대 토스트 수
+
+    def __init__(self, title: str, message: str, duration: int = 10, position: str = "bottom-center",
                  is_sticky: bool = False, snooze_callback=None, complete_callback=None, parent=None):
         super().__init__(parent)
         self.title_text = title
@@ -26,7 +25,8 @@ class JarvisToast(QWidget):
         self.is_sticky = is_sticky
         self.snooze_callback = snooze_callback
         self.complete_callback = complete_callback
-        
+        self._closing = False
+
         self.init_ui()
         self.setup_animation()
     
@@ -204,7 +204,7 @@ class JarvisToast(QWidget):
         self.close_toast()
         
     def _on_complete_clicked(self):
-        if hasattr(self, 'complete_callback') and self.complete_callback:
+        if self.complete_callback:
             try:
                 self.complete_callback()
             except Exception as e:
@@ -223,52 +223,80 @@ class JarvisToast(QWidget):
         self.fade_out_anim.finished.connect(self._on_fade_finished)
     
     def show_toast(self):
+        # 최대 개수 초과 시 가장 오래된 토스트 제거
+        while len(JarvisToast._active_toasts) >= self.MAX_TOASTS:
+            oldest = JarvisToast._active_toasts[0]
+            oldest.close_toast()
+
         screen = QApplication.primaryScreen().availableGeometry()
-        
+
         y_offset = 10
         for toast in JarvisToast._active_toasts:
             if toast.isVisible():
                 y_offset += toast.height() + 10
-        
+
         if self.position == "bottom-center":
-            # 중앙 하단 좌표 계산
             start_x = (screen.width() - self.width()) // 2 + screen.x()
             end_x = start_x
-            
-            # 아래에서 위로 올라오는 효과
             start_y = screen.bottom() + 10
             end_y = screen.bottom() - self.height() - y_offset
-            
-        else: # Default: bottom-right
+        else:
             start_x = screen.right() + 10
             end_x = screen.right() - self.width() - 10
             start_y = screen.bottom() - self.height() - y_offset
-            end_y = start_y  # Y축 변화 없음 (옆에서 나옴)
-        
-        self.move(int(start_x), int(start_y) if self.position != "bottom-center" else int(end_y))
+            end_y = start_y
+
+        # 초기 위치를 화면 밖(시작점)으로 설정하여 깜빡임 방지
+        self.move(int(start_x), int(start_y))
         self.show()
-        
+
         JarvisToast._active_toasts.append(self)
-        
+
         self.slide_in_anim.setStartValue(QPoint(int(start_x), int(start_y)))
         self.slide_in_anim.setEndValue(QPoint(int(end_x), int(end_y)))
         self.slide_in_anim.start()
-        
-        # Sticky 모드가 아닐 때만 자동 소멸 타이머 실행
+
         if not self.is_sticky:
             QTimer.singleShot(self.duration * 1000, self.close_toast)
     
     def close_toast(self):
+        if self._closing:
+            return
+        self._closing = True
         if self.fade_out_anim.state() != QPropertyAnimation.State.Running:
             self.fade_out_anim.start()
-    
+
     def _on_fade_finished(self):
         if self in JarvisToast._active_toasts:
             JarvisToast._active_toasts.remove(self)
+            self._reposition_toasts()
         self.deleteLater()
-    
+
+    @staticmethod
+    def _reposition_toasts():
+        """남은 토스트들을 빈 공간 없이 재배치"""
+        screen = QApplication.primaryScreen().availableGeometry()
+        y_offset = 10
+        for toast in JarvisToast._active_toasts:
+            if not toast.isVisible():
+                continue
+            end_x = toast.pos().x()
+            end_y = screen.bottom() - toast.height() - y_offset
+
+            anim = QPropertyAnimation(toast, b"pos")
+            anim.setDuration(200)
+            anim.setEndValue(QPoint(end_x, int(end_y)))
+            anim.setEasingCurve(QEasingCurve.Type.OutQuad)
+            anim.start()
+            # anim을 toast에 보관하여 GC 방지
+            toast._reposition_anim = anim
+
+            y_offset += toast.height() + 10
+
     def mousePressEvent(self, event):
-        self.close_toast()
+        # Sticky 모드에서는 배경 클릭으로 닫히지 않음 (버튼으로만 닫기)
+        if not self.is_sticky:
+            self.close_toast()
 
 
 class ToastSignalHandler(QObject):

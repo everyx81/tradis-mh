@@ -2220,8 +2220,16 @@ class JarvisGUI(QMainWindow):
         self.emit_log(f"[업데이트] v{self._new_ver} 다운로드 완료. 업데이트를 설치합니다...")
 
         if apply_update(tmp_path):
-            # PowerShell 업데이트 창이 표시될 시간을 주고 종료
-            QTimer.singleShot(800, lambda: (QApplication.quit(), os._exit(0)))
+            # PyInstaller _MEI 폴더 정리를 위해 정상 종료 필수
+            # os._exit(0)는 atexit 핸들러를 스킵하여 _MEI 잔존 → DLL 로드 실패 유발
+            def _clean_exit_for_update():
+                QApplication.quit()  # Qt 이벤트 루프 종료 → sys.exit() → atexit → _MEI 정리
+
+            # 5초 후에도 프로세스가 살아있으면 강제 종료 (스레드 hang 대비)
+            import time as _time
+            threading.Thread(target=lambda: (_time.sleep(5), os._exit(0)), daemon=True).start()
+
+            QTimer.singleShot(800, _clean_exit_for_update)
         else:
             from gui.dialogs import JarvisMessageBox
             JarvisMessageBox.warning(self, "업데이트", "개발 모드에서는 자동 업데이트가 지원되지 않습니다.")

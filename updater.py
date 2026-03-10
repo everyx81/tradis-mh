@@ -124,9 +124,12 @@ def apply_update(new_exe_path):
         return False
 
     pid = os.getpid()
+    # 현재 실행 중인 _MEI 경로 (PyInstaller onefile 전용)
+    mei_path = getattr(sys, '_MEIPASS', '')
     # PowerShell 단일 따옴표 이스케이프
     esc_new = new_exe_path.replace("'", "''")
     esc_cur = current_exe.replace("'", "''")
+    esc_mei = mei_path.replace("'", "''")
 
     ps_script = f'''
 Add-Type -AssemblyName System.Windows.Forms
@@ -227,9 +230,12 @@ if ($ok) {{
     [Windows.Forms.Application]::DoEvents()
 
     # PyInstaller 임시 폴더(_MEI*) 정리
-    # os._exit()로 강제 종료 시 _MEI 폴더가 불완전하게 남아
-    # 새 EXE 실행 시 python312.dll 로드 실패를 유발할 수 있음
-    # runtime_tmpdir = C:\ProgramData\TRADIS_TMP (spec 설정)
+    # 1) 현재 실행 중이던 정확한 _MEIPASS 경로 삭제 (가장 확실)
+    $meiPass = '{esc_mei}'
+    if ($meiPass -and (Test-Path $meiPass)) {{
+        Remove-Item $meiPass -Recurse -Force -ErrorAction SilentlyContinue
+    }}
+    # 2) 혹시 남은 다른 _MEI* 폴더도 정리 (누적 방지)
     $meiDirs = @('C:\ProgramData\TRADIS_TMP', [System.IO.Path]::GetTempPath())
     foreach ($d in $meiDirs) {{
         if (Test-Path $d) {{
@@ -278,6 +284,7 @@ def _apply_update_bat(new_exe_path, current_exe):
     """폴백: bat 스크립트로 EXE 교체 (PowerShell 없는 환경용)"""
     current_short = _get_short_path(current_exe)
     new_short = _get_short_path(new_exe_path)
+    mei_short = _get_short_path(getattr(sys, '_MEIPASS', ''))
 
     bat_content = f'''@echo off
 chcp 65001 >nul 2>nul
@@ -299,6 +306,7 @@ if errorlevel 1 (
     goto retry
 )
 echo   Cleaning up temp files...
+if exist "{mei_short}" rd /s /q "{mei_short}" 2>nul
 for /d %%D in ("C:\\ProgramData\\TRADIS_TMP\\_MEI*") do rd /s /q "%%D" 2>nul
 for /d %%D in ("%TEMP%\\_MEI*") do rd /s /q "%%D" 2>nul
 timeout /t 2 /nobreak >nul

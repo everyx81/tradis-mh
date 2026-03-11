@@ -45,8 +45,11 @@ class HUDStyleCalendar(QCalendarWidget):
         
         # 4. 정사각형 셀 비율을 위한 초기 설정
         QTimer.singleShot(0, self._force_square_cells)
-        # 5. 월 변경 시에도 정사각형 유지
-        self.currentPageChanged.connect(lambda: QTimer.singleShot(0, self._force_square_cells))
+        # 5. 월 변경 시에도 정사각형 유지 + 이전 달 셀 위치 데이터 정리
+        def _on_page_changed():
+            self._cell_rects.clear()
+            QTimer.singleShot(0, self._force_square_cells)
+        self.currentPageChanged.connect(_on_page_changed)
         
     def init_style(self):
         # 애플 스타일 다크 모드 캘린더 테마 적용
@@ -149,19 +152,25 @@ class HUDStyleCalendar(QCalendarWidget):
         self.setWeekdayTextFormat(Qt.DayOfWeek.Sunday, fmt_sun)
         
     def _force_square_cells(self):
-        """모든 셀을 CELL_WIDTH x CELL_HEIGHT 직사각형으로 강제"""
-        from PyQt6.QtWidgets import QTableView
+        """모든 셀을 CELL_WIDTH x CELL_HEIGHT 직사각형으로 강제 (배치 처리)"""
+        from PyQt6.QtWidgets import QTableView, QHeaderView
         table = self.findChild(QTableView)
         if not table:
             return
-        
+
         col_count = table.model().columnCount() if table.model() else 7
         row_count = table.model().rowCount() if table.model() else 6
-        
+
+        # 시그널 차단으로 레이아웃 재계산 1회로 축소
+        table.horizontalHeader().blockSignals(True)
+        table.verticalHeader().blockSignals(True)
         for c in range(col_count):
             table.setColumnWidth(c, self.CELL_WIDTH)
         for r in range(row_count):
             table.setRowHeight(r, self.CELL_HEIGHT)
+        table.horizontalHeader().blockSignals(False)
+        table.verticalHeader().blockSignals(False)
+        table.viewport().update()
     
     def resizeEvent(self, event):
         """크기 변경 시 정사각형 셀 비율 유지"""

@@ -69,6 +69,8 @@ class LocalScheduleManager:
         self._stop_reminder = threading.Event()
         self._data_changed = threading.Event() # [NEW] 데이터 변경 감지용 이벤트
         self._ui_callbacks = []  # UI 갱신 콜백 리스트
+        self._cached_data = None  # [PERF] 메모리 캐시 (디스크 I/O 감소)
+        self._cache_lock = threading.Lock()
 
         # 데이터 파일 초기화
         self._ensure_data_file()
@@ -79,13 +81,16 @@ class LocalScheduleManager:
             self._save_data({"schedules": [], "memos": []})
     
     def _load_data(self) -> Dict:
-        """데이터 파일 로드 및 이전 버전 스키마 마이그레이션"""
+        """데이터 파일 로드 (메모리 캐시 우선, 변경 시만 디스크 읽기)"""
+        with self._cache_lock:
+            if self._cached_data is not None:
+                return self._cached_data
         try:
             with open(self.data_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
                 if "memos" not in data:
                     data["memos"] = []
-                    
+
                 is_modified = False
                 for schedule in data.get("schedules", []):
                     # 마이그레이션 로직 (이전 속성을 새로운 구조로 변환)
@@ -95,35 +100,41 @@ class LocalScheduleManager:
                             old_val = schedule.pop("remind_minutes", [60])
                         schedule["alerts"] = old_val if isinstance(old_val, list) else [old_val]
                         is_modified = True
-                        
+
                     if "reminded_alerts" not in schedule:
                         schedule["reminded_alerts"] = schedule.pop("reminded_at", [])
                         is_modified = True
-                        
+
                     if "snooze_until" not in schedule:
                         schedule["snooze_until"] = None
                         is_modified = True
-                
+
                 if is_modified:
                     self._save_data(data)
-                    
+
+                with self._cache_lock:
+                    self._cached_data = data
                 return data
         except Exception as e:
             print(f"[데이터 로드 오류] {e}")
             return {"schedules": [], "memos": []}
     
     def _save_data(self, data: Dict) -> bool:
-        """데이터 파일 저장"""
+        """데이터 파일 저장 + 메모리 캐시 동시 갱신"""
         try:
             with open(self.data_file, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
+            with self._cache_lock:
+                self._cached_data = data
             return True
         except Exception as e:
             print(f"[데이터 저장 오류] {e}")
             return False
             
     def _trigger_update(self):
-        """데이터 변경 시 대기 중인 스레드를 깨움"""
+        """데이터 변경 시 캐시 무효화 + 대기 중인 스레드를 깨움"""
+        with self._cache_lock:
+            self._cached_data = None
         self._data_changed.set()
 
     def register_ui_callback(self, callback):

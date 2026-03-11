@@ -535,6 +535,12 @@ class JarvisGUI(QMainWindow):
             # 글로벌 단축키 해제
             keyboard.unhook_all()
             self._remove_snippet_hook()
+            # [PERF] 잔류 토스트 위젯 강제 정리
+            from gui.jarvis_toast import JarvisToast
+            for toast in list(JarvisToast._active_toasts):
+                toast.hide()
+                toast.deleteLater()
+            JarvisToast._active_toasts.clear()
         except Exception as e:
             print(f"Close event error: {e}")
         event.accept()

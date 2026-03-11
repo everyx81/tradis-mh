@@ -36,6 +36,19 @@ def validate_mapping_amounts(mapping, directory):
     _summed_files = set()          # 파일별 sum_files 중복 합산 방지
     _used_bi_indices = {}          # {filename: set(idx)} - billing_item 사용 추적
 
+    # [FIX] "(추가)" 항목의 파일 금액을 미리 수집 (부모 항목의 금액 비교 시 합산)
+    _additional_file_totals = {}   # {expense_name: total of additional files}
+    for item in mapping:
+        label = item.get('label', '')
+        filename = item.get('filename', '')
+        if '(추가)' in label and filename and '비용: ' in label:
+            expense_name = label.split('비용: ')[-1].split(' (')[0]
+            file_path = os.path.join(directory, filename)
+            cached_add = gemini_ocr._get_cached_result(file_path)
+            if cached_add:
+                add_total = parse_amount(cached_add.get('total_amount', 0))
+                _additional_file_totals[expense_name] = _additional_file_totals.get(expense_name, 0) + add_total
+
     for item in mapping:
         label = item.get('label', '')
         filename = item.get('filename', '')
@@ -48,12 +61,18 @@ def validate_mapping_amounts(mapping, directory):
         # "포함" 또는 "(추가)" 항목은 파일 없이 부모에 포함된 항목
         is_fee_included = '포함' in label or '(추가)' in label
 
-        item_amt = _parse_amount(raw_item_amt)
+        item_amt = parse_amount(raw_item_amt)
         result['sum_items'] += item_amt
 
         if is_fee_included:
-            # [Bug 1 수정] 포함 항목: sum_items에만 합산
-            # sum_files에는 미포함 (부모 파일의 total_amount에 이미 포함됨)
+            # [FIX] "(추가)" 항목에 자체 파일이 있으면 sum_files에 포함
+            if filename and filename not in _summed_files:
+                file_path = os.path.join(directory, filename)
+                cached_add = gemini_ocr._get_cached_result(file_path)
+                if cached_add:
+                    file_total = parse_amount(cached_add.get('total_amount', 0))
+                    result['sum_files'] += file_total
+                _summed_files.add(filename)
             continue
 
         if not filename:
@@ -75,7 +94,7 @@ def validate_mapping_amounts(mapping, directory):
             bi_matched = False
 
             if billing_items:
-                search_kws = _build_search_kws(item_name_from_label)
+                search_kws = build_search_kws(item_name_from_label)
                 used_indices = _used_bi_indices.setdefault(filename, set())
 
                 # [Bug 4 수정] 1차: 정확 매칭 우선, 부분 매칭 폴백
@@ -104,7 +123,7 @@ def validate_mapping_amounts(mapping, directory):
                 matched_idx = exact_idx if exact_bi else partial_idx
 
                 if matched_bi:
-                    file_amt = _parse_amount(matched_bi.get('amount', 0))
+                    file_amt = parse_amount(matched_bi.get('amount', 0))
                     bi_matched = True
                     if matched_idx is not None:
                         used_indices.add(matched_idx)
@@ -114,7 +133,7 @@ def validate_mapping_amounts(mapping, directory):
                     for idx, bi in enumerate(billing_items):
                         if idx in used_indices:
                             continue
-                        bi_amt = _parse_amount(bi.get('amount', 0))
+                        bi_amt = parse_amount(bi.get('amount', 0))
                         if bi_amt > 0 and bi_amt == item_amt:
                             file_amt = bi_amt
                             bi_matched = True
@@ -124,32 +143,50 @@ def validate_mapping_amounts(mapping, directory):
             # [Bug 2 수정] total_amount 폴백: 단일 항목이거나 billing_items 없을 때만
             if not bi_matched:
                 if not billing_items or len(billing_items) == 1:
-                    file_amt = _parse_amount(cached.get('total_amount', 0))
+                    file_amt = parse_amount(cached.get('total_amount', 0))
                 # 복수 항목인데 매칭 실패 → file_amt = 0 유지 (불일치로 표시)
 
         # [Bug 1 수정] sum_files: 파일당 1번만 합산 (파일 total_amount 사용)
         if filename not in _summed_files:
             if cached:
-                file_total = _parse_amount(cached.get('total_amount', 0))
+                file_total = parse_amount(cached.get('total_amount', 0))
                 result['sum_files'] += file_total if file_total > 0 else file_amt
             else:
                 result['sum_files'] += file_amt
             _summed_files.add(filename)
 
-        # [Bug 3 수정] 개별 항목 매칭 판정
-        if item_amt > 0 and file_amt > 0:
-            matched = (item_amt == file_amt)
+        # [FIX] 추가 파일 금액 합산 + 파일 총액 폴백으로 다중 비교
+        비용항목명 = label.replace('비용: ', '').split(' (')[0]
+        추가파일_합계 = _additional_file_totals.get(비용항목명, 0)
+        파일_총액 = parse_amount(cached.get('total_amount', 0)) if cached else 0
+
+        # 여러 조합으로 매칭 시도:
+        # 1) 청구항목 금액 + 추가파일 금액
+        # 2) 파일 총액 + 추가파일 금액
+        # 3) 청구항목 금액 단독
+        # 4) 파일 총액 단독
+        비교용_파일금액 = file_amt + 추가파일_합계
+        matched = False
+        if item_amt > 0:
+            for 후보금액 in [
+                file_amt + 추가파일_합계,    # 청구항목 금액 + 추가파일
+                파일_총액 + 추가파일_합계,    # 파일 총액 + 추가파일
+                file_amt,                    # 청구항목 금액 단독
+                파일_총액,                    # 파일 총액 단독
+            ]:
+                if 후보금액 > 0 and item_amt == 후보금액:
+                    matched = True
+                    비교용_파일금액 = 후보금액
+                    break
         elif item_amt == 0 and file_amt == 0:
             matched = True  # 양쪽 다 0이면 검증 불필요
-        else:
-            matched = False  # 한쪽만 0이면 불일치 (OCR 실패 등)
 
         if not matched:
             result['item_all_matched'] = False
 
         result['item_details'].append({
             'label': label, 'item_amount': item_amt,
-            'file_amount': file_amt, 'matched': matched,
+            'file_amount': 비교용_파일금액, 'matched': matched,
             'filename': filename
         })
 
@@ -160,7 +197,7 @@ def validate_mapping_amounts(mapping, directory):
 
 
 # [Bug 6+7 수정] 음수, 소수점, 숫자 타입 올바르게 처리
-def _parse_amount(raw):
+def parse_amount(raw):
     """금액을 정수로 변환 (음수, 소수점, 콤마 등 처리)"""
     try:
         if isinstance(raw, (int, float)):
@@ -181,7 +218,7 @@ def _parse_amount(raw):
 
 
 # [Bug 8 수정] 양방향 EXPENSE_SYNONYMS 검색
-def _build_search_kws(item_name):
+def build_search_kws(item_name):
     """항목명에서 검색 키워드 생성 (양방향 EXPENSE_SYNONYMS 확장)"""
     item_upper = item_name.upper().replace(" ", "")
     kws = {item_upper}

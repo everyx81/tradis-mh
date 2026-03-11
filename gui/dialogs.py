@@ -329,7 +329,8 @@ class GroupCard(GlassFrame):
                     
                     # 비용 항목별로 해당하는 파일이 폴더에 있는지 확인
                     # 같은 키워드의 파일 사용 횟수 추적 (N:N 매칭 지원)
-                    from core.constants import EXPENSE_SYNONYMS, FEE_INVOICE_ITEMS
+                    from core.constants import EXPENSE_SYNONYMS, FEE_INVOICE_ITEMS, FIXED_SLOT_KEYS
+                    from core.validator import parse_amount, build_search_kws
                     used_files = []  # 이미 매칭에 사용된 파일 추적
 
                     for item_data in expense_list:
@@ -358,12 +359,8 @@ class GroupCard(GlassFrame):
                             required.append({'name': item_name, 'found': found})
                             continue
 
-                        # 동의어 사전으로 검색 키워드 확장
-                        item_upper = item_name.upper().replace(" ", "")
-                        search_kws = [item_upper]
-                        for k, s in EXPENSE_SYNONYMS.items():
-                            if k in item_name:
-                                search_kws.extend([x.upper().replace(" ", "") for x in s])
+                        # 동의어 사전으로 검색 키워드 확장 (양방향)
+                        search_kws = build_search_kws(item_name)
 
                         # 아직 사용 안 된 파일 중에서 키워드 매칭 (1개씩 소비)
                         found = False
@@ -393,11 +390,10 @@ class GroupCard(GlassFrame):
 
                         # 금액 기반 보정 매칭 (위에서 못 찾은 경우)
                         if not found:
-                            item_amt = item_data.get("amount", 0) if isinstance(item_data, dict) else 0
-                            try:
-                                item_amt = int(str(item_amt).replace(',', '').replace('원', ''))
-                            except ValueError:
-                                item_amt = 0
+                            item_amt = parse_amount(item_data.get("amount", 0) if isinstance(item_data, dict) else 0)
+
+                            # 고정 슬롯 파일만 제외 (비용 계산서 파일은 금액 매칭 후보에 포함)
+                            fixed_slot_files = {docs[key] for key in FIXED_SLOT_KEYS if key in docs}
 
                             if item_amt > 0:
                                 uncl_amounts = {}
@@ -405,18 +401,14 @@ class GroupCard(GlassFrame):
                                     for f in os.listdir(self.directory):
                                         if not f.lower().endswith('.pdf'):
                                             continue
-                                        if f in docs.values() or f in used_files:
+                                        if f in fixed_slot_files or f in used_files:
                                             continue
                                         if "청구서" in f and "계산서" not in f:
                                             continue
                                         fp = os.path.join(self.directory, f)
                                         f_cached = gemini_ocr._get_cached_result(fp)
                                         if f_cached:
-                                            f_amt = f_cached.get('total_amount', 0)
-                                            try:
-                                                f_amt = int(str(f_amt).replace(',', '').replace('원', ''))
-                                            except ValueError:
-                                                f_amt = 0
+                                            f_amt = parse_amount(f_cached.get('total_amount', 0))
                                             if f_amt > 0:
                                                 uncl_amounts[f] = f_amt
 
@@ -466,7 +458,7 @@ class GroupCard(GlassFrame):
             else:
                 name = label
             
-            # [NEW] 금액 보정 기반 매칭 아이콘 시각적 차별화
+            # [NEW] 금액 보정 기반 매칭 아이콘 시각적 차별화 (파랑 = 금액 매칭만)
             is_matched_by_amount = item.get('matched_by_amount', False)
             if filename:
                 icon = "🔵" if is_matched_by_amount else "✅"

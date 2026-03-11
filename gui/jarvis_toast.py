@@ -223,10 +223,12 @@ class JarvisToast(QWidget):
         self.fade_out_anim.finished.connect(self._on_fade_finished)
     
     def show_toast(self):
-        # 최대 개수 초과 시 가장 오래된 토스트 제거
+        # 최대 개수 초과 시 가장 오래된 토스트 강제 제거
         while len(JarvisToast._active_toasts) >= self.MAX_TOASTS:
-            oldest = JarvisToast._active_toasts[0]
-            oldest.close_toast()
+            oldest = JarvisToast._active_toasts.pop(0)
+            oldest._closing = True
+            oldest.hide()
+            oldest.deleteLater()
 
         screen = QApplication.primaryScreen().availableGeometry()
 

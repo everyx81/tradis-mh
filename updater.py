@@ -236,7 +236,7 @@ if ($ok) {{
         Remove-Item $meiPass -Recurse -Force -ErrorAction SilentlyContinue
     }}
     # 2) 혹시 남은 다른 _MEI* 폴더도 정리 (누적 방지)
-    $meiDirs = @('C:\ProgramData\TRADIS_TMP', [System.IO.Path]::GetTempPath())
+    $meiDirs = @([System.IO.Path]::GetTempPath(), 'C:\ProgramData\TRADIS_TMP')
     foreach ($d in $meiDirs) {{
         if (Test-Path $d) {{
             Get-ChildItem -Path $d -Directory -Filter "_MEI*" -ErrorAction SilentlyContinue | ForEach-Object {{

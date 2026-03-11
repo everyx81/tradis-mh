@@ -2231,9 +2231,16 @@ class JarvisGUI(QMainWindow):
             def _clean_exit_for_update():
                 QApplication.quit()  # Qt 이벤트 루프 종료 → sys.exit() → atexit → _MEI 정리
 
-            # 5초 후에도 프로세스가 살아있으면 강제 종료 (스레드 hang 대비)
+            # 10초 후에도 프로세스가 살아있으면 종료 (스레드 hang 대비)
+            # sys.exit()로 atexit 핸들러(_MEI 정리) 실행 보장
             import time as _time
-            threading.Thread(target=lambda: (_time.sleep(5), os._exit(0)), daemon=True).start()
+            def _force_exit():
+                _time.sleep(10)
+                try:
+                    sys.exit(0)
+                except SystemExit:
+                    os._exit(0)  # sys.exit마저 실패 시 최후 수단
+            threading.Thread(target=_force_exit, daemon=True).start()
 
             QTimer.singleShot(800, _clean_exit_for_update)
         else:

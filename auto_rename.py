@@ -28,7 +28,7 @@ from core.constants import (
 # Config
 from core.config import (
     get_config_path, load_config, set_api_key,
-    CONFIG, api_key, client
+    CONFIG, api_key, client, get_client
 )
 
 # Utils

@@ -11,10 +11,7 @@ import json
 import time
 import threading
 
-import pypdfium2 as pdfium
-from google.genai import types
-
-from .config import client
+from .config import get_client
 from .utils import pdf_lock, cache_lock
 
 
@@ -105,6 +102,7 @@ class GeminiOCR:
 
     def analyze_pdf(self, fp):
         """PDF 분석 (파일 캐싱 적용)"""
+        client = get_client()
         if client is None:
             return {"company_name": "Unknown", "identifier": "Unknown", "id_type": "Unknown", "doc_type": "Unknown"}
 
@@ -115,7 +113,9 @@ class GeminiOCR:
             return cached_result
 
         try:
-            # 파일을 메모리로 직접 로드
+            import pypdfium2 as pdfium
+            from google.genai import types
+
             with open(fp, 'rb') as f:
                 pdf_bytes = f.read()
 
@@ -139,12 +139,10 @@ class GeminiOCR:
             if not img_data:
                 return {"company_name": "Unknown", "identifier": "Unknown", "id_type": "Unknown", "doc_type": "Unknown"}
 
-            full_prompt = self.base_prompt
-
             response = client.models.generate_content(
                 model=f"models/{self.model_id}",
                 contents=[
-                    full_prompt,
+                    self.base_prompt,
                     types.Part.from_bytes(data=img_data, mime_type="image/jpeg")
                 ]
             )

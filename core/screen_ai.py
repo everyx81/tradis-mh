@@ -18,8 +18,7 @@ except ImportError:
     PYAUTOGUI_AVAILABLE = False
     print("[경고] pyautogui 또는 PIL 패키지가 없습니다. pip install pyautogui pillow")
 
-from google.genai import types
-from .config import client
+from .config import get_client
 
 
 @dataclass
@@ -109,6 +108,7 @@ class ScreenAI:
                 "confidence": float  # AI 확신도
             }
         """
+        client = get_client()
         if client is None:
             return {"error": "Gemini API 클라이언트가 초기화되지 않았습니다", "selected_row": 1}
         
@@ -119,8 +119,9 @@ class ScreenAI:
         
         # 프롬프트 생성
         prompt = self._build_declaration_selection_prompt(export_data)
-        
+
         try:
+            from google.genai import types
             response = client.models.generate_content(
                 model=f"models/{self.model_id}",
                 contents=[
@@ -234,6 +235,7 @@ class ScreenAI:
         Returns:
             (x, y) 좌표 또는 None
         """
+        client = get_client()
         if client is None:
             return None
             
@@ -254,8 +256,9 @@ class ScreenAI:
 
 요소를 찾지 못하면 found: false로 응답하세요.
 """
-        
+
         try:
+            from google.genai import types
             response = client.models.generate_content(
                 model=f"models/{self.model_id}",
                 contents=[
@@ -286,6 +289,7 @@ class ScreenAI:
     
     def describe_current_screen(self) -> str:
         """현재 화면 상태를 AI로 분석하여 설명"""
+        client = get_client()
         if client is None:
             return "Gemini API 클라이언트가 초기화되지 않았습니다"
             
@@ -304,8 +308,9 @@ class ScreenAI:
 
 간결하게 한국어로 응답하세요.
 """
-        
+
         try:
+            from google.genai import types
             response = client.models.generate_content(
                 model=f"models/{self.model_id}",
                 contents=[

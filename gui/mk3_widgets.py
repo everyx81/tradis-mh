@@ -1314,8 +1314,8 @@ class MK3MemoOnlyWidget(QWidget):
             
             def run(self):
                 try:
-                    from core.config import client
-                    
+                    from core.config import get_client
+                    client = get_client()
                     if client is None:
                         self.error.emit("API 키가 설정되지 않았습니다.")
                         return

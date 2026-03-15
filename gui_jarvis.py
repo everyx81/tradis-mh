@@ -1448,12 +1448,24 @@ class JarvisGUI(QMainWindow):
             return
         path = self.line_path.text()
         if not path: return
+        # 무거운 모듈 백그라운드 프리로딩 (첫 OCR 지연 방지)
+        threading.Thread(target=self._preload_ocr_modules, daemon=True).start()
         self.renamer.start(path)
         self.btn_start.setEnabled(False)
         self.btn_start.setText("RUNNING..")
         self.btn_stop.setEnabled(True)
         self.emit_log("Monitoring Started...")
         self.run_intelligent_merge()
+
+    def _preload_ocr_modules(self):
+        """OCR에 필요한 무거운 모듈을 백그라운드에서 미리 로드"""
+        try:
+            import pypdfium2
+            from google.genai import types
+            from core.config import get_client
+            get_client()
+        except Exception:
+            pass
 
     def stop_monitoring(self):
         self.renamer.stop()

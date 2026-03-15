@@ -9,7 +9,6 @@ import sys
 import json
 import base64
 import keyring
-from google import genai
 
 SERVICE_NAME = "TRADIS_MH"
 
@@ -105,9 +104,17 @@ def get_api_key() -> str:
     _migrate_api_key_to_keyring()
     return keyring.get_password(SERVICE_NAME, "gemini_api_key") or ""
 
-# API 키 로드 + 클라이언트 초기화
+# API 키 로드 (클라이언트는 지연 초기화)
 api_key = get_api_key()
-client = genai.Client(api_key=api_key) if api_key else None
+client = None  # get_client()로 접근
+
+def get_client():
+    """Gemini 클라이언트 지연 초기화"""
+    global client
+    if client is None and api_key:
+        from google import genai
+        client = genai.Client(api_key=api_key)
+    return client
 
 def set_api_key(new_key: str):
     """API 키 설정 (keyring에 저장)"""
@@ -122,6 +129,7 @@ def set_api_key(new_key: str):
 
     if actual_key:
         keyring.set_password(SERVICE_NAME, "gemini_api_key", actual_key)
+        from google import genai
         client = genai.Client(api_key=actual_key)
     else:
         keyring.delete_password(SERVICE_NAME, "gemini_api_key")

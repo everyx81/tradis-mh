@@ -223,19 +223,16 @@ for ($r = 0; $r -lt 20; $r++) {{
 }}
 
 if ($ok) {{
-    # ── Phase 3: 잔여 _MEI 폴더 정리 후 재시작 ──
-    $st.Text = [char]0xC644 + [char]0xB8CC + "! " + [char]0xC7AC + [char]0xC2DC + [char]0xC791 + " " + [char]0xC911 + "..."
+    # ── Phase 3: 잔여 _MEI 폴더 정리 ──
     $pb.Style = "Continuous"
     $pb.Value = 100
     [Windows.Forms.Application]::DoEvents()
 
     # PyInstaller 임시 폴더(_MEI*) 정리
-    # 1) 현재 실행 중이던 정확한 _MEIPASS 경로 삭제 (가장 확실)
     $meiPass = '{esc_mei}'
     if ($meiPass -and (Test-Path $meiPass)) {{
         Remove-Item $meiPass -Recurse -Force -ErrorAction SilentlyContinue
     }}
-    # 2) 혹시 남은 다른 _MEI* 폴더도 정리 (누적 방지)
     $meiDirs = @([System.IO.Path]::GetTempPath(), 'C:\ProgramData\TRADIS_TMP')
     foreach ($d in $meiDirs) {{
         if (Test-Path $d) {{
@@ -244,10 +241,14 @@ if ($ok) {{
             }}
         }}
     }}
-    Start-Sleep -Seconds 2
 
-    Start-Process -FilePath '{esc_cur}'
     Remove-Item -LiteralPath '{esc_new}' -Force -ErrorAction SilentlyContinue
+
+    # 자동 재시작 대신 안내 메시지 표시
+    $st.Text = [char]0xC5C5 + [char]0xB370 + [char]0xC774 + [char]0xD2B8 + " " + [char]0xC644 + [char]0xB8CC + "! " + [char]0xD504 + [char]0xB85C + [char]0xADF8 + [char]0xB7A8 + [char]0xC744 + " " + [char]0xB2E4 + [char]0xC2DC + " " + [char]0xC2E4 + [char]0xD589 + [char]0xD574 + " " + [char]0xC8FC + [char]0xC138 + [char]0xC694 + "."
+    $st.ForeColor = [Drawing.Color]::FromArgb(0, 229, 255)
+    [Windows.Forms.Application]::DoEvents()
+    Start-Sleep -Seconds 5
 }} else {{
     $st.Text = [char]0xC5C5 + [char]0xB370 + [char]0xC774 + [char]0xD2B8 + " " + [char]0xC2E4 + [char]0xD328
     $st.ForeColor = [Drawing.Color]::FromArgb(255, 100, 100)
@@ -310,9 +311,12 @@ if exist "{mei_short}" rd /s /q "{mei_short}" 2>nul
 for /d %%D in ("C:\\ProgramData\\TRADIS_TMP\\_MEI*") do rd /s /q "%%D" 2>nul
 for /d %%D in ("%TEMP%\\_MEI*") do rd /s /q "%%D" 2>nul
 timeout /t 2 /nobreak >nul
-echo   Update complete! Restarting...
-start "" "{current_short}"
 del "{new_short}" 2>nul
+echo   Update complete!
+echo.
+echo   Please restart the program manually.
+echo.
+pause
 del "%~f0"
 '''
     bat_path = os.path.join(tempfile.gettempdir(), "tradis_update.bat")

@@ -1123,6 +1123,9 @@ class FileManagerWidget(QWidget):
             JarvisMessageBox.warning(self, "오류", "Company_ID 형식의 폴더가 선택되지 않았습니다.")
             return
 
+        # 디렉토리 구조 캐시 (한 번만 스캔)
+        dir_cache = self._build_dir_cache(root)
+
         # 중복 사전 검사
         new_folders = []
         dup_folders = []  # (src_path, folder_name, existing_full_path)
@@ -1130,7 +1133,7 @@ class FileManagerWidget(QWidget):
             parts = folder_name.split('_')
             comp = parts[0]
             fid = "_".join(parts[1:])
-            existing_rel = self._find_id_in_company_dir(root, comp, fid)
+            existing_rel = self._find_id_in_company_dir(root, comp, fid, _cache=dir_cache)
             if existing_rel:
                 existing_full = os.path.join(root, existing_rel)
                 dup_folders.append((src_path, folder_name, existing_full))
@@ -1158,7 +1161,7 @@ class FileManagerWidget(QWidget):
                 comp = parts[0]
                 fid = "_".join(parts[1:])
 
-                existing_company_folder = self._find_company_folder(root, comp)
+                existing_company_folder = self._find_company_folder(root, comp, _cache=dir_cache)
                 if existing_company_folder: dst_parent = existing_company_folder
                 else:
                     dst_parent = os.path.join(root, comp)
@@ -1280,57 +1283,59 @@ class FileManagerWidget(QWidget):
 
 
 
-    def _find_id_in_company_dir(self, root, company, target_id):
-        clean_company = company.replace("★", "").strip()
+    def _build_dir_cache(self, root):
+        """root 디렉토리 구조를 한 번만 스캔하여 캐시 생성 (원본 로직과 동일한 우선순위)"""
+        # company_map: clean_name_upper -> (folder_path, {child_names})
+        company_map = {}
         try:
-            # 1단계: root 직접 하위에서 회사 폴더 찾기
+            root_items = []
             for folder in os.listdir(root):
                 folder_path = os.path.join(root, folder)
                 if not os.path.isdir(folder_path): continue
-                clean_folder = folder.replace("★", "").strip()
-                if clean_folder.upper() == clean_company.upper():
-                    if target_id in os.listdir(folder_path): return os.path.join(folder, target_id)
-            
-            # 2단계: root/*/하위에서 회사 폴더 찾기
-            for parent_folder in os.listdir(root):
-                parent_path = os.path.join(root, parent_folder)
-                if not os.path.isdir(parent_path): continue
+                root_items.append((folder, folder_path))
+                # 1단계: root 직접 하위 회사 폴더 (우선)
+                clean = folder.replace("★", "").strip().upper()
                 try:
-                    for sub_folder in os.listdir(parent_path):
-                        sub_path = os.path.join(parent_path, sub_folder)
+                    children = set(os.listdir(folder_path))
+                except (PermissionError, OSError):
+                    children = set()
+                if clean not in company_map:
+                    company_map[clean] = (folder_path, children)
+            # 2단계: root/*/하위 회사 폴더 (1단계에서 못 찾은 것만)
+            for folder, folder_path in root_items:
+                try:
+                    for sub_folder in os.listdir(folder_path):
+                        sub_path = os.path.join(folder_path, sub_folder)
                         if not os.path.isdir(sub_path): continue
-                        clean_sub = sub_folder.replace("★", "").strip()
-                        if clean_sub.upper() == clean_company.upper():
-                            if target_id in os.listdir(sub_path): 
-                                return os.path.join(parent_folder, sub_folder, target_id)
-                except PermissionError:
+                        clean_sub = sub_folder.replace("★", "").strip().upper()
+                        if clean_sub not in company_map:
+                            try:
+                                sub_children = set(os.listdir(sub_path))
+                            except (PermissionError, OSError):
+                                sub_children = set()
+                            company_map[clean_sub] = (sub_path, sub_children)
+                except (PermissionError, OSError):
                     continue
-        except (OSError, AttributeError): pass
+        except (OSError, AttributeError):
+            pass
+        return company_map
+
+    def _find_id_in_company_dir(self, root, company, target_id, _cache=None):
+        cache = _cache or self._build_dir_cache(root)
+        clean_company = company.replace("★", "").strip().upper()
+        entry = cache.get(clean_company)
+        if entry:
+            folder_path, children = entry
+            if target_id in children:
+                return os.path.relpath(os.path.join(folder_path, target_id), root)
         return None
 
-    def _find_company_folder(self, root, company):
-        clean_company = company.replace("★", "").strip()
-        try:
-            # 1단계: root 직접 하위 검색
-            for folder in os.listdir(root):
-                folder_path = os.path.join(root, folder)
-                if not os.path.isdir(folder_path): continue
-                clean_folder = folder.replace("★", "").strip()
-                if clean_folder.upper() == clean_company.upper(): return folder_path
-            
-            # 2단계: root/*/하위 검색 (하위의 하위)
-            for parent_folder in os.listdir(root):
-                parent_path = os.path.join(root, parent_folder)
-                if not os.path.isdir(parent_path): continue
-                try:
-                    for sub_folder in os.listdir(parent_path):
-                        sub_path = os.path.join(parent_path, sub_folder)
-                        if not os.path.isdir(sub_path): continue
-                        clean_sub = sub_folder.replace("★", "").strip()
-                        if clean_sub.upper() == clean_company.upper(): return sub_path
-                except PermissionError:
-                    continue
-        except (OSError, AttributeError): pass
+    def _find_company_folder(self, root, company, _cache=None):
+        cache = _cache or self._build_dir_cache(root)
+        clean_company = company.replace("★", "").strip().upper()
+        entry = cache.get(clean_company)
+        if entry:
+            return entry[0]
         return None
 
     def _on_move_complete(self, count, duplicates, selected_folders, base_path):
@@ -1862,7 +1867,12 @@ TRADIS MH는 관세사무소 업무 자동화 도구입니다.
 
 ## 📋 버전 정보
 
-**현재 버전**: v1.0.3
+**현재 버전**: v1.0.9
+
+#### v1.0.9 (2026-03-12)
+- OCR 분류 개선: 포워더/선사 Handling Charge → 선박운임계산서로 정확 분류
+- 매칭 UI 개선: 계산서 미매칭 항목 붉은색 강조 표시
+- 금액 검증 로직 개선: FEE_INVOICE_ITEMS에서 정밀검사실험비용 제거
 
 #### v1.0.3 (2026-03-09)
 - 정산 불필요 수입건 지원 (수입신고필증만 있는 건 → 폴더 정리 모드)

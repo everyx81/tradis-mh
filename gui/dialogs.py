@@ -608,11 +608,16 @@ class GroupCard(GlassFrame):
             
             lbl = QLabel(f"➡ {item['label']}")
             
-            # [NEW] 상세 뷰에서도 금액 매칭 기반은 시각적으로 다르게 표시 (파란색 등)
+            # 매칭 상태에 따른 라벨 색상 분기
+            has_file = bool(item.get('filename', ''))
+            is_included = '포함' in item['label']
             if item.get('matched_by_amount', False):
                 lbl.setStyleSheet("color: #00BFFF; background: transparent; font-weight: bold;")
                 lbl.setToolTip("총금액 비교로 매칭되었습니다.")
-            elif '포함' in item['label']:
+            elif not has_file and not is_included:
+                lbl.setStyleSheet("color: #ff4444; background: transparent; font-weight: bold;")
+                lbl.setToolTip("계산서 매칭 안 됨")
+            elif is_included:
                 lbl.setStyleSheet("color: #00aaaa; background: transparent;")
             else:
                 lbl.setStyleSheet("color: #00ffff; background: transparent;")

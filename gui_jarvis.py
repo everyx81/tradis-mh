@@ -19,8 +19,7 @@ import json
 import threading
 import datetime
 import subprocess
-import keyboard  # 글로벌 단축키
-import pyperclip  # 클립보드 + 붙여넣기
+# keyboard, pyperclip: 지연 로딩 (_setup_global_hotkeys에서 import)
 
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QGridLayout,
                              QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
@@ -33,14 +32,10 @@ from PyQt6.QtGui import QPixmap, QFont
 
 # Internal Modules (Logic)
 from auto_rename import AutoRenamer, check_single_instance, set_api_key, Archiver
-from calendar_manager import LocalScheduleManager, WindowsNotifier
+# calendar_manager: 지연 로딩 (init_ui에서 import)
 from core.config import get_config_path
 
-# Export Automation Modules
-from export_mail_monitor import HanbiroMailMonitor
-from export_excel_parser import ExportExcelParser
-from readykorea_automation import ReadyKoreaAutomation, ExportInputData, AutomationStatus
-from export_mail_sender import ExportMailSender, EmailConfig
+# Export Automation Modules: 지연 로딩 (관리자 전용 기능)
 
 
 # GUI Modules (Refactored)
@@ -102,8 +97,8 @@ class JarvisGUI(QMainWindow):
         # 메일 모니터 초기화 (기능 제거됨)
         self.mail_monitor = None
         
-        # ReadyKorea 자동화 초기화
-        self.rk_automation = ReadyKoreaAutomation(on_status_change=self._on_rk_status_change)
+        # ReadyKorea 자동화 초기화 (지연 로딩)
+        self.rk_automation = None
         self.last_export_data = None  # 마지막 파싱된 수출 데이터 저장
         self.last_mail_info = None    # 마지막 수신 메일 정보 저장
         self.mail_sender = None       # 메일 발송기 (나중에 초기화)
@@ -465,6 +460,7 @@ class JarvisGUI(QMainWindow):
     def _create_content_pages(self):
         """QStackedWidget에 일정/통관/REPORT/SETTINGS 페이지 추가"""
         # --- 공유 리소스 (라이선스 무관하게 항상 생성) ---
+        from calendar_manager import LocalScheduleManager
         self.shared_schedule_manager = LocalScheduleManager()
 
         class CustomNotifierAdapter:
@@ -533,6 +529,7 @@ class JarvisGUI(QMainWindow):
                 self.schedule_manager.stop_reminder_loop()
             self.save_settings()
             # 글로벌 단축키 해제
+            import keyboard
             keyboard.unhook_all()
             self._remove_snippet_hook()
             # [PERF] 잔류 토스트 위젯 강제 정리
@@ -597,6 +594,7 @@ class JarvisGUI(QMainWindow):
     def _register_hotkeys(self):
         """단축키 등록"""
         try:
+            import keyboard
             # 메모장 단축키
             memo_key = self.hotkey_settings.get("memo_hotkey", "ctrl+shift+m")
             if memo_key:
@@ -609,6 +607,7 @@ class JarvisGUI(QMainWindow):
     
     def _unregister_hotkeys(self):
         """단축키 해제"""
+        import keyboard
         keyboard.unhook_all()
         self._remove_snippet_hook()
     
@@ -640,6 +639,8 @@ class JarvisGUI(QMainWindow):
         """텍스트 스니펫 붙여넣기 (다른 스레드에서 호출됨)"""
         def do_paste():
             try:
+                import pyperclip
+                import keyboard
                 # 클립보드에 복사
                 pyperclip.copy(text)
                 # Ctrl+V 시뮬레이션
@@ -1531,7 +1532,8 @@ class JarvisGUI(QMainWindow):
                     self.archiver.export_docs_root = data["export_docs_root"]
                     self.file_manager.lbl_exp_docs_root.setText(data["export_docs_root"])
                 # API 키는 keyring에서 로드 (core/config.py에서 자동 처리)
-                from core.config import api_key as loaded_api_key
+                from core.config import _ensure_api_key
+                loaded_api_key = _ensure_api_key()
                 self.emit_log("API Key loaded." if loaded_api_key else "API Key missing.")
                 if "browser_home_path" in data:
                     self.file_manager.browser_home_path = data["browser_home_path"]
@@ -1714,14 +1716,22 @@ class JarvisGUI(QMainWindow):
     # 메일 모니터링 기능 완전히 제거됨
     
     # 메일 모니터링 기능(VERONICA UI 업데이트) 제거됨
-    def _on_rk_status_change(self, status: AutomationStatus, message: str):
+    def _get_rk_automation(self):
+        """ReadyKorea 자동화 지연 초기화"""
+        if self.rk_automation is None:
+            from readykorea_automation import ReadyKoreaAutomation
+            self.rk_automation = ReadyKoreaAutomation(on_status_change=self._on_rk_status_change)
+        return self.rk_automation
+
+    def _on_rk_status_change(self, status, message: str):
         """ReadyKorea 자동화 상태 변경 콜백 (스레드 안전)"""
+        from readykorea_automation import AutomationStatus
         # QTimer.singleShot을 사용하여 메인 스레드에서 UI 업데이트
         def update_ui():
             if hasattr(self.file_manager, 'rk_automation_status'):
                 status_text = f"● {status.value}"
                 color = "#888"
-                
+
                 if status == AutomationStatus.COMPLETED:
                     color = "#00ff00"
                 elif status == AutomationStatus.ERROR:
@@ -1763,13 +1773,14 @@ class JarvisGUI(QMainWindow):
             return
         
         # ExportData를 ExportInputData로 변환
+        from readykorea_automation import ExportInputData
         input_data = ExportInputData.from_export_data(self.last_export_data)
         
         self._add_rk_log("자동 입력 시작...")
         
         def run_automation():
             try:
-                result = self.rk_automation.run_automation(input_data)
+                result = self._get_rk_automation().run_automation(input_data)
                 if result:
                     QTimer.singleShot(0, lambda: self._add_rk_log("✅ 자동 입력 완료!"))
                 else:
@@ -1787,7 +1798,7 @@ class JarvisGUI(QMainWindow):
         self._add_rk_log("ReadyKorea 연결 테스트 중...")
         
         def test_connection():
-            result = self.rk_automation.connect()
+            result = self._get_rk_automation().connect()
             if result:
                 QTimer.singleShot(0, lambda: self._add_rk_log("✅ ReadyKorea 연결 성공!"))
             else:
@@ -1828,6 +1839,7 @@ class JarvisGUI(QMainWindow):
             # 사용자 요청에 따라 발신자 주소 동적 생성 (ID + @ihaedo.com)
             user_id = email_addr.split('@')[0]
 
+            from export_mail_sender import ExportMailSender, EmailConfig
             email_config = EmailConfig(
                 smtp_server=hanbiro.get('smtp_server', 'raeon.hanbiro.net'),
                 smtp_port=int(hanbiro.get('smtp_port', 465)),

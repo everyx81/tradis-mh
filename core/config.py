@@ -8,7 +8,6 @@ import os
 import sys
 import json
 import base64
-import keyring
 
 SERVICE_NAME = "TRADIS_MH"
 
@@ -83,6 +82,7 @@ def _decode_api_key(encoded_key: str) -> str:
 
 def _migrate_api_key_to_keyring():
     """config.json의 api_key를 keyring으로 마이그레이션 (최초 1회)"""
+    import keyring
     encoded = CONFIG.get("api_key", "")
     if not encoded:
         return
@@ -96,6 +96,7 @@ def _migrate_api_key_to_keyring():
 
 def get_api_key() -> str:
     """keyring에서 API 키 로드 (없으면 config.json에서 마이그레이션)"""
+    import keyring
     key = keyring.get_password(SERVICE_NAME, "gemini_api_key")
     if key:
         return key
@@ -104,21 +105,31 @@ def get_api_key() -> str:
     _migrate_api_key_to_keyring()
     return keyring.get_password(SERVICE_NAME, "gemini_api_key") or ""
 
-# API 키 로드 (클라이언트는 지연 초기화)
-api_key = get_api_key()
+# API 키 지연 로딩 (keyring 접근을 시작 시 지연)
+api_key = None  # _ensure_api_key()로 초기화
 client = None  # get_client()로 접근
+_api_key_loaded = False
+
+def _ensure_api_key():
+    """API 키 지연 로딩 (최초 1회)"""
+    global api_key, _api_key_loaded
+    if not _api_key_loaded:
+        api_key = get_api_key()
+        _api_key_loaded = True
+    return api_key
 
 def get_client():
     """Gemini 클라이언트 지연 초기화"""
     global client
-    if client is None and api_key:
+    if client is None and _ensure_api_key():
         from google import genai
         client = genai.Client(api_key=api_key)
     return client
 
 def set_api_key(new_key: str):
     """API 키 설정 (keyring에 저장)"""
-    global api_key, client
+    global api_key, client, _api_key_loaded
+    import keyring
 
     actual_key = _decode_api_key(new_key) if new_key else ""
 
@@ -126,6 +137,7 @@ def set_api_key(new_key: str):
         actual_key = new_key
 
     api_key = actual_key
+    _api_key_loaded = True
 
     if actual_key:
         keyring.set_password(SERVICE_NAME, "gemini_api_key", actual_key)

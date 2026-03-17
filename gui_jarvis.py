@@ -1525,9 +1525,11 @@ class JarvisGUI(QMainWindow):
                 if "import_root" in data:
                     self.archiver.import_root = data["import_root"]
                     self.file_manager.lbl_imp_root.setText(data["import_root"])
+                    self.file_manager.start_background_indexing(data["import_root"])
                 if "export_root" in data:
                     self.archiver.export_root = data["export_root"]
                     self.file_manager.lbl_exp_root.setText(data["export_root"])
+                    self.file_manager.start_background_indexing(data["export_root"])
                 if "export_docs_root" in data:
                     self.archiver.export_docs_root = data["export_docs_root"]
                     self.file_manager.lbl_exp_docs_root.setText(data["export_docs_root"])

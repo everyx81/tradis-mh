@@ -45,6 +45,10 @@ class FileManagerWidget(QWidget):
         self.target_subfolders = []
         self.move_list_t1 = []
         self.browser_home_path = ""  # 홈 폴더 경로
+        # 디렉토리 인덱스 (백그라운드 사전 구축)
+        self._dir_index = {}       # root -> company_map
+        self._dir_index_ready = {}  # root -> bool
+        self._dir_index_lock = threading.Lock()
         
         # Signal 연결: 백그라운드 쓰레드에서 emit되면 메인 쓰레드에서 슬롯 실행
         self.refresh_after_move_signal.connect(self._on_move_complete)
@@ -1123,11 +1127,11 @@ class FileManagerWidget(QWidget):
             JarvisMessageBox.warning(self, "오류", "Company_ID 형식의 폴더가 선택되지 않았습니다.")
             return
 
-        # 이동 대상 회사만 추출하여 타겟 스캔
+        # 인덱스에서 캐시 조회 (미준비 시 타겟 스캔 폴백)
         needed_companies = set()
         for _, folder_name in valid_folders:
             needed_companies.add(folder_name.split('_')[0].replace("★", "").strip().upper())
-        dir_cache = self._build_targeted_cache(root, needed_companies)
+        dir_cache = self._get_dir_cache(root, needed_companies)
 
         # 중복 사전 검사
         new_folders = []
@@ -1175,6 +1179,7 @@ class FileManagerWidget(QWidget):
                     shutil.move(src_path, dst)
                     count += 1
                     moved_dst_paths.append(dst)
+                    self._update_index_after_move(root, comp.replace("★", "").strip().upper(), fid, dst_parent)
                     self.emit_log(f" -> [이동 성공] {folder_name} -> {comp}/{fid}")
                 except Exception as e: self.emit_log(f" -> [이동 실패] {folder_name}: {e}")
 
@@ -1286,57 +1291,36 @@ class FileManagerWidget(QWidget):
 
 
 
-    def _build_targeted_cache(self, root, needed_companies):
-        """필요한 회사만 타겟 스캔 (전체 스캔 대비 대폭 빠름)"""
-        # company_map: clean_name_upper -> (folder_path, {child_names})
-        company_map = {}
-        remaining = set(needed_companies)  # 아직 못 찾은 회사
-        try:
-            root_items = []
-            with os.scandir(root) as entries:
-                for entry in entries:
-                    if not entry.is_dir(follow_symlinks=False): continue
-                    clean = entry.name.replace("★", "").strip().upper()
-                    root_items.append((clean, entry.path))
-                    # 1단계: root 직접 하위에서 필요한 회사만 스캔
-                    if clean in remaining:
-                        try:
-                            children = {e.name for e in os.scandir(entry.path)}
-                        except (PermissionError, OSError):
-                            children = set()
-                        company_map[clean] = (entry.path, children)
-                        remaining.discard(clean)
-            # 2단계: 1단계에서 못 찾은 회사만 root/*/하위에서 검색
-            if remaining:
-                for _, folder_path in root_items:
-                    if not remaining: break
-                    try:
-                        with os.scandir(folder_path) as sub_entries:
-                            for sub_entry in sub_entries:
-                                if not remaining: break
-                                if not sub_entry.is_dir(follow_symlinks=False): continue
-                                clean_sub = sub_entry.name.replace("★", "").strip().upper()
-                                if clean_sub in remaining:
-                                    try:
-                                        sub_children = {e.name for e in os.scandir(sub_entry.path)}
-                                    except (PermissionError, OSError):
-                                        sub_children = set()
-                                    company_map[clean_sub] = (sub_entry.path, sub_children)
-                                    remaining.discard(clean_sub)
-                    except (PermissionError, OSError):
-                        continue
-        except (OSError, AttributeError):
-            pass
-        return company_map
+    # ── 디렉토리 인덱스 (Everything 방식: 사전 구축 + 디스크 캐시) ──
 
-    def _build_dir_cache(self, root):
-        """root 디렉토리 전체 스캔 캐시 (폴백용)"""
-        import time as _time
-        now = _time.monotonic()
-        if (hasattr(self, '_dir_cache_data') and self._dir_cache_root == root
-                and now - self._dir_cache_time < 10):
-            return self._dir_cache_data
+    def _get_index_path(self, root):
+        """인덱스 저장 경로"""
+        import hashlib
+        key = hashlib.md5(root.encode('utf-8')).hexdigest()[:12]
+        return os.path.join(os.path.dirname(get_config_path()), f"dir_index_{key}.json")
 
+    def start_background_indexing(self, root):
+        """백그라운드에서 디렉토리 인덱스 구축 (프로그램 시작 시 호출)"""
+        if not root or not os.path.isdir(root):
+            return
+        # 1) 디스크 캐시가 있으면 즉시 로드
+        idx_path = self._get_index_path(root)
+        if os.path.exists(idx_path):
+            try:
+                with open(idx_path, 'r', encoding='utf-8') as f:
+                    saved = json.load(f)
+                # JSON은 set 미지원 → list로 저장/set으로 복원
+                company_map = {k: (v[0], set(v[1])) for k, v in saved.items()}
+                with self._dir_index_lock:
+                    self._dir_index[root] = company_map
+                    self._dir_index_ready[root] = True
+            except Exception:
+                pass
+        # 2) 백그라운드에서 최신 인덱스 갱신
+        threading.Thread(target=self._rebuild_index, args=(root,), daemon=True).start()
+
+    def _rebuild_index(self, root):
+        """전체 디렉토리 스캔 후 인덱스 저장"""
         company_map = {}
         try:
             root_items = []
@@ -1367,14 +1351,88 @@ class FileManagerWidget(QWidget):
                     continue
         except (OSError, AttributeError):
             pass
+        # 메모리 인덱스 업데이트
+        with self._dir_index_lock:
+            self._dir_index[root] = company_map
+            self._dir_index_ready[root] = True
+        # 디스크에 저장 (다음 실행 시 즉시 로드)
+        try:
+            idx_path = self._get_index_path(root)
+            os.makedirs(os.path.dirname(idx_path), exist_ok=True)
+            serializable = {k: (v[0], list(v[1])) for k, v in company_map.items()}
+            with open(idx_path, 'w', encoding='utf-8') as f:
+                json.dump(serializable, f, ensure_ascii=False)
+        except Exception:
+            pass
 
-        self._dir_cache_data = company_map
-        self._dir_cache_root = root
-        self._dir_cache_time = now
+    def _get_dir_cache(self, root, needed_companies=None):
+        """인덱스에서 캐시 반환. 인덱스 미준비 시 타겟 스캔 폴백."""
+        with self._dir_index_lock:
+            if self._dir_index_ready.get(root):
+                return self._dir_index[root]
+        # 폴백: 필요한 회사만 타겟 스캔
+        if needed_companies:
+            return self._build_targeted_cache(root, needed_companies)
+        return self._build_full_cache(root)
+
+    def _build_targeted_cache(self, root, needed_companies):
+        """필요한 회사만 타겟 스캔 (인덱스 미준비 시 폴백)"""
+        company_map = {}
+        remaining = set(needed_companies)
+        try:
+            root_items = []
+            with os.scandir(root) as entries:
+                for entry in entries:
+                    if not entry.is_dir(follow_symlinks=False): continue
+                    clean = entry.name.replace("★", "").strip().upper()
+                    root_items.append((clean, entry.path))
+                    if clean in remaining:
+                        try:
+                            children = {e.name for e in os.scandir(entry.path)}
+                        except (PermissionError, OSError):
+                            children = set()
+                        company_map[clean] = (entry.path, children)
+                        remaining.discard(clean)
+            if remaining:
+                for _, folder_path in root_items:
+                    if not remaining: break
+                    try:
+                        with os.scandir(folder_path) as sub_entries:
+                            for sub_entry in sub_entries:
+                                if not remaining: break
+                                if not sub_entry.is_dir(follow_symlinks=False): continue
+                                clean_sub = sub_entry.name.replace("★", "").strip().upper()
+                                if clean_sub in remaining:
+                                    try:
+                                        sub_children = {e.name for e in os.scandir(sub_entry.path)}
+                                    except (PermissionError, OSError):
+                                        sub_children = set()
+                                    company_map[clean_sub] = (sub_entry.path, sub_children)
+                                    remaining.discard(clean_sub)
+                    except (PermissionError, OSError):
+                        continue
+        except (OSError, AttributeError):
+            pass
         return company_map
 
+    def _build_full_cache(self, root):
+        """전체 스캔 (폴백용)"""
+        return self._build_targeted_cache(root, None)
+
+    def _update_index_after_move(self, root, company_clean, fid, dst_parent):
+        """이동 후 인덱스 부분 업데이트 (전체 재스캔 불필요)"""
+        with self._dir_index_lock:
+            if root not in self._dir_index:
+                return
+            idx = self._dir_index[root]
+            if company_clean in idx:
+                folder_path, children = idx[company_clean]
+                children.add(fid)
+            else:
+                idx[company_clean] = (dst_parent, {fid})
+
     def _find_id_in_company_dir(self, root, company, target_id, _cache=None):
-        cache = _cache or self._build_dir_cache(root)
+        cache = _cache or self._get_dir_cache(root)
         clean_company = company.replace("★", "").strip().upper()
         entry = cache.get(clean_company)
         if entry:
@@ -1384,7 +1442,7 @@ class FileManagerWidget(QWidget):
         return None
 
     def _find_company_folder(self, root, company, _cache=None):
-        cache = _cache or self._build_dir_cache(root)
+        cache = _cache or self._get_dir_cache(root)
         clean_company = company.replace("★", "").strip().upper()
         entry = cache.get(clean_company)
         if entry:
@@ -1407,14 +1465,16 @@ class FileManagerWidget(QWidget):
     def set_root(self, mode):
         d = QFileDialog.getExistingDirectory(self, f"Select {mode.upper()} Root")
         if d:
-            if mode == 'import': 
+            if mode == 'import':
                 self.archiver.import_root = d
                 self.lbl_imp_root.setText(d)
                 self.lbl_imp_root.setStyleSheet("color: #00aaaa; font-size: 8pt;")
-            elif mode == 'export': 
+                self.start_background_indexing(d)
+            elif mode == 'export':
                 self.archiver.export_root = d
                 self.lbl_exp_root.setText(d)
                 self.lbl_exp_root.setStyleSheet("color: #00aaaa; font-size: 8pt;")
+                self.start_background_indexing(d)
             elif mode == 'export_docs':
                 self.archiver.export_docs_root = d
                 self.lbl_exp_docs_root.setText(d)
@@ -1920,7 +1980,7 @@ TRADIS MH는 관세사무소 업무 자동화 도구입니다.
 
 ## 📋 버전 정보
 
-**현재 버전**: v1.0.12
+**현재 버전**: v1.0.16
 
 #### v1.0.12 (2026-03-15)
 - 시작 속도 개선: google.genai, pypdfium2 지연 로딩 (UI 먼저 표시)

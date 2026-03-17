@@ -1123,8 +1123,11 @@ class FileManagerWidget(QWidget):
             JarvisMessageBox.warning(self, "오류", "Company_ID 형식의 폴더가 선택되지 않았습니다.")
             return
 
-        # 디렉토리 구조 캐시 (한 번만 스캔)
-        dir_cache = self._build_dir_cache(root)
+        # 이동 대상 회사만 추출하여 타겟 스캔
+        needed_companies = set()
+        for _, folder_name in valid_folders:
+            needed_companies.add(folder_name.split('_')[0].replace("★", "").strip().upper())
+        dir_cache = self._build_targeted_cache(root, needed_companies)
 
         # 중복 사전 검사
         new_folders = []
@@ -1283,16 +1286,57 @@ class FileManagerWidget(QWidget):
 
 
 
+    def _build_targeted_cache(self, root, needed_companies):
+        """필요한 회사만 타겟 스캔 (전체 스캔 대비 대폭 빠름)"""
+        # company_map: clean_name_upper -> (folder_path, {child_names})
+        company_map = {}
+        remaining = set(needed_companies)  # 아직 못 찾은 회사
+        try:
+            root_items = []
+            with os.scandir(root) as entries:
+                for entry in entries:
+                    if not entry.is_dir(follow_symlinks=False): continue
+                    clean = entry.name.replace("★", "").strip().upper()
+                    root_items.append((clean, entry.path))
+                    # 1단계: root 직접 하위에서 필요한 회사만 스캔
+                    if clean in remaining:
+                        try:
+                            children = {e.name for e in os.scandir(entry.path)}
+                        except (PermissionError, OSError):
+                            children = set()
+                        company_map[clean] = (entry.path, children)
+                        remaining.discard(clean)
+            # 2단계: 1단계에서 못 찾은 회사만 root/*/하위에서 검색
+            if remaining:
+                for _, folder_path in root_items:
+                    if not remaining: break
+                    try:
+                        with os.scandir(folder_path) as sub_entries:
+                            for sub_entry in sub_entries:
+                                if not remaining: break
+                                if not sub_entry.is_dir(follow_symlinks=False): continue
+                                clean_sub = sub_entry.name.replace("★", "").strip().upper()
+                                if clean_sub in remaining:
+                                    try:
+                                        sub_children = {e.name for e in os.scandir(sub_entry.path)}
+                                    except (PermissionError, OSError):
+                                        sub_children = set()
+                                    company_map[clean_sub] = (sub_entry.path, sub_children)
+                                    remaining.discard(clean_sub)
+                    except (PermissionError, OSError):
+                        continue
+        except (OSError, AttributeError):
+            pass
+        return company_map
+
     def _build_dir_cache(self, root):
-        """root 디렉토리 구조를 한 번만 스캔하여 캐시 생성 (os.scandir 최적화)"""
-        # 캐시 재사용: 같은 root에 대해 10초 이내 재호출 시 기존 캐시 반환
+        """root 디렉토리 전체 스캔 캐시 (폴백용)"""
         import time as _time
         now = _time.monotonic()
         if (hasattr(self, '_dir_cache_data') and self._dir_cache_root == root
                 and now - self._dir_cache_time < 10):
             return self._dir_cache_data
 
-        # company_map: clean_name_upper -> (folder_path, {child_names})
         company_map = {}
         try:
             root_items = []
@@ -1300,7 +1344,6 @@ class FileManagerWidget(QWidget):
                 for entry in entries:
                     if not entry.is_dir(follow_symlinks=False): continue
                     root_items.append((entry.name, entry.path))
-                    # 1단계: root 직접 하위 회사 폴더 (우선)
                     clean = entry.name.replace("★", "").strip().upper()
                     try:
                         children = {e.name for e in os.scandir(entry.path)}
@@ -1308,7 +1351,6 @@ class FileManagerWidget(QWidget):
                         children = set()
                     if clean not in company_map:
                         company_map[clean] = (entry.path, children)
-            # 2단계: root/*/하위 회사 폴더 (1단계에서 못 찾은 것만)
             for folder, folder_path in root_items:
                 try:
                     with os.scandir(folder_path) as sub_entries:
@@ -1326,7 +1368,6 @@ class FileManagerWidget(QWidget):
         except (OSError, AttributeError):
             pass
 
-        # 캐시 저장
         self._dir_cache_data = company_map
         self._dir_cache_root = root
         self._dir_cache_time = now

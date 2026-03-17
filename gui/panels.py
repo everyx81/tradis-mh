@@ -1284,40 +1284,52 @@ class FileManagerWidget(QWidget):
 
 
     def _build_dir_cache(self, root):
-        """root 디렉토리 구조를 한 번만 스캔하여 캐시 생성 (원본 로직과 동일한 우선순위)"""
+        """root 디렉토리 구조를 한 번만 스캔하여 캐시 생성 (os.scandir 최적화)"""
+        # 캐시 재사용: 같은 root에 대해 10초 이내 재호출 시 기존 캐시 반환
+        import time as _time
+        now = _time.monotonic()
+        if (hasattr(self, '_dir_cache_data') and self._dir_cache_root == root
+                and now - self._dir_cache_time < 10):
+            return self._dir_cache_data
+
         # company_map: clean_name_upper -> (folder_path, {child_names})
         company_map = {}
         try:
             root_items = []
-            for folder in os.listdir(root):
-                folder_path = os.path.join(root, folder)
-                if not os.path.isdir(folder_path): continue
-                root_items.append((folder, folder_path))
-                # 1단계: root 직접 하위 회사 폴더 (우선)
-                clean = folder.replace("★", "").strip().upper()
-                try:
-                    children = set(os.listdir(folder_path))
-                except (PermissionError, OSError):
-                    children = set()
-                if clean not in company_map:
-                    company_map[clean] = (folder_path, children)
+            with os.scandir(root) as entries:
+                for entry in entries:
+                    if not entry.is_dir(follow_symlinks=False): continue
+                    root_items.append((entry.name, entry.path))
+                    # 1단계: root 직접 하위 회사 폴더 (우선)
+                    clean = entry.name.replace("★", "").strip().upper()
+                    try:
+                        children = {e.name for e in os.scandir(entry.path)}
+                    except (PermissionError, OSError):
+                        children = set()
+                    if clean not in company_map:
+                        company_map[clean] = (entry.path, children)
             # 2단계: root/*/하위 회사 폴더 (1단계에서 못 찾은 것만)
             for folder, folder_path in root_items:
                 try:
-                    for sub_folder in os.listdir(folder_path):
-                        sub_path = os.path.join(folder_path, sub_folder)
-                        if not os.path.isdir(sub_path): continue
-                        clean_sub = sub_folder.replace("★", "").strip().upper()
-                        if clean_sub not in company_map:
-                            try:
-                                sub_children = set(os.listdir(sub_path))
-                            except (PermissionError, OSError):
-                                sub_children = set()
-                            company_map[clean_sub] = (sub_path, sub_children)
+                    with os.scandir(folder_path) as sub_entries:
+                        for sub_entry in sub_entries:
+                            if not sub_entry.is_dir(follow_symlinks=False): continue
+                            clean_sub = sub_entry.name.replace("★", "").strip().upper()
+                            if clean_sub not in company_map:
+                                try:
+                                    sub_children = {e.name for e in os.scandir(sub_entry.path)}
+                                except (PermissionError, OSError):
+                                    sub_children = set()
+                                company_map[clean_sub] = (sub_entry.path, sub_children)
                 except (PermissionError, OSError):
                     continue
         except (OSError, AttributeError):
             pass
+
+        # 캐시 저장
+        self._dir_cache_data = company_map
+        self._dir_cache_root = root
+        self._dir_cache_time = now
         return company_map
 
     def _find_id_in_company_dir(self, root, company, target_id, _cache=None):

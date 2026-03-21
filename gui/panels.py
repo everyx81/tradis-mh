@@ -36,6 +36,7 @@ class FileManagerWidget(QWidget):
     stop_monitoring_clicked = pyqtSignal()  # 모니터링 중지 버튼 클릭
     item_deleted = pyqtSignal()  # 항목 삭제 시그널
     admin_unlocked = pyqtSignal()  # 관리자 잠금 해제 시그널
+    _mail_search_done = pyqtSignal(str, str, str, object, str)  # company, bl_id, file_path, threads, my_email
 
     def __init__(self, parent=None, path_callback=None, archiver=None, license_tier="standard"):
         super().__init__(parent)
@@ -54,7 +55,8 @@ class FileManagerWidget(QWidget):
         self.refresh_after_move_signal.connect(self._on_move_complete)
         self.search_result_signal.connect(self._display_search_results)
         self.quick_export_complete_signal.connect(self._on_quick_export_complete)
-        
+        self._mail_search_done.connect(self._show_mail_thread_dialog)
+
         self.init_ui()
         QTimer.singleShot(0, self.refresh_targets)
         self.load_config()
@@ -114,6 +116,8 @@ class FileManagerWidget(QWidget):
         self.list_widget._restore_style()
         self.list_widget.items_dropped.connect(self._on_items_dropped)
         self.list_widget.refresh_needed.connect(lambda: self._load_folder_contents(self.list_widget.current_folder) if self.list_widget.current_folder else None)
+        self.list_widget.mail_send_requested.connect(self._on_mail_send_requested)
+        self.list_widget.mail_preconnect_requested.connect(self._preconnect_imap)
         left_layout.addWidget(self.list_widget)
         
         # 하단 버튼
@@ -1619,6 +1623,209 @@ class FileManagerWidget(QWidget):
         self.export_mail_list.takeItem(row)
         # 삭제 후 시그널 발생 (연동 데이터 초기화용)
         self.item_deleted.emit()
+
+    def _preconnect_imap(self):
+        """정산서 우클릭 시 IMAP 사전 연결 (메뉴 표시 동안 백그라운드)"""
+        def do_preconnect():
+            try:
+                import json
+                config_path = get_config_path()
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+                hanbiro = config.get('hanbiro_mail', {})
+                email_addr = hanbiro.get('email', '')
+                imap_server = hanbiro.get('imap_server', 'raeon.hanbiro.net')
+                import keyring
+                password = keyring.get_password("TRADIS_MH", "email_password") or ''
+                if email_addr and password:
+                    from export_mail_sender import ExportMailSender, EmailConfig
+                    ec = EmailConfig(imap_server=imap_server, email=email_addr, password=password)
+                    sender = ExportMailSender(ec)
+                    sender.ensure_connections()
+                    print("[메일] IMAP 사전 연결 완료")
+            except Exception as e:
+                print(f"[메일] 사전 연결 실패 (무시): {e}")
+
+        threading.Thread(target=do_preconnect, daemon=True).start()
+
+    def _on_mail_send_requested(self, file_path: str):
+        """정산서 파일 우클릭 → 메일 보내기 처리"""
+        print(f"[메일 보내기] _on_mail_send_requested 진입: {file_path}")
+        try:
+            self._do_mail_send(file_path)
+        except Exception as e:
+            print(f"[메일 보내기 오류] {e}")
+            import traceback
+            traceback.print_exc()
+            QMessageBox.critical(self, "오류", f"메일 보내기 처리 중 오류:\n{e}")
+
+    def _do_mail_send(self, file_path: str):
+        import re
+        import datetime
+        import threading
+        import json
+        from export_mail_sender import ExportMailSender, EmailConfig, FoundEmailThread
+        from .dialogs import MailThreadSelectDialog, SendMailDialog
+
+        filename = os.path.basename(file_path)
+        print(f"[메일 보내기] _do_mail_send 진입: filename={filename}")
+
+        # 파일명에서 B/L, 업체명 파싱: {company}({bl_id})정산서.pdf
+        match = re.search(r'^(.+?)\(([^)]+)\)', filename)
+        if not match:
+            QMessageBox.warning(self, "오류", f"파일명에서 B/L 번호를 추출할 수 없습니다.\n{filename}")
+            return
+        company = match.group(1).strip()
+        bl_id = match.group(2).strip()
+
+        # EmailConfig 구성
+        config_path = get_config_path()
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+            hanbiro = config.get('hanbiro_mail', {})
+            email_addr = hanbiro.get('email', '')
+            imap_server = hanbiro.get('imap_server', 'raeon.hanbiro.net')
+        except Exception:
+            email_addr = ''
+            imap_server = 'raeon.hanbiro.net'
+
+        import keyring
+        password = keyring.get_password("TRADIS_MH", "email_password") or ''
+
+        if not email_addr or not password:
+            QMessageBox.warning(self, "메일 설정 필요", "SETTINGS 탭에서 메일 설정을 먼저 해주세요.")
+            return
+
+        email_config = EmailConfig(
+            imap_server=imap_server,
+            email=email_addr,
+            password=password,
+        )
+        sender = ExportMailSender(email_config)
+
+        # 로딩 표시 (Frosted Glass)
+        from PyQt6.QtWidgets import QGraphicsDropShadowEffect
+        from PyQt6.QtGui import QFont, QColor as QC
+
+        self._mail_loading = QDialog(self)
+        self._mail_loading.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        self._mail_loading.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        loading_lbl = QLabel(f"  메일 검색 중...  ({bl_id})  ")
+        loading_lbl.setFont(QFont("Segoe UI", 11))
+        loading_lbl.setStyleSheet("""
+            background-color: rgba(25, 32, 48, 235);
+            border: 1px solid rgba(0, 255, 255, 0.3);
+            border-radius: 14px;
+            color: #00ddee;
+            padding: 18px 28px;
+        """)
+        loading_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        shadow = QGraphicsDropShadowEffect()
+        shadow.setBlurRadius(30)
+        shadow.setXOffset(0)
+        shadow.setYOffset(5)
+        shadow.setColor(QC(0, 0, 0, 160))
+        loading_lbl.setGraphicsEffect(shadow)
+
+        ll = QVBoxLayout(self._mail_loading)
+        ll.setContentsMargins(0, 0, 0, 0)
+        ll.addWidget(loading_lbl)
+        self._mail_loading.adjustSize()
+        self._mail_loading.show()
+        QApplication.processEvents()
+
+        # IMAP 검색 (백그라운드) → 시그널로 메인 스레드에 전달
+        def do_search():
+            try:
+                results = sender.search_threads_by_bl(bl_id)
+            except Exception as e:
+                print(f"[메일 검색 오류] {e}")
+                results = []
+            self._mail_search_done.emit(company, bl_id, file_path, results, email_addr)
+
+        threading.Thread(target=do_search, daemon=True).start()
+
+    def _show_mail_thread_dialog(self, company, bl_id, file_path, threads, my_email):
+        """IMAP 검색 결과로 메일 선택 다이얼로그 → SendMailDialog"""
+        # 로딩 다이얼로그 닫기
+        if hasattr(self, '_mail_loading') and self._mail_loading:
+            self._mail_loading.close()
+            self._mail_loading = None
+        try:
+            self._do_show_mail_thread_dialog(company, bl_id, file_path, threads, my_email)
+        except Exception as e:
+            print(f"[메일 다이얼로그 오류] {e}")
+            import traceback
+            traceback.print_exc()
+            QMessageBox.critical(self, "오류", f"메일 다이얼로그 오류:\n{e}")
+
+    def _do_show_mail_thread_dialog(self, company, bl_id, file_path, threads, my_email):
+        import datetime
+        from .dialogs import MailThreadSelectDialog, SendMailDialog
+        print(f"[메일 다이얼로그] threads={len(threads)}건, company={company}, bl={bl_id}")
+
+        dlg = MailThreadSelectDialog(self, threads=threads, bl_number=bl_id)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        selected = dlg.selected_thread
+
+        # 시간대별 인사말
+        hour = datetime.datetime.now().hour
+        if 6 <= hour < 12:
+            greeting_first = "좋은 아침입니다."
+            greeting_last = "좋은 하루 보내세요~"
+        elif 12 <= hour < 18:
+            greeting_first = "좋은 오후입니다."
+            greeting_last = "따뜻한 오후되세요~"
+        else:
+            greeting_first = "좋은 저녁입니다."
+            greeting_last = "편안한 저녁되세요~"
+
+        # 본문 템플릿
+        body = (
+            f"안녕하세요\n\n"
+            f"{greeting_first}\n"
+            f"해도관세사무소 최명헌입니다.\n\n"
+            f"{company}({bl_id})건 정산서 보내드립니다.\n\n"
+            f"{greeting_last}\n\n"
+            f"감사합니다.\n"
+            f"최명헌 드림"
+        )
+
+        if selected:
+            # 답장: "내가 보낸 메일"이면 to 필드를 원본 수신자로
+            my_id = my_email.split('@')[0].lower()
+            sender_email = selected.sender.lower()
+            if my_id in sender_email or my_email.lower() in sender_email:
+                to = selected.to
+            else:
+                to = selected.sender
+            cc = selected.cc or ""
+            subject = f"Re: {selected.subject}" if not selected.subject.startswith("Re:") else selected.subject
+            in_reply_to = selected.message_id
+            references = selected.message_id
+        else:
+            # 새 메일
+            to = ""
+            cc = ""
+            subject = f"[해도관세사무소] {company}({bl_id}) - 정산서"
+            in_reply_to = ""
+            references = ""
+
+        mail_dlg = SendMailDialog(
+            parent=self,
+            subject=subject,
+            body=body,
+            attachments=[file_path],
+            to=to,
+            cc=cc,
+            in_reply_to=in_reply_to,
+            references=references,
+        )
+        mail_dlg.exec()
 
     def _show_target_folder_context_menu(self, pos):
         """MOVE TARGET 폴더 우클릭 메뉴"""

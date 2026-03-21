@@ -137,6 +137,8 @@ class DropListWidget(QListWidget):
     """드래그 앤 드롭 및 탐색기 기능을 지원하는 커스텀 QListWidget"""
     items_dropped = pyqtSignal(list)       # 드롭 발생 시
     refresh_needed = pyqtSignal()          # 새로고침 필요 시
+    mail_send_requested = pyqtSignal(str)  # 정산서 메일 발송 요청 (파일 경로)
+    mail_preconnect_requested = pyqtSignal()  # IMAP 사전 연결 요청
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -225,7 +227,19 @@ class DropListWidget(QListWidget):
         action_delete = menu.addAction("🗑️ 삭제")
         menu.addSeparator()
         action_open_explorer = menu.addAction("📂 탐색기에서 열기")
-        
+
+        # 메일 보내기 (정산서 PDF만)
+        menu.addSeparator()
+        action_mail = menu.addAction("📧 메일 보내기")
+        path_for_check = item.data(Qt.ItemDataRole.UserRole) or ""
+        basename = os.path.basename(path_for_check) if path_for_check else ""
+        is_settlement_pdf = path_for_check and path_for_check.lower().endswith('.pdf') and '정산서' in basename
+        if not is_settlement_pdf:
+            action_mail.setEnabled(False)
+        else:
+            # 정산서 PDF 우클릭 시 IMAP 사전 연결 시작
+            self.mail_preconnect_requested.emit()
+
         # 붙여넣기 가능 여부 확인
         clipboard = QApplication.clipboard()
         mime_data = clipboard.mimeData()
@@ -255,6 +269,10 @@ class DropListWidget(QListWidget):
         elif action == action_open_explorer:
             if path:
                 subprocess.run(f'explorer /select,"{path}"', creationflags=subprocess.CREATE_NO_WINDOW)
+        elif action == action_mail:
+            if path:
+                print(f"[메일 보내기] 시그널 emit: {path}")
+                self.mail_send_requested.emit(path)
 
     def _copy_to_clipboard(self, paths, is_cut=False):
         """파일을 클립보드에 복사/잘라내기"""

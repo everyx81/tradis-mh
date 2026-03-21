@@ -12,9 +12,10 @@ import threading
 
 from PyQt6.QtWidgets import (QWidget, QLabel, QVBoxLayout, QHBoxLayout, QApplication,
                               QPushButton, QComboBox, QDialog, QMessageBox, QLineEdit, QTextEdit,
-                              QListWidget, QListWidgetItem)
+                              QListWidget, QListWidgetItem, QTableWidget, QTableWidgetItem,
+                              QFormLayout, QHeaderView)
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QPropertyAnimation, QEasingCurve, QPoint, QParallelAnimationGroup
-from PyQt6.QtGui import QPixmap, QImage, QCursor
+from PyQt6.QtGui import QPixmap, QImage, QCursor, QColor
 
 from .widgets import GlassFrame, NeonButton
 from .utils import resource_path, generate_pdf_thumbnail
@@ -1396,47 +1397,77 @@ class JarvisMessageBox(QDialog):
 class SendMailDialog(QDialog):
     """메일 발송 다이얼로그"""
     
-    def __init__(self, parent=None, subject="", body="", html_body="", attachments=None, to="", cc=""):
+    def __init__(self, parent=None, subject="", body="", html_body="", attachments=None,
+                 to="", cc="", in_reply_to="", references="",
+                 recipient_name="", recipient_title=""):
         super().__init__(parent)
-        self.setWindowTitle("📧 메일 발송")
-        self.setMinimumWidth(500)
-        self.setMinimumHeight(400)
-        self.setStyleSheet("""
-            QDialog {
-                background-color: rgba(5, 15, 30, 240);
-                border: 2px solid #00ffff;
-                border-radius: 10px;
-            }
-            QLabel { color: #ffffff; font-size: 10pt; }
-            QLineEdit, QTextEdit {
-                background-color: rgba(5, 15, 30, 200);
-                border: 1px solid #00aaaa;
-                border-radius: 5px;
-                color: #ffffff;
-                padding: 8px;
-            }
-        """)
-        
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+
         self.subject = subject
         self.body = body
         self.html_body = html_body
         self.attachments = attachments or []
         self.default_to = to
         self.default_cc = cc
-        
+        self.in_reply_to = in_reply_to
+        self.references = references
+        self.recipient_name = recipient_name
+        self.recipient_title = recipient_title
+
         self.init_ui()
         self._load_mail_settings()
     
     def init_ui(self):
-        from PyQt6.QtWidgets import QFormLayout
-        
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(15)
-        
+        from PyQt6.QtWidgets import QFormLayout, QGraphicsDropShadowEffect
+        from PyQt6.QtGui import QFont
+
+        # Frosted Glass 컨테이너
+        self.container = QWidget(self)
+        self.container.setObjectName("send_mail_container")
+        self.container.setStyleSheet("""
+            #send_mail_container {
+                background-color: rgba(25, 32, 48, 235);
+                border: 1px solid rgba(0, 255, 255, 0.3);
+                border-radius: 16px;
+            }
+            #send_mail_container QLabel {
+                color: #e0e0e0;
+                font-size: 10pt;
+                background: transparent;
+            }
+            #send_mail_container QLineEdit, #send_mail_container QTextEdit {
+                background-color: rgba(15, 22, 40, 200);
+                border: 1px solid rgba(0, 200, 220, 0.25);
+                border-radius: 6px;
+                color: #ffffff;
+                padding: 8px;
+                font-size: 10pt;
+            }
+            #send_mail_container QLineEdit:focus, #send_mail_container QTextEdit:focus {
+                border: 1px solid rgba(0, 255, 255, 0.6);
+            }
+        """)
+
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(40)
+        shadow.setXOffset(0)
+        shadow.setYOffset(8)
+        shadow.setColor(QColor(0, 0, 0, 180))
+        self.container.setGraphicsEffect(shadow)
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(12, 12, 12, 12)
+        outer.addWidget(self.container)
+
+        layout = QVBoxLayout(self.container)
+        layout.setContentsMargins(24, 24, 24, 20)
+        layout.setSpacing(12)
+
         # 헤더
-        header = QLabel("📧 메일 발송")
-        header.setStyleSheet("color: #00ffff; font-size: 14pt; font-weight: bold;")
+        header = QLabel("메일 발송")
+        header.setFont(QFont("Segoe UI", 14, QFont.Weight.Bold))
+        header.setStyleSheet("color: #00ffff; background: transparent;")
         layout.addWidget(header)
         
         # 폼
@@ -1454,9 +1485,28 @@ class SendMailDialog(QDialog):
         self.input_cc.setPlaceholderText("cc1@email.com, cc2@email.com")
         self.input_cc.setText(self.default_cc)
         form.addRow("참조:", self.input_cc)
-        
 
-        
+        # 이름/직책 (정산서 메일용)
+        name_title_layout = QHBoxLayout()
+        self.input_name = QLineEdit()
+        self.input_name.setPlaceholderText("이름")
+        self.input_name.setText(self.recipient_name)
+        self.input_name.setMaximumWidth(150)
+        name_title_layout.addWidget(self.input_name)
+
+        self.input_title = QLineEdit()
+        self.input_title.setPlaceholderText("직책")
+        self.input_title.setText(self.recipient_title)
+        self.input_title.setMaximumWidth(150)
+        name_title_layout.addWidget(self.input_title)
+        name_title_layout.addStretch()
+
+        form.addRow("이름/직책:", name_title_layout)
+
+        # 이름/직책 변경 시 본문 첫 줄 업데이트
+        self.input_name.textChanged.connect(self._update_greeting_line)
+        self.input_title.textChanged.connect(self._update_greeting_line)
+
         # 제목
         self.input_subject = QLineEdit()
         self.input_subject.setText(self.subject)
@@ -1474,7 +1524,7 @@ class SendMailDialog(QDialog):
         # 첨부 파일 영역
         attach_header = QHBoxLayout()
         attach_label = QLabel("📎 첨부파일:")
-        attach_label.setStyleSheet("color: #00ff88; font-size: 10pt; font-weight: bold;")
+        attach_label.setStyleSheet("color: #00ff88; font-size: 10pt; font-weight: bold; background: transparent;")
         attach_header.addWidget(attach_label)
         attach_header.addStretch()
         
@@ -1494,13 +1544,13 @@ class SendMailDialog(QDialog):
         self.attach_list.setAcceptDrops(True)
         self.attach_list.setStyleSheet("""
             QListWidget {
-                background-color: rgba(5, 15, 30, 200);
-                border: 1px solid #00aaaa;
-                border-radius: 5px;
+                background-color: rgba(15, 22, 40, 200);
+                border: 1px solid rgba(0, 200, 220, 0.2);
+                border-radius: 6px;
                 color: #00ff88;
                 font-size: 9pt;
             }
-            QListWidget::item { padding: 3px; }
+            QListWidget::item { padding: 4px 8px; }
             QListWidget::item:selected { background-color: rgba(0, 255, 255, 50); color: #ffffff; }
         """)
         self.attach_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -1515,7 +1565,7 @@ class SendMailDialog(QDialog):
         
         # 드래그 앤 드롭 힌트
         drop_hint = QLabel("💡 파일을 끌어다 놓거나 버튼으로 추가")
-        drop_hint.setStyleSheet("color: #666; font-size: 8pt;")
+        drop_hint.setStyleSheet("color: rgba(255,255,255,0.35); font-size: 8pt; background: transparent;")
         layout.addWidget(drop_hint)
         
         # 기존 첨부파일 추가
@@ -1602,8 +1652,42 @@ class SendMailDialog(QDialog):
             event.acceptProposedAction()
         else:
             event.ignore()
-    
-    
+
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            event.accept()
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() & Qt.MouseButton.LeftButton and hasattr(self, '_drag_pos'):
+            self.move(event.globalPosition().toPoint() - self._drag_pos)
+            event.accept()
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Escape:
+            self.reject()
+        else:
+            super().keyPressEvent(event)
+
+    def _update_greeting_line(self):
+        """이름/직책 변경 시 본문 첫 줄 업데이트"""
+        name = self.input_name.text().strip()
+        title = self.input_title.text().strip()
+
+        current_text = self.text_body.toPlainText()
+        lines = current_text.split('\n')
+
+        # 첫 줄이 "안녕하세요"로 시작하면 업데이트
+        if lines and lines[0].startswith("안녕하세요"):
+            if name and title:
+                lines[0] = f"안녕하세요 {name} {title}님!!"
+            elif name:
+                lines[0] = f"안녕하세요 {name}님!!"
+            else:
+                lines[0] = "안녕하세요"
+            self.text_body.setText('\n'.join(lines))
+
     def _load_mail_settings(self):
         """저장된 메일 설정 로드"""
         import json
@@ -1628,59 +1712,113 @@ class SendMailDialog(QDialog):
             self.smtp_user = ''
             self.smtp_password = ''
     
+    def _build_html_with_signature(self, plain_text: str) -> str:
+        """텍스트 본문을 HTML로 변환하고 HAEDO 서명 추가"""
+        # 텍스트를 HTML 단락으로 변환
+        paragraphs = plain_text.split('\n\n')
+        html_body_parts = []
+        for p in paragraphs:
+            lines = p.strip().replace('\n', '<br>')
+            if lines:
+                html_body_parts.append(f'<p style="margin:0 0 10px 0;">{lines}</p>')
+
+        body_html = '\n'.join(html_body_parts)
+
+        signature_html = """
+<br>
+<table style="border-top: 2px solid #c23616; padding-top: 10px;">
+  <tr>
+    <td style="padding-right: 15px; vertical-align: top;">
+      <img src="cid:haedo_logo" width="120">
+    </td>
+    <td style="font-size: 9pt; color: #555; line-height: 1.6; font-family: '맑은 고딕', sans-serif;">
+      <b>해도관세사무소</b> / 최명헌 / 차장<br>
+      서울특별시 강서구 공항대로 194, 11층 1118호(마곡동, 문영 퀸즈파크 12차)(07807)<br>
+      Tel 02-2664-3692&nbsp;&nbsp;Fax 02-2665-3693&nbsp;&nbsp;Mobile 010-7441-1104<br>
+      Messenger n97397737@nate.com<br>
+      Email mhchoi@ihaedo.com
+    </td>
+  </tr>
+</table>"""
+
+        return f"""<div style="font-family: '맑은 고딕', sans-serif; font-size: 10pt; color: #333;">
+{body_html}
+{signature_html}
+</div>"""
+
     def _send_mail(self):
         """메일 발송"""
         import smtplib
+        import imaplib
         from email.mime.text import MIMEText
         from email.mime.multipart import MIMEMultipart
         from email.mime.base import MIMEBase
+        from email.mime.image import MIMEImage
         from email import encoders
-        
+
         to_addr = self.input_to.text().strip()
-        cc_addr = self.input_cc.text().strip()  # 참조 추가
+        cc_addr = self.input_cc.text().strip()
         subject = self.input_subject.text().strip()
         body = self.text_body.toPlainText()
-        
+
         if not to_addr:
             self.lbl_status.setText("❌ 받는 사람을 입력하세요")
             self.lbl_status.setStyleSheet("color: #ff6666; font-size: 9pt;")
             return
-        
+
         if not self.smtp_user or not self.smtp_password:
             self.lbl_status.setText("❌ SETTINGS 탭에서 메일 설정을 먼저 해주세요")
             self.lbl_status.setStyleSheet("color: #ff6666; font-size: 9pt;")
             return
-        
+
         try:
             self.lbl_status.setText("📤 발송 중...")
             self.lbl_status.setStyleSheet("color: #00ffff; font-size: 9pt;")
             QApplication.processEvents()
-            
+
             # 메일 구성
             msg = MIMEMultipart('mixed')
-            
+
             # 사용자 요청: ID + @ihaedo.com 자동 변환
             user_id = self.smtp_user.split('@')[0] if '@' in self.smtp_user else self.smtp_user
             sender_address = f"{user_id}@ihaedo.com"
-            
+
             msg['From'] = sender_address
             msg['To'] = to_addr
             if cc_addr:
                 msg['Cc'] = cc_addr
             msg['Subject'] = subject
-            
-            # 본문 컨테이너 (Alternative)
-            msg_body = MIMEMultipart('alternative')
-            msg.attach(msg_body)
-            
+
+            # In-Reply-To / References 헤더 (스레드 연결)
+            if self.in_reply_to:
+                msg['In-Reply-To'] = self.in_reply_to
+                msg['References'] = self.references or self.in_reply_to
+
+            # 본문 컨테이너
+            msg_related = MIMEMultipart('related')
+            msg.attach(msg_related)
+
+            msg_alt = MIMEMultipart('alternative')
+            msg_related.attach(msg_alt)
+
             # 텍스트 본문
             part_text = MIMEText(body, 'plain', 'utf-8')
-            msg_body.attach(part_text)
-            
-            # HTML 본문 (있으면)
-            if self.html_body:
-                part_html = MIMEText(self.html_body, 'html', 'utf-8')
-                msg_body.attach(part_html)
+            msg_alt.attach(part_text)
+
+            # HTML 본문 (서명 포함)
+            html_content = self._build_html_with_signature(body)
+            part_html = MIMEText(html_content, 'html', 'utf-8')
+            msg_alt.attach(part_html)
+
+            # HAEDO 로고 인라인 이미지
+            from .utils import resource_path
+            logo_path = resource_path("haedo_logo.png")
+            if os.path.exists(logo_path):
+                with open(logo_path, 'rb') as f:
+                    logo_img = MIMEImage(f.read(), _subtype='png')
+                    logo_img.add_header('Content-ID', '<haedo_logo>')
+                    logo_img.add_header('Content-Disposition', 'inline', filename='haedo_logo.png')
+                    msg_related.attach(logo_img)
             
             # 첨부파일
             from email.header import Header
@@ -1709,14 +1847,257 @@ class SendMailDialog(QDialog):
             with smtplib.SMTP_SSL(self.smtp_server, self.smtp_port) as server:
                 server.login(self.smtp_user, self.smtp_password)
                 server.sendmail(self.smtp_user, recipients, msg.as_string())
-            
+
+            # 보낸메일함에 IMAP 저장
+            try:
+                imap = imaplib.IMAP4_SSL(self.smtp_server, 993)
+                imap.login(self.smtp_user, self.smtp_password)
+                # Sent 폴더 찾기 (\Sent 플래그 기반)
+                _, folders = imap.list()
+                sent_folder = None
+                for folder_info in folders:
+                    decoded = folder_info.decode() if folder_info else ""
+                    if '\\Sent' in decoded:
+                        parts = decoded.split('"')
+                        if len(parts) >= 4:
+                            sent_folder = parts[-2]
+                        break
+                if sent_folder:
+                    imap.append(sent_folder, "\\Seen", None, msg.as_bytes())
+                    print(f"[메일] 보낸메일함 저장 완료: {sent_folder}")
+                else:
+                    print("[메일] 보낸메일함 폴더를 찾지 못함")
+                imap.logout()
+            except Exception as e:
+                print(f"[메일] 보낸메일함 저장 실패: {e}")  # 발송은 성공
+
             self.lbl_status.setText("✅ 발송 완료!")
             self.lbl_status.setStyleSheet("color: #00ff88; font-size: 9pt;")
             QTimer.singleShot(1000, self.accept)
-            
+
         except Exception as e:
             self.lbl_status.setText(f"❌ 발송 실패: {str(e)}")
             self.lbl_status.setStyleSheet("color: #ff6666; font-size: 9pt;")
+
+
+class MailThreadSelectDialog(QDialog):
+    """B/L 검색 결과에서 답장할 메일을 선택하는 다이얼로그 (Frosted Glass)"""
+
+    def __init__(self, parent=None, threads=None, bl_number=""):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+
+        self.threads = threads or []
+        self.bl_number = bl_number
+        self.selected_thread = None
+
+        self._init_ui()
+
+    def _init_ui(self):
+        from PyQt6.QtWidgets import QGraphicsDropShadowEffect
+        from PyQt6.QtGui import QFont
+        from .widgets import NeonButton
+
+        # 메인 컨테이너 (Frosted Glass)
+        self.container = QWidget(self)
+        self.container.setObjectName("mail_thread_container")
+        self.container.setStyleSheet("""
+            #mail_thread_container {
+                background-color: rgba(25, 32, 48, 235);
+                border: 1px solid rgba(0, 255, 255, 0.3);
+                border-radius: 16px;
+            }
+        """)
+
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(40)
+        shadow.setXOffset(0)
+        shadow.setYOffset(8)
+        shadow.setColor(QColor(0, 0, 0, 180))
+        self.container.setGraphicsEffect(shadow)
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(12, 12, 12, 12)
+        outer.addWidget(self.container)
+
+        layout = QVBoxLayout(self.container)
+        layout.setContentsMargins(24, 24, 24, 20)
+        layout.setSpacing(12)
+
+        # 헤더
+        header = QLabel(f"B/L: {self.bl_number}")
+        header.setFont(QFont("Segoe UI", 14, QFont.Weight.Bold))
+        header.setStyleSheet("color: #00ffff; background: transparent;")
+        layout.addWidget(header)
+
+        sub = QLabel(f"관련 메일 {len(self.threads)}건  ·  답장할 메일을 선택하세요")
+        sub.setFont(QFont("Segoe UI", 9))
+        sub.setStyleSheet("color: rgba(255,255,255,0.55); background: transparent;")
+        layout.addWidget(sub)
+
+        layout.addSpacing(4)
+
+        if self.threads:
+            # 테이블
+            self.table = QTableWidget(len(self.threads), 4)
+            self.table.setHorizontalHeaderLabels(["날짜", "구분", "보낸사람", "제목"])
+            self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+            self.table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+            self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+            self.table.verticalHeader().setVisible(False)
+            self.table.setAlternatingRowColors(True)
+            self.table.setShowGrid(False)
+            self.table.setFont(QFont("Segoe UI", 9))
+            self.table.setMinimumHeight(250)
+            self.table.setStyleSheet("""
+                QTableWidget {
+                    background-color: rgba(15, 22, 40, 200);
+                    alternate-background-color: rgba(25, 35, 55, 200);
+                    border: 1px solid rgba(0, 200, 220, 0.2);
+                    border-radius: 8px;
+                    color: #e0e0e0;
+                    selection-background-color: rgba(0, 255, 255, 50);
+                    selection-color: #ffffff;
+                }
+                QTableWidget::item {
+                    padding: 6px 10px;
+                    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+                }
+                QTableWidget::item:hover {
+                    background-color: rgba(0, 255, 255, 15);
+                }
+                QHeaderView::section {
+                    background-color: rgba(0, 50, 65, 220);
+                    color: #00ddee;
+                    border: none;
+                    border-bottom: 2px solid rgba(0, 200, 220, 0.3);
+                    padding: 7px 10px;
+                    font-weight: bold;
+                    font-size: 9pt;
+                }
+                QScrollBar:vertical {
+                    background: rgba(15, 22, 40, 100);
+                    width: 8px;
+                    border-radius: 4px;
+                }
+                QScrollBar::handle:vertical {
+                    background: rgba(0, 200, 220, 0.3);
+                    border-radius: 4px;
+                    min-height: 30px;
+                }
+                QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+            """)
+
+            def extract_name(raw: str) -> str:
+                if '"' in raw:
+                    return raw.split('"')[1].strip()
+                if '<' in raw:
+                    return raw.split('<')[0].strip().strip('"')
+                return raw.split('@')[0] if '@' in raw else raw
+
+            for row, thread in enumerate(self.threads):
+                date_item = QTableWidgetItem(thread.date)
+                date_item.setData(Qt.ItemDataRole.UserRole, thread)
+                self.table.setItem(row, 0, date_item)
+
+                folder_item = QTableWidgetItem(thread.folder)
+                if thread.folder == "보낸메일":
+                    folder_item.setForeground(QColor("#5bc0de"))
+                else:
+                    folder_item.setForeground(QColor("#f0ad4e"))
+                self.table.setItem(row, 1, folder_item)
+
+                sender_name = extract_name(thread.sender)
+                self.table.setItem(row, 2, QTableWidgetItem(sender_name))
+
+                self.table.setItem(row, 3, QTableWidgetItem(thread.subject))
+
+            # 컬럼 너비: 내용에 맞게 자동 조절 후 제목은 확장
+            self.table.resizeColumnsToContents()
+            # 최소 너비 보장
+            if self.table.columnWidth(0) < 120:
+                self.table.setColumnWidth(0, 120)
+            if self.table.columnWidth(1) < 65:
+                self.table.setColumnWidth(1, 65)
+            if self.table.columnWidth(2) < 80:
+                self.table.setColumnWidth(2, 80)
+            self.table.horizontalHeader().setStretchLastSection(True)
+            self.table.setRowHeight(0, 36)
+            for r in range(len(self.threads)):
+                self.table.setRowHeight(r, 36)
+
+            # 전체 다이얼로그 너비 계산 (테이블 내용 기반)
+            total_w = sum(self.table.columnWidth(c) for c in range(3)) + 300  # 제목 여유
+            self.setMinimumWidth(max(700, min(total_w, 950)))
+
+            self.table.selectRow(0)
+            self.table.cellDoubleClicked.connect(lambda r, c: self._select_row(r))
+            layout.addWidget(self.table)
+        else:
+            no_result = QLabel("검색 결과가 없습니다.\n새 메일을 작성하시겠습니까?")
+            no_result.setFont(QFont("Segoe UI", 11))
+            no_result.setStyleSheet("color: rgba(255,150,150,0.9); background: transparent;")
+            no_result.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(no_result)
+            layout.addStretch()
+            self.setMinimumWidth(400)
+
+        layout.addSpacing(4)
+
+        # 버튼
+        btn_layout = QHBoxLayout()
+
+        btn_new = NeonButton("새 메일 작성", color="green")
+        btn_new.setFixedSize(120, 34)
+        btn_new.clicked.connect(lambda: self._finish(None))
+        btn_layout.addWidget(btn_new)
+
+        btn_layout.addStretch()
+
+        btn_cancel = NeonButton("취소", color="orange")
+        btn_cancel.setFixedSize(80, 34)
+        btn_cancel.clicked.connect(self.reject)
+        btn_layout.addWidget(btn_cancel)
+
+        if self.threads:
+            btn_select = NeonButton("답장", color="cyan")
+            btn_select.setFixedSize(80, 34)
+            btn_select.clicked.connect(self._on_select)
+            btn_layout.addWidget(btn_select)
+
+        layout.addLayout(btn_layout)
+
+    def _select_row(self, row):
+        item = self.table.item(row, 0)
+        if item:
+            self._finish(item.data(Qt.ItemDataRole.UserRole))
+
+    def _on_select(self):
+        if hasattr(self, 'table'):
+            row = self.table.currentRow()
+            if row >= 0:
+                self._select_row(row)
+
+    def _finish(self, thread):
+        self.selected_thread = thread
+        self.accept()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            event.accept()
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() & Qt.MouseButton.LeftButton and hasattr(self, '_drag_pos'):
+            self.move(event.globalPosition().toPoint() - self._drag_pos)
+            event.accept()
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Escape:
+            self.reject()
+        else:
+            super().keyPressEvent(event)
 
 
 class MarkingPopup(QDialog):

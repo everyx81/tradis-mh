@@ -7,14 +7,28 @@ import os
 import re
 import smtplib
 import imaplib
+import datetime
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email.mime.application import MIMEApplication
 from email import encoders
-from email.utils import getaddresses
-from typing import Optional, Callable
+from email.header import decode_header
+from email.utils import getaddresses, parsedate_to_datetime
+from typing import Optional, Callable, List
 from dataclasses import dataclass
+
+
+@dataclass
+class FoundEmailThread:
+    """IMAP 검색으로 찾은 메일 스레드 정보"""
+    message_id: str      # Message-ID (In-Reply-To용)
+    subject: str         # 제목
+    sender: str          # 보낸 사람
+    to: str              # 받는 사람
+    cc: str              # 참조
+    date: str            # 날짜 (표시용 문자열)
+    folder: str          # 발견된 폴더 (INBOX/Sent)
 
 
 @dataclass
@@ -43,15 +57,206 @@ class ExportMailSender:
 감사합니다.
 최명헌 드림"""
     
+    _sent_folder_cache: Optional[str] = None
+    _imap_connections: dict = {}  # 폴더별 전용 IMAP 연결: {"INBOX": conn, "Sent": conn}
+    _search_cache: dict = {}     # B/L별 검색 결과 캐시: {bl: (timestamp, results)}
+    _CACHE_TTL = 120             # 캐시 유효시간 (초)
+
     def __init__(self, config: EmailConfig, log_callback: Optional[Callable[[str], None]] = None):
         self.config = config
         self.log_callback = log_callback
-    
+
     def log(self, msg: str):
         if self.log_callback:
             self.log_callback(msg)
         print(f"[MailSender] {msg}")
-    
+
+    def _decode_header_value(self, value: str) -> str:
+        """MIME 인코딩된 헤더 값을 디코딩"""
+        if not value:
+            return ""
+        decoded_parts = decode_header(value)
+        result = []
+        for part, charset in decoded_parts:
+            if isinstance(part, bytes):
+                result.append(part.decode(charset or 'utf-8', errors='replace'))
+            else:
+                result.append(part)
+        return " ".join(result)
+
+    def _get_connection(self, folder: str) -> imaplib.IMAP4_SSL:
+        """폴더별 전용 IMAP 연결 반환 (재사용 or 신규 생성+SELECT)"""
+        conn = ExportMailSender._imap_connections.get(folder)
+        if conn:
+            try:
+                conn.noop()
+                return conn  # 기존 연결 재사용 (이미 SELECT된 상태)
+            except Exception:
+                conn = None
+
+        # 신규 연결
+        conn = imaplib.IMAP4_SSL(self.config.imap_server, self.config.imap_port, timeout=15)
+        conn.login(self.config.email, self.config.password)
+        conn.select(folder, readonly=True)
+        ExportMailSender._imap_connections[folder] = conn
+        return conn
+
+    def ensure_connections(self):
+        """사전 연결: INBOX + Sent 폴더용 IMAP 연결을 미리 생성"""
+        import concurrent.futures
+        if ExportMailSender._sent_folder_cache is None:
+            try:
+                tmp = imaplib.IMAP4_SSL(self.config.imap_server, self.config.imap_port, timeout=15)
+                tmp.login(self.config.email, self.config.password)
+                ExportMailSender._sent_folder_cache = self._find_sent_folder(tmp) or ""
+                tmp.logout()
+            except Exception:
+                ExportMailSender._sent_folder_cache = ""
+
+        folders = ["INBOX"]
+        if ExportMailSender._sent_folder_cache:
+            folders.append(ExportMailSender._sent_folder_cache)
+
+        def connect(folder):
+            try:
+                self._get_connection(folder)
+            except Exception:
+                pass
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as ex:
+            list(ex.map(connect, folders))
+
+    def _search_folder(self, folder: str, bl_number: str, since_date: str) -> List[FoundEmailThread]:
+        """단일 폴더에서 B/L 검색 (전용 연결 사용)"""
+        results = []
+        try:
+            imap = self._get_connection(folder)
+
+            search_criteria = f'(SUBJECT "{bl_number}" SINCE {since_date})'
+            status, msg_ids = imap.search(None, search_criteria)
+            if status != "OK" or not msg_ids[0]:
+                return results
+
+            ids = msg_ids[0].split()
+            if not ids:
+                return results
+
+            id_set = b','.join(ids)
+            status, fetch_data = imap.fetch(
+                id_set,
+                "(BODY.PEEK[HEADER.FIELDS (MESSAGE-ID SUBJECT FROM TO CC DATE)])"
+            )
+            if status != "OK":
+                return results
+
+            folder_label = "받은메일" if folder == "INBOX" else "보낸메일"
+
+            for item in fetch_data:
+                if not isinstance(item, tuple) or len(item) < 2:
+                    continue
+                try:
+                    raw_header = item[1]
+                    if isinstance(raw_header, bytes):
+                        raw_header = raw_header.decode('utf-8', errors='replace')
+
+                    headers = {}
+                    current_key = None
+                    for line in raw_header.split('\r\n'):
+                        if line.startswith((' ', '\t')) and current_key:
+                            headers[current_key] += ' ' + line.strip()
+                        elif ':' in line:
+                            key, _, val = line.partition(':')
+                            current_key = key.strip().lower()
+                            headers[current_key] = val.strip()
+
+                    message_id = headers.get('message-id', '')
+                    subject = self._decode_header_value(headers.get('subject', ''))
+                    sender = self._decode_header_value(headers.get('from', ''))
+                    to = self._decode_header_value(headers.get('to', ''))
+                    cc = self._decode_header_value(headers.get('cc', ''))
+                    date_str = headers.get('date', '')
+
+                    try:
+                        dt = parsedate_to_datetime(date_str)
+                        display_date = dt.strftime("%Y-%m-%d %H:%M")
+                    except Exception:
+                        display_date = date_str[:20] if date_str else ""
+
+                    results.append(FoundEmailThread(
+                        message_id=message_id,
+                        subject=subject,
+                        sender=sender,
+                        to=to,
+                        cc=cc,
+                        date=display_date,
+                        folder=folder_label,
+                    ))
+                except Exception as e:
+                    self.log(f"메일 헤더 파싱 오류: {e}")
+                    continue
+        except Exception as e:
+            self.log(f"폴더 검색 오류 ({folder}): {e}")
+            # 연결 오류 시 해당 폴더 캐시 제거
+            ExportMailSender._imap_connections.pop(folder, None)
+
+        return results
+
+    def search_threads_by_bl(self, bl_number: str) -> List[FoundEmailThread]:
+        """
+        B/L 번호로 IMAP 검색하여 관련 메일 목록 반환
+        INBOX + Sent 폴더를 병렬 검색, 결과 캐시 적용
+        """
+        import concurrent.futures
+
+        # 1) 캐시 확인
+        cached = ExportMailSender._search_cache.get(bl_number)
+        if cached:
+            ts, cached_results = cached
+            if (datetime.datetime.now() - ts).total_seconds() < self._CACHE_TTL:
+                self.log(f"B/L '{bl_number}' 캐시 반환: {len(cached_results)}건")
+                return cached_results
+
+        # 2) 보낸메일함 폴더명 확보
+        if ExportMailSender._sent_folder_cache is None:
+            try:
+                tmp = imaplib.IMAP4_SSL(self.config.imap_server, self.config.imap_port, timeout=15)
+                tmp.login(self.config.email, self.config.password)
+                ExportMailSender._sent_folder_cache = self._find_sent_folder(tmp) or ""
+                tmp.logout()
+            except Exception:
+                ExportMailSender._sent_folder_cache = ""
+
+        sent_folder = ExportMailSender._sent_folder_cache
+        folders = ["INBOX"]
+        if sent_folder:
+            folders.append(sent_folder)
+
+        since_date = (datetime.datetime.now() - datetime.timedelta(days=30)).strftime("%d-%b-%Y")
+
+        # 3) 병렬 검색 (폴더별 전용 연결)
+        results = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+            futures = {
+                executor.submit(self._search_folder, folder, bl_number, since_date): folder
+                for folder in folders
+            }
+            for future in concurrent.futures.as_completed(futures):
+                try:
+                    results.extend(future.result())
+                except Exception as e:
+                    self.log(f"병렬 검색 오류: {e}")
+
+        results.sort(key=lambda x: x.date, reverse=True)
+        self.log(f"B/L '{bl_number}' 검색 완료: {len(results)}건 발견")
+
+        # 4) 캐시 저장 (최대 50개)
+        if len(ExportMailSender._search_cache) > 50:
+            oldest = min(ExportMailSender._search_cache, key=lambda k: ExportMailSender._search_cache[k][0])
+            del ExportMailSender._search_cache[oldest]
+        ExportMailSender._search_cache[bl_number] = (datetime.datetime.now(), results)
+
+        return results
+
     def find_export_declaration(self, folder_path: str, identifier: str) -> Optional[str]:
         """
         지정 폴더에서 ID가 일치하는 수출신고필증 찾기
@@ -196,20 +401,27 @@ class ExportMailSender:
                     pass
     
     def _find_sent_folder(self, imap: imaplib.IMAP4_SSL) -> Optional[str]:
-        """보낸 메일함 폴더 찾기"""
+        """보낸 메일함 폴더 찾기 (\\Sent 플래그 기반)"""
         _, folders = imap.list()
-        
-        # 일반적인 보낸 메일함 이름들
-        sent_names = ['Sent', 'INBOX.Sent', '보낸편지함', 'Sent Messages', 'Sent Items']
-        
+
         for folder_info in folders:
-            folder_name = folder_info.decode().split('"')[-2] if folder_info else ""
-            if folder_name in sent_names:
+            decoded = folder_info.decode() if folder_info else ""
+            # \Sent 플래그로 찾기 (가장 정확)
+            if '\\Sent' in decoded:
+                # 폴더명 추출: (...) "/" "폴더명"
+                parts = decoded.split('"')
+                if len(parts) >= 4:
+                    return parts[-2]
+
+        # 폴백: 이름 기반 검색
+        sent_names = ['Sent', 'INBOX.Sent', 'Sent Messages', 'Sent Items']
+        for folder_info in folders:
+            decoded = folder_info.decode() if folder_info else ""
+            parts = decoded.split('"')
+            folder_name = parts[-2] if len(parts) >= 4 else ""
+            if folder_name in sent_names or 'sent' in folder_name.lower():
                 return folder_name
-            if 'sent' in folder_name.lower():
-                return folder_name
-        
-        # 기본값 시도
+
         return self.config.sent_folder
 
 

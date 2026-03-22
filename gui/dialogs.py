@@ -1726,20 +1726,16 @@ class SendMailDialog(QDialog):
 
         signature_html = """
 <br>
-<table style="border-top: 2px solid #c23616; padding-top: 10px;">
-  <tr>
-    <td style="padding-right: 15px; vertical-align: top;">
-      <img src="cid:haedo_logo" width="120">
-    </td>
-    <td style="font-size: 9pt; color: #555; line-height: 1.6; font-family: '맑은 고딕', sans-serif;">
-      <b>해도관세사무소</b> / 최명헌 / 차장<br>
-      서울특별시 강서구 공항대로 194, 11층 1118호(마곡동, 문영 퀸즈파크 12차)(07807)<br>
-      Tel 02-2664-3692&nbsp;&nbsp;Fax 02-2665-3693&nbsp;&nbsp;Mobile 010-7441-1104<br>
-      Messenger n97397737@nate.com<br>
-      Email mhchoi@ihaedo.com
-    </td>
-  </tr>
-</table>"""
+<div>
+  <img src="cid:haedo_logo" width="260" style="display:block; margin-bottom:4px;">
+  <div style="font-size: 9pt; color: #555; line-height: 1.6; font-family: '맑은 고딕', sans-serif;">
+    <b style="color:#333;">해도관세사무소 / 최명헌 / 차장</b><br>
+    서울특별시 강서구 공항대로 194, 11층 1118호(마곡동, 문영 퀸즈파크 12차)(07807)<br>
+    Tel 02-2664-3692&nbsp;&nbsp;Fax 02-2665-3693&nbsp;&nbsp;<b>Mobile</b>&nbsp;&nbsp;010-7441-1104<br>
+    <b>Messenger</b>&nbsp;&nbsp;n97397737@nate.com<br>
+    <b>Email</b>&nbsp;&nbsp;mhchoi@ihaedo.com
+  </div>
+</div>"""
 
         return f"""<div style="font-family: '맑은 고딕', sans-serif; font-size: 10pt; color: #333;">
 {body_html}
@@ -1783,7 +1779,7 @@ class SendMailDialog(QDialog):
             user_id = self.smtp_user.split('@')[0] if '@' in self.smtp_user else self.smtp_user
             sender_address = f"{user_id}@ihaedo.com"
 
-            msg['From'] = sender_address
+            msg['From'] = f'"최명헌" <{sender_address}>'
             msg['To'] = to_addr
             if cc_addr:
                 msg['Cc'] = cc_addr
@@ -2008,7 +2004,10 @@ class MailThreadSelectDialog(QDialog):
                     folder_item.setForeground(QColor("#f0ad4e"))
                 self.table.setItem(row, 1, folder_item)
 
-                sender_name = extract_name(thread.sender)
+                if thread.folder == "보낸메일":
+                    sender_name = "최명헌"
+                else:
+                    sender_name = extract_name(thread.sender)
                 self.table.setItem(row, 2, QTableWidgetItem(sender_name))
 
                 self.table.setItem(row, 3, QTableWidgetItem(thread.subject))

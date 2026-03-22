@@ -60,7 +60,7 @@ class ExportMailSender:
     _sent_folder_cache: Optional[str] = None
     _imap_connections: dict = {}  # 폴더별 전용 IMAP 연결: {"INBOX": conn, "Sent": conn}
     _search_cache: dict = {}     # B/L별 검색 결과 캐시: {bl: (timestamp, results)}
-    _CACHE_TTL = 120             # 캐시 유효시간 (초)
+    _CACHE_TTL = 600             # 캐시 유효시간 (초) - 프리페치 결과 유지
 
     def __init__(self, config: EmailConfig, log_callback: Optional[Callable[[str], None]] = None):
         self.config = config
@@ -144,7 +144,7 @@ class ExportMailSender:
             id_set = b','.join(ids)
             status, fetch_data = imap.fetch(
                 id_set,
-                "(BODY.PEEK[HEADER.FIELDS (MESSAGE-ID SUBJECT FROM TO CC DATE)])"
+                "(INTERNALDATE BODY.PEEK[HEADER.FIELDS (MESSAGE-ID SUBJECT FROM TO CC DATE)])"
             )
             if status != "OK":
                 return results
@@ -155,6 +155,21 @@ class ExportMailSender:
                 if not isinstance(item, tuple) or len(item) < 2:
                     continue
                 try:
+                    # INTERNALDATE 추출 (fallback용)
+                    internal_date = ""
+                    meta_line = item[0]
+                    if isinstance(meta_line, bytes):
+                        meta_line = meta_line.decode('utf-8', errors='replace')
+                    import re as _re
+                    idate_match = _re.search(r'INTERNALDATE "([^"]+)"', meta_line)
+                    if idate_match:
+                        try:
+                            from email.utils import parsedate_to_datetime as _pdt
+                            idt = _pdt(idate_match.group(1))
+                            internal_date = idt.strftime("%Y-%m-%d %H:%M")
+                        except Exception:
+                            internal_date = idate_match.group(1)[:16] if idate_match.group(1) else ""
+
                     raw_header = item[1]
                     if isinstance(raw_header, bytes):
                         raw_header = raw_header.decode('utf-8', errors='replace')
@@ -180,7 +195,7 @@ class ExportMailSender:
                         dt = parsedate_to_datetime(date_str)
                         display_date = dt.strftime("%Y-%m-%d %H:%M")
                     except Exception:
-                        display_date = date_str[:20] if date_str else ""
+                        display_date = internal_date if internal_date else (date_str[:20] if date_str else "")
 
                     results.append(FoundEmailThread(
                         message_id=message_id,
@@ -231,7 +246,7 @@ class ExportMailSender:
         if sent_folder:
             folders.append(sent_folder)
 
-        since_date = (datetime.datetime.now() - datetime.timedelta(days=30)).strftime("%d-%b-%Y")
+        since_date = (datetime.datetime.now() - datetime.timedelta(days=14)).strftime("%d-%b-%Y")
 
         # 3) 병렬 검색 (폴더별 전용 연결)
         results = []
@@ -307,7 +322,8 @@ class ExportMailSender:
         # MIME 메시지 생성
         msg = MIMEMultipart()
         # 발신자 주소 설정 (별도 설정이 있으면 사용)
-        msg['From'] = self.config.sender_email if self.config.sender_email else self.config.email
+        from_addr = self.config.sender_email if self.config.sender_email else self.config.email
+        msg['From'] = f'"최명헌" <{from_addr}>'
         msg['To'] = to_email
         if cc:
             msg['Cc'] = cc

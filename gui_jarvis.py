@@ -1337,6 +1337,89 @@ class JarvisGUI(QMainWindow):
             self.file_manager.refresh_targets()
         # 병합/폴더 정리 후 카드 + 미분류 목록 재스캔
         self._debounced_refresh()
+        # 백그라운드 메일 프리페치
+        self._prefetch_mail_cache()
+
+    def _prefetch_mail_cache(self):
+        """병합 완료 후 정산서 파일의 B/L 번호로 메일을 미리 검색하여 캐시에 저장"""
+        if getattr(self, '_prefetch_running', False):
+            return
+        self._prefetch_running = True
+
+        import re
+        path = self.line_path.text()
+        if not path or not os.path.exists(path):
+            self._prefetch_running = False
+            return
+
+        # 정산서 파일에서 B/L 번호 추출
+        bl_numbers = []
+        pattern = re.compile(r'^(.+?)\(([^)]+)\).*정산서\.pdf$', re.IGNORECASE)
+        try:
+            for folder in os.listdir(path):
+                folder_path = os.path.join(path, folder)
+                if not os.path.isdir(folder_path):
+                    continue
+                for fname in os.listdir(folder_path):
+                    m = pattern.match(fname)
+                    if m:
+                        bl_id = m.group(2).strip()
+                        if bl_id not in bl_numbers:
+                            bl_numbers.append(bl_id)
+        except Exception:
+            self._prefetch_running = False
+            return
+
+        if not bl_numbers:
+            self._prefetch_running = False
+            return
+
+        # 메일 설정 로드
+        from core.config import get_config_path
+        import json
+        config_path = get_config_path()
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+            hanbiro = config.get('hanbiro_mail', {})
+            email_addr = hanbiro.get('email', '')
+            imap_server = hanbiro.get('imap_server', 'raeon.hanbiro.net')
+        except Exception:
+            self._prefetch_running = False
+            return
+
+        import keyring
+        password = keyring.get_password("TRADIS_MH", "email_password") or ''
+        if not email_addr or not password:
+            self._prefetch_running = False
+            return
+
+        from export_mail_sender import ExportMailSender, EmailConfig
+        email_config = EmailConfig(imap_server=imap_server, email=email_addr, password=password)
+
+        def do_prefetch():
+            try:
+                sender = ExportMailSender(email_config)
+                sender.ensure_connections()
+                for bl_id in bl_numbers:
+                    # 이미 캐시에 있으면 건너뜀
+                    cached = ExportMailSender._search_cache.get(bl_id)
+                    if cached:
+                        import datetime
+                        ts, _ = cached
+                        if (datetime.datetime.now() - ts).total_seconds() < ExportMailSender._CACHE_TTL:
+                            continue
+                    try:
+                        sender.search_threads_by_bl(bl_id)
+                    except Exception:
+                        pass
+                self.emit_log(f"[메일 프리페치] {len(bl_numbers)}건 B/L 캐시 완료")
+            except Exception as e:
+                print(f"[메일 프리페치 오류] {e}")
+            finally:
+                self._prefetch_running = False
+
+        threading.Thread(target=do_prefetch, daemon=True).start()
 
     def _debounced_refresh(self):
         # 불필요한 반복 로그 제거 (상태 갱신 시마다 로그가 찍혀 리소스 낭비)

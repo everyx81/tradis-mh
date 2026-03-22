@@ -1772,23 +1772,54 @@ class FileManagerWidget(QWidget):
 
         selected = dlg.selected_thread
 
-        # 시간대별 인사말
+        # 시간대별 인사말 (랜덤 선택)
+        import random
         hour = datetime.datetime.now().hour
         if 6 <= hour < 12:
-            greeting_first = "좋은 아침입니다."
-            greeting_last = "좋은 하루 보내세요~"
+            greeting_first = random.choice([
+                "상쾌한 아침입니다.",
+                "활기찬 아침이네요!",
+                "기분 좋은 아침이네요!",
+                "항상 맡겨주셔서 감사합니다.",
+            ])
+            greeting_last = random.choice([
+                "기분 좋은 하루 되시길 바랍니다~",
+                "오늘도 좋은 일만 가득하시길 바랍니다~",
+                "즐거운 하루 되세요~",
+                "오늘도 활기찬 하루 보내세요~",
+            ])
         elif 12 <= hour < 18:
-            greeting_first = "좋은 오후입니다."
-            greeting_last = "따뜻한 오후되세요~"
+            greeting_first = random.choice([
+                "항상 감사드립니다.",
+                "늘 도움 주셔서 감사합니다.",
+                "항상 맡겨주셔서 감사합니다.",
+                "늘 잘 부탁드립니다.",
+            ])
+            greeting_last = random.choice([
+                "항상 좋은 일만 가득하시길 바랍니다~",
+                "남은 하루도 좋은 하루 되세요~",
+                "남은 오후도 힘내세요~",
+                "오늘도 좋은 일만 가득하시길 바랍니다~",
+            ])
         else:
-            greeting_first = "좋은 저녁입니다."
-            greeting_last = "편안한 저녁되세요~"
+            greeting_first = random.choice([
+                "항상 감사드립니다.",
+                "늦은 시간에 보내드립니다.",
+                "늘 신경 써주셔서 감사합니다.",
+                "덕분에 잘 진행되고 있습니다.",
+            ])
+            greeting_last = random.choice([
+                "편안한 저녁되세요~",
+                "편안한 밤 보내세요~",
+                "편안하고 여유로운 저녁 되세요~",
+                "푹 쉬시고 내일도 힘내세요~",
+            ])
 
         # 본문 템플릿
         body = (
             f"안녕하세요\n\n"
-            f"{greeting_first}\n"
-            f"해도관세사무소 최명헌입니다.\n\n"
+            f"해도관세사무소 최명헌입니다.\n"
+            f"{greeting_first}\n\n"
             f"{company}({bl_id})건 정산서 보내드립니다.\n\n"
             f"{greeting_last}\n\n"
             f"감사합니다.\n"

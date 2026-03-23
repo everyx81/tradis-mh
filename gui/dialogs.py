@@ -1712,19 +1712,9 @@ class SendMailDialog(QDialog):
             self.smtp_user = ''
             self.smtp_password = ''
     
-    def _build_html_with_signature(self, plain_text: str) -> str:
-        """텍스트 본문을 HTML로 변환하고 HAEDO 서명 추가"""
-        # 텍스트를 HTML 단락으로 변환
-        paragraphs = plain_text.split('\n\n')
-        html_body_parts = []
-        for p in paragraphs:
-            lines = p.strip().replace('\n', '<br>')
-            if lines:
-                html_body_parts.append(f'<p style="margin:0 0 10px 0;">{lines}</p>')
-
-        body_html = '\n'.join(html_body_parts)
-
-        signature_html = """
+    def _get_signature_html(self) -> str:
+        """HAEDO 메일 서명 HTML 반환"""
+        return """
 <br>
 <div>
   <img src="cid:haedo_logo" width="260" style="display:block; margin-bottom:4px;">
@@ -1736,6 +1726,28 @@ class SendMailDialog(QDialog):
     <b>Email</b>&nbsp;&nbsp;mhchoi@ihaedo.com
   </div>
 </div>"""
+
+    def _append_signature_to_html(self, html_body: str) -> str:
+        """전달받은 HTML 본문에 HAEDO 서명 추가"""
+        signature_html = self._get_signature_html()
+        # </body> 태그가 있으면 그 앞에 서명 삽입, 없으면 뒤에 추가
+        if '</body>' in html_body.lower():
+            import re
+            return re.sub(r'(</body>)', f'{signature_html}\\1', html_body, count=1, flags=re.IGNORECASE)
+        return html_body + signature_html
+
+    def _build_html_with_signature(self, plain_text: str) -> str:
+        """텍스트 본문을 HTML로 변환하고 HAEDO 서명 추가"""
+        # 텍스트를 HTML 단락으로 변환
+        paragraphs = plain_text.split('\n\n')
+        html_body_parts = []
+        for p in paragraphs:
+            lines = p.strip().replace('\n', '<br>')
+            if lines:
+                html_body_parts.append(f'<p style="margin:0 0 10px 0;">{lines}</p>')
+
+        body_html = '\n'.join(html_body_parts)
+        signature_html = self._get_signature_html()
 
         return f"""<div style="font-family: '맑은 고딕', sans-serif; font-size: 10pt; color: #333;">
 {body_html}
@@ -1802,7 +1814,12 @@ class SendMailDialog(QDialog):
             msg_alt.attach(part_text)
 
             # HTML 본문 (서명 포함)
-            html_content = self._build_html_with_signature(body)
+            if self.html_body:
+                # 전달받은 HTML 본문이 있으면 그대로 사용 + 서명 추가
+                html_content = self._append_signature_to_html(self.html_body)
+            else:
+                # 없으면 텍스트를 HTML로 변환 + 서명 추가
+                html_content = self._build_html_with_signature(body)
             part_html = MIMEText(html_content, 'html', 'utf-8')
             msg_alt.attach(part_html)
 

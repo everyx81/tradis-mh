@@ -233,7 +233,7 @@ if ($ok) {{
     if ($meiPass -and (Test-Path $meiPass)) {{
         Remove-Item $meiPass -Recurse -Force -ErrorAction SilentlyContinue
     }}
-    $meiDirs = @([System.IO.Path]::GetTempPath(), 'C:\ProgramData\TRADIS_TMP')
+    $meiDirs = @([System.IO.Path]::GetTempPath(), 'C:\\ProgramData\\TRADIS_TMP')
     foreach ($d in $meiDirs) {{
         if (Test-Path $d) {{
             Get-ChildItem -Path $d -Directory -Filter "_MEI*" -ErrorAction SilentlyContinue | ForEach-Object {{

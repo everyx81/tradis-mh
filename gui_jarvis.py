@@ -607,8 +607,11 @@ class JarvisGUI(QMainWindow):
     
     def _unregister_hotkeys(self):
         """단축키 해제"""
-        import keyboard
-        keyboard.unhook_all()
+        try:
+            import keyboard
+            keyboard.unhook_all()
+        except Exception:
+            pass
         self._remove_snippet_hook()
     
     def _activate_memo(self):
@@ -641,13 +644,20 @@ class JarvisGUI(QMainWindow):
             try:
                 import pyperclip
                 import keyboard
+                # 물리 Ctrl 키가 릴리스될 때까지 대기 (최대 500ms)
+                import ctypes
+                VK_CONTROL = 0x11
+                for _ in range(50):
+                    if not (ctypes.windll.user32.GetAsyncKeyState(VK_CONTROL) & 0x8000):
+                        break
+                    import time; time.sleep(0.01)
                 # 클립보드에 복사
                 pyperclip.copy(text)
                 # Ctrl+V 시뮬레이션
                 keyboard.send('ctrl+v')
             except Exception as e:
                 print(f"스니펫 붙여넣기 오류: {e}")
-        
+
         # 약간의 딜레이 후 붙여넣기 (키 릴리스 대기)
         threading.Timer(0.05, do_paste).start()
     
@@ -696,7 +706,7 @@ class JarvisGUI(QMainWindow):
         VK_CONTROL = 0x11
         
         HOOKPROC = ctypes.CFUNCTYPE(
-            ctypes.c_long, ctypes.c_int,
+            ctypes.wintypes.LPARAM, ctypes.c_int,
             ctypes.wintypes.WPARAM, ctypes.wintypes.LPARAM
         )
         
@@ -714,14 +724,17 @@ class JarvisGUI(QMainWindow):
         
         @HOOKPROC
         def hook_proc(nCode, wParam, lParam):
-            if nCode == HC_ACTION and wParam in (WM_KEYDOWN, WM_SYSKEYDOWN):
-                kb = ctypes.cast(lParam, ctypes.POINTER(KBDLLHOOKSTRUCT)).contents
-                if kb.vkCode in vk_map:
-                    # Ctrl 키가 눌려있는지 확인
-                    if user32.GetAsyncKeyState(VK_CONTROL) & 0x8000:
-                        text = vk_map[kb.vkCode]
-                        threading.Timer(0.05, lambda: paste_fn(text)).start()
-                        return 1  # 숫자 키만 차단 (Ctrl은 이미 OS에 전달됨)
+            try:
+                if nCode >= 0 and wParam in (WM_KEYDOWN, WM_SYSKEYDOWN):
+                    kb = ctypes.cast(lParam, ctypes.POINTER(KBDLLHOOKSTRUCT)).contents
+                    if kb.vkCode in vk_map:
+                        # Ctrl 키가 눌려있는지 확인
+                        if user32.GetAsyncKeyState(VK_CONTROL) & 0x8000:
+                            text = vk_map[kb.vkCode]
+                            threading.Timer(0.05, lambda: paste_fn(text)).start()
+                            return 1  # 숫자 키만 차단 (Ctrl은 이미 OS에 전달됨)
+            except Exception:
+                pass
             return user32.CallNextHookEx(None, nCode, wParam, lParam)
         
         # GC 방지를 위해 참조 유지

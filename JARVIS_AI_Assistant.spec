@@ -9,6 +9,7 @@ datas = [
     ('intro_jarvis.jpg', '.'),
     ('jarvis_bg.png', '.'),
     ('app_icon.ico', '.'),
+    ('haedo_logo.png', '.'),
     ('es.exe', '.'),  # Everything 검색 도구
 ]
 
@@ -18,8 +19,8 @@ hidden_imports = [
     'PyQt6.QtWidgets',
     'PyQt6.QtCore',
     'PyQt6.QtGui',
-    'google.generativeai',
-    'google.ai.generativelanguage',
+    'google.genai',
+    'google.genai.types',
     'PIL',
     'PIL.Image',
     'pdf2image',
@@ -38,6 +39,9 @@ hidden_imports = [
     'email',
     'email.header',
     'email.message',
+    # 글로벌 단축키 & 스니펫
+    'keyboard',
+    'pyperclip',
     # pywinauto (ReadyKorea 자동화)
     'pywinauto',
     'pywinauto.application',

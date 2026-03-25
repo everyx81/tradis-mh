@@ -1501,7 +1501,7 @@ class JarvisGUI(QMainWindow):
             
     def trigger_debounced_refresh(self):
         self.debounce_timer.stop()
-        self.debounce_timer.start(2000)
+        self.debounce_timer.start(1000)
 
     def open_api_settings(self):
         from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit

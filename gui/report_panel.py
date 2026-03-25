@@ -974,105 +974,113 @@ class ReportPanel(QWidget):
             self.log_signal.emit(f"[REPORT] Excel 로드 실패: {e}")
     
     def _load_advances_from_sheets(self):
-        """Google Sheets에서 대납금 데이터 가져오기"""
-        try:
-            from core.google_sheets import fetch_advances_from_sheet
-            
-            # 데이터 가져오기
-            advances = fetch_advances_from_sheet()
-            
-            if not advances:
-                JarvisMessageBox.information(self, "알림", "Google Sheets에서 가져온 대납금 데이터가 없습니다.")
+        """Google Sheets에서 대납금 데이터 가져오기 (백그라운드 스레드)"""
+        import threading
+
+        # 기존 데이터 덮어쓰기 확인 (UI 작업은 메인 스레드에서)
+        if self.table_advances.rowCount() > 0:
+            if not JarvisMessageBox.question(
+                self, "확인",
+                "기존 대납금 데이터를 Google Sheets 데이터로 교체하시겠습니까?"
+            ):
                 return
-                
-            # 디버그: 첫 번째 항목 확인 (터미널)
-            if advances:
-                print(f"[DEBUG] First advance item with BL: {advances[0].get('bl_no', 'N/A')}")
-            
-            # 기존 데이터 덮어쓰기 확인
-            if self.table_advances.rowCount() > 0:
-                if not JarvisMessageBox.question(
-                    self, "확인", 
-                    f"기존 대납금 데이터를 Google Sheets 데이터({len(advances)}건)로 교체하시겠습니까?"
-                ):
-                    return
-            
-            # 테이블 초기화 및 데이터 추가
-            self.table_advances.setRowCount(0)
-            for item in advances:
-                self._add_row(
-                    self.table_advances, 
-                    item.get('company', ''), 
-                    bl_no=item.get('bl_no', ''), # Google Sheets에서 가져온 BL 번호
-                    amount=item.get('amount', 0),
-                    date=item.get('expected_date', ''),
-                    confirmed=item.get('is_confirmed', False),
-                    row_index=item.get('row_index')  # 행 번호 전달
-                )
-            self._schedule_update()
-            self.log_signal.emit(f"[REPORT] Google Sheets에서 대납금 {len(advances)}건 로드 완료")
-            JarvisMessageBox.information(self, "완료", f"대납금 {len(advances)}건을 가져왔습니다.")
-            
-        except FileNotFoundError as e:
-            JarvisMessageBox.warning(self, "인증 파일 없음", str(e))
-            self.log_signal.emit(f"[REPORT] Sheets 로드 실패: 인증 파일 없음")
-        except Exception as e:
-            JarvisMessageBox.critical(self, "오류", f"Google Sheets 로드 실패:\n{str(e)}")
-            self.log_signal.emit(f"[REPORT] Sheets 로드 실패: {e}")
+
+        self.log_signal.emit("[REPORT] Google Sheets 데이터 로딩 중...")
+
+        def _fetch_bg():
+            try:
+                from core.google_sheets import fetch_advances_from_sheet
+                advances = fetch_advances_from_sheet()
+                # 결과를 메인 스레드에서 UI 업데이트
+                from PyQt6.QtCore import QTimer
+                QTimer.singleShot(0, lambda: self._apply_advances_data(advances))
+            except FileNotFoundError as e:
+                from PyQt6.QtCore import QTimer
+                QTimer.singleShot(0, lambda: (
+                    JarvisMessageBox.warning(self, "인증 파일 없음", str(e)),
+                    self.log_signal.emit(f"[REPORT] Sheets 로드 실패: 인증 파일 없음")
+                ))
+            except Exception as e:
+                err_msg = str(e)
+                from PyQt6.QtCore import QTimer
+                QTimer.singleShot(0, lambda: (
+                    JarvisMessageBox.critical(self, "오류", f"Google Sheets 로드 실패:\n{err_msg}"),
+                    self.log_signal.emit(f"[REPORT] Sheets 로드 실패: {err_msg}")
+                ))
+
+        threading.Thread(target=_fetch_bg, daemon=True).start()
+
+    def _apply_advances_data(self, advances):
+        """Google Sheets에서 가져온 대납금 데이터를 UI에 적용 (메인 스레드)"""
+        if not advances:
+            JarvisMessageBox.information(self, "알림", "Google Sheets에서 가져온 대납금 데이터가 없습니다.")
+            return
+
+        self.table_advances.setRowCount(0)
+        for item in advances:
+            self._add_row(
+                self.table_advances,
+                item.get('company', ''),
+                bl_no=item.get('bl_no', ''),
+                amount=item.get('amount', 0),
+                date=item.get('expected_date', ''),
+                confirmed=item.get('is_confirmed', False),
+                row_index=item.get('row_index')
+            )
+        self._schedule_update()
+        self.log_signal.emit(f"[REPORT] Google Sheets에서 대납금 {len(advances)}건 로드 완료")
+        JarvisMessageBox.information(self, "완료", f"대납금 {len(advances)}건을 가져왔습니다.")
     
     def _update_sheets_report_date(self, report_date: str):
-        """메일 발송 후 Google Sheets의 보고일자 열 업데이트
-        
+        """메일 발송 후 Google Sheets의 보고일자 열 업데이트 (백그라운드 스레드)
+
         확인(입금완료) 체크된 항목만 보고일자를 기록함.
         미확인 항목은 다음 보고에도 포함되어야 하므로 보고일자 기록 안 함.
         """
+        import threading
+
+        # UI에서 row_indices 수집 (메인 스레드)
+        row_indices = []
+        for row in range(self.table_advances.rowCount()):
+            company_item = self.table_advances.item(row, 0)
+            if not company_item:
+                continue
+            chk_col = self.table_advances.columnCount() - 1
+            widget = self.table_advances.cellWidget(row, chk_col)
+            is_confirmed = False
+            if widget:
+                chk = widget.findChild(QCheckBox)
+                if chk:
+                    is_confirmed = chk.isChecked()
+            if is_confirmed:
+                row_index = company_item.data(Qt.ItemDataRole.UserRole)
+                if row_index is not None:
+                    row_indices.append(row_index)
+
+        if not row_indices:
+            self.log_signal.emit("[REPORT] 업데이트할 Sheets 행 없음 (로컬 데이터만 사용됨)")
+            return
+
+        # 날짜 포맷 변환 (2026-01-30 -> 1/30)
         try:
-            from core.google_sheets import update_report_dates
-            
-            # 대납금 테이블에서 row_index 수집 (확인된 항목만)
-            row_indices = []
-            for row in range(self.table_advances.rowCount()):
-                company_item = self.table_advances.item(row, 0)
-                if not company_item:
-                    continue
-                    
-                # 확인 체크박스 상태 확인 (대납금 테이블은 5열, 마지막 열이 확인)
-                chk_col = self.table_advances.columnCount() - 1  # 마지막 열
-                widget = self.table_advances.cellWidget(row, chk_col)
-                is_confirmed = False
-                if widget:
-                    chk = widget.findChild(QCheckBox)
-                    if chk:
-                        is_confirmed = chk.isChecked()
-                
-                # 확인된 항목만 보고일자 업데이트
-                if is_confirmed:
-                    row_index = company_item.data(Qt.ItemDataRole.UserRole)
-                    if row_index is not None:
-                        row_indices.append(row_index)
-            
-            if not row_indices:
-                self.log_signal.emit("[REPORT] 업데이트할 Sheets 행 없음 (로컬 데이터만 사용됨)")
-                return
-            
-            # 날짜 포맷 변환 (2026-01-30 -> 1/30)
+            from datetime import datetime
+            dt = datetime.strptime(report_date, '%Y-%m-%d')
+            formatted_date = f"{dt.month}/{dt.day}"
+        except ValueError:
+            formatted_date = report_date
+
+        # 네트워크 호출은 백그라운드 스레드에서
+        def _update_bg():
             try:
-                from datetime import datetime
-                dt = datetime.strptime(report_date, '%Y-%m-%d')
-                formatted_date = f"{dt.month}/{dt.day}"
-            except ValueError:
-                formatted_date = report_date
-            
-            # 스프레드시트 업데이트
-            updated = update_report_dates(row_indices, formatted_date)
-            self.log_signal.emit(f"[REPORT] Sheets 보고일자 업데이트: {updated}건 (행: {row_indices})")
-            
-        except FileNotFoundError:
-            # 인증 파일 없으면 무시 (로컬 전용 모드)
-            self.log_signal.emit("[REPORT] Sheets 업데이트 생략 (인증 파일 없음)")
-        except Exception as e:
-            # 업데이트 실패해도 메일 발송은 성공한 것이므로 경고만
-            self.log_signal.emit(f"[REPORT] Sheets 보고일자 업데이트 실패: {e}")
+                from core.google_sheets import update_report_dates
+                updated = update_report_dates(row_indices, formatted_date)
+                self.log_signal.emit(f"[REPORT] Sheets 보고일자 업데이트: {updated}건 (행: {row_indices})")
+            except FileNotFoundError:
+                self.log_signal.emit("[REPORT] Sheets 업데이트 생략 (인증 파일 없음)")
+            except Exception as e:
+                self.log_signal.emit(f"[REPORT] Sheets 보고일자 업데이트 실패: {e}")
+
+        threading.Thread(target=_update_bg, daemon=True).start()
 
 
     

@@ -200,7 +200,7 @@ class GeminiOCR:
             return None
 
     def _save_to_cache(self, fp, result):
-        """결과를 캐시에 저장"""
+        """결과를 캐시에 저장 (최적화: indent 제거, O(n) 정리)"""
         MAX_CACHE_SIZE = 200
 
         with cache_lock:
@@ -223,13 +223,14 @@ class GeminiOCR:
                 }
 
                 if len(cache) > MAX_CACHE_SIZE:
-                    sorted_items = sorted(cache.items(), key=lambda x: x[1].get('cached_at', 0))
+                    # O(n) 방식으로 가장 오래된 항목 제거
                     to_remove = len(cache) - MAX_CACHE_SIZE
-                    for i in range(to_remove):
-                        del cache[sorted_items[i][0]]
+                    oldest_keys = sorted(cache, key=lambda k: cache[k].get('cached_at', 0))[:to_remove]
+                    for k in oldest_keys:
+                        del cache[k]
 
                 with open(cache_path, 'w', encoding='utf-8') as f:
-                    json.dump(cache, f, ensure_ascii=False, indent=2)
+                    json.dump(cache, f, ensure_ascii=False, separators=(',', ':'))
 
             except Exception as e:
                 print(f"캐시 저장 오류: {e}")

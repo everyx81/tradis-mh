@@ -80,8 +80,9 @@ class HanbiroMailMonitor:
         # 콜백 함수
         self.on_export_mail_detected: Optional[Callable[[ExportMailInfo], None]] = None
         
-        # 처리한 메일 ID 저장 (중복 방지)
+        # 처리한 메일 ID 저장 (중복 방지, 최대 1000개 유지)
         self._processed_ids: set = set()
+        self._MAX_PROCESSED_IDS = 1000
         
         # 다운로드 폴더 생성
         if not os.path.exists(self.download_folder):
@@ -234,6 +235,12 @@ class HanbiroMailMonitor:
                     
                     # 중복 방지: 이미 처리한 ID 등록 (성공 여부 상관없이 일단 등록하여 무한반복 방지)
                     self._processed_ids.add(mail_id_str)
+                    # 메모리 누수 방지: 오래된 ID 정리
+                    if len(self._processed_ids) > self._MAX_PROCESSED_IDS:
+                        # set은 순서 없으므로 절반 제거 (오래된 것 추정)
+                        to_remove = len(self._processed_ids) - self._MAX_PROCESSED_IDS // 2
+                        for _ in range(to_remove):
+                            self._processed_ids.pop()
                     
                     # 발신자, 받는 사람, 참조
                     sender = self._decode_header(msg.get('From', ''))
@@ -295,8 +302,11 @@ class HanbiroMailMonitor:
     
     def _idle_monitoring_loop(self):
         """IMAP IDLE 방식 실시간 모니터링 (즉시 감지)"""
-        # IDLE 모니터링 시작 로그 (터미널 출력 제거)
-        
+        import select as _select
+
+        # IDLE 재시작 주기: 4분 (RFC 권장 29분이나, 서버 호환성 위해 4분)
+        IDLE_RESTART_SECONDS = 240
+
         while self._running:
             try:
                 # 연결 확인
@@ -304,39 +314,32 @@ class HanbiroMailMonitor:
                     if not self.connect():
                         time.sleep(5)
                         continue
-                
+
                 # INBOX 선택
                 self.mail_connection.select('INBOX')
-                
+
                 # 먼저 기존 메일 체크
                 self.check_new_mails()
-                
+
                 # IDLE 모드 진입
                 if not self.mail_connection:
                     continue
                 self.mail_connection.send(b'a IDLE\r\n')
-                
-                # 서버 응답 대기 (최대 29분, 보통 서버가 타임아웃 전에 재연결 필요)
-                # 여기서는 10초마다 IDLE 재시작 + 강제 메일 체크
-                import select
-                timeout = 10  # 10초마다 강제 체크 (1분 컷 목표)
-                
+
+                elapsed = 0
                 while self._running:
-                    # 소켓에서 데이터 대기
                     sock = self.mail_connection.socket()
-                    readable, _, _ = select.select([sock], [], [], 1)  # 1초 타임아웃
-                    
+                    readable, _, _ = _select.select([sock], [], [], 5)  # 5초 대기
+
                     if readable:
                         response = sock.recv(1024).decode('utf-8', errors='replace')
-                        
-                        # EXISTS = 새 메일 도착
+
                         if 'EXISTS' in response:
                             print("[메일] 새 메일 감지! (IDLE)")
-                            # IDLE 종료
                             self.mail_connection.send(b'DONE\r\n')
                             time.sleep(0.5)
-                            
-                            # 버퍼 비우기 - 남은 응답 읽기
+
+                            # 버퍼 비우기
                             try:
                                 sock.setblocking(False)
                                 while True:
@@ -349,37 +352,33 @@ class HanbiroMailMonitor:
                                 sock.setblocking(True)
                             except (OSError, Exception):
                                 pass
-                            
-                            # 연결 재설정 후 메일 체크 (깨끗한 상태)
+
+                            # 연결 재설정 후 메일 체크
                             self.disconnect()
                             time.sleep(0.3)
                             if self.connect():
                                 self.check_new_mails()
                             break
-                        
-                        # IDLE 응답 확인
+
                         if '+ ' in response or 'idling' in response.lower():
                             continue
-                    
-                    # 타임아웃 체크 (60초마다 강제 메일 체크)
-                    timeout -= 1
-                    if timeout <= 0:
-                        # IDLE 종료
+
+                    # IDLE 재시작 체크 (4분마다)
+                    elapsed += 5
+                    if elapsed >= IDLE_RESTART_SECONDS:
                         if self.mail_connection:
                             self.mail_connection.send(b'DONE\r\n')
                         time.sleep(0.3)
-                        
-                        # 연결 재설정 후 메일 체크
                         self.disconnect()
                         if self.connect():
                             self.check_new_mails()
                         break
-                        
+
             except Exception as e:
                 print(f"[메일] IDLE 오류: {e}")
                 self.disconnect()
                 time.sleep(3)
-        
+
         print("[메일] IDLE 모니터링 종료")
     
     def _polling_monitoring_loop(self, interval_seconds: int):

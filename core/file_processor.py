@@ -49,7 +49,8 @@ class AutoRenamer:
         self.stop()
 
         if self.executor is None:
-            self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=3)
+            workers = min(4, (os.cpu_count() or 2) + 1)
+            self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=workers)
 
         eh = PDFHandler(self)
         self.observer = Observer()
@@ -92,9 +93,9 @@ class AutoRenamer:
 
     def _wait_for_file_ready(self, fp, timeout=10):
         """파일 쓰기가 완료될 때까지 대기. 완료되면 True, 빈 파일이면 False."""
-        interval = 0.5
         elapsed = 0
         prev_size = -1
+        stable_count = 0
 
         while elapsed < timeout:
             if not os.path.exists(fp):
@@ -105,13 +106,18 @@ class AutoRenamer:
                 return False
 
             if size > 0 and size == prev_size:
-                return True  # 크기가 안정됨 → 쓰기 완료
+                stable_count += 1
+                if stable_count >= 2:
+                    return True  # 2회 연속 동일 → 쓰기 완료 확정
+            else:
+                stable_count = 0
 
             prev_size = size
+            # 초반 빠른 체크, 이후 간격 늘림
+            interval = 0.2 if elapsed < 2 else 0.5
             time.sleep(interval)
             elapsed += interval
 
-        # 타임아웃 후에도 크기가 0이면 빈 파일
         try:
             return os.path.getsize(fp) > 0
         except OSError:
@@ -282,7 +288,11 @@ class AutoRenamer:
         if self.merge_request_callback:
             self.merge_request_callback({'directory': dr, 'groups': groups, 'unclassified': uncl})
 
-    def _determine_merge_order(self, dr, sf, dm, mo, an=None, ti=None):
+    def _determine_merge_order(self, dr, sf, dm, mo, an=None, ti=None, pdf_files_cache=None):
+        # 디렉토리 PDF 목록 캐싱 (함수 내 재사용)
+        _all_dir_pdfs = pdf_files_cache if pdf_files_cache is not None else [
+            f for f in os.listdir(dr) if f.lower().endswith('.pdf')
+        ]
         m = []
         m.append({'label': '[명세서] 자금정산서', 'filename': sf if sf else ''})
         if mo == "수입":
@@ -305,7 +315,7 @@ class AutoRenamer:
         allp = []
 
         if ti:
-            for f in [f for f in os.listdir(dr) if f.lower().endswith('.pdf')]:
+            for f in _all_dir_pdfs:
                 if f in af:
                     continue
                 # 청구서(자금청구서)는 정산서에 병합하면 안 되는 별도 서류이므로 제외
@@ -545,9 +555,7 @@ class AutoRenamer:
             uncl_files = [f for f in allp if f not in af]
 
             if os.path.exists(dr):
-                for f in os.listdir(dr):
-                    if not f.lower().endswith('.pdf'):
-                        continue
+                for f in _all_dir_pdfs:
                     if f in af or f in uncl_files:
                         continue
                     if "청구서" in f and "계산서" not in f:
@@ -595,8 +603,8 @@ class AutoRenamer:
 
                 if has_req_keywords:
                     try:
-                        for f in os.listdir(dr):
-                            if not f.startswith("미분류_") or not f.lower().endswith('.pdf'):
+                        for f in _all_dir_pdfs:
+                            if not f.startswith("미분류_"):
                                 continue
                             if f in af:
                                 continue

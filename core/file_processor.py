@@ -546,23 +546,24 @@ class AutoRenamer:
                 if absorbed:
                     break
 
-        # ── 3단계: 금액 기반 보정 매칭 (미분류 파일 포함) ──
+        # ── 3단계: 금액 기반 보정 매칭 (BL 불일치 파일 포함) ──
+        # BL 일치 파일(allp)이 우선이고, 그래도 못 찾으면 폴더 내 전체 파일에서 금액 매칭
         unmatched_items = [idx for idx, x in enumerate(m)
                           if x['filename'] == '' and '비용: ' in x['label']
                           and '포함' not in x['label'] and '(추가)' not in x['label']]
 
         if unmatched_items:
+            # 1차: BL 일치 파일 중 미할당 파일
             uncl_files = [f for f in allp if f not in af]
 
+            # 2차: 같은 폴더 내 모든 미할당 PDF (BL 불일치 포함)
             if os.path.exists(dr):
                 for f in _all_dir_pdfs:
                     if f in af or f in uncl_files:
                         continue
                     if "청구서" in f and "계산서" not in f:
                         continue
-                    c, i, d, s = parse_renamed_filename(f)
-                    if not i:
-                        uncl_files.append(f)
+                    uncl_files.append(f)
 
             uncl_amounts = {}
             for f in uncl_files:

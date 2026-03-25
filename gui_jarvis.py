@@ -529,8 +529,6 @@ class JarvisGUI(QMainWindow):
                 self.schedule_manager.stop_reminder_loop()
             self.save_settings()
             # 글로벌 단축키 해제
-            import keyboard
-            keyboard.unhook_all()
             self._remove_snippet_hook()
             # [PERF] 잔류 토스트 위젯 강제 정리
             from gui.jarvis_toast import JarvisToast
@@ -592,26 +590,14 @@ class JarvisGUI(QMainWindow):
             print(f"단축키 설정 저장 오류: {e}")
     
     def _register_hotkeys(self):
-        """단축키 등록"""
+        """단축키 등록 — 단일 Win32 훅으로 메모+스니펫 통합"""
         try:
-            import keyboard
-            # 메모장 단축키
-            memo_key = self.hotkey_settings.get("memo_hotkey", "ctrl+shift+m")
-            if memo_key:
-                keyboard.add_hotkey(memo_key, self._activate_memo, suppress=False)
-            
-            # 스니펫 단축키 - Win32 저수준 훅 사용 (Ctrl 키 미차단)
             self._install_snippet_hook()
         except Exception as e:
             print(f"단축키 등록 오류: {e}")
-    
+
     def _unregister_hotkeys(self):
         """단축키 해제"""
-        try:
-            import keyboard
-            keyboard.unhook_all()
-        except Exception:
-            pass
         self._remove_snippet_hook()
     
     def _activate_memo(self):
@@ -643,18 +629,24 @@ class JarvisGUI(QMainWindow):
         def do_paste():
             try:
                 import pyperclip
-                import keyboard
-                # 물리 Ctrl 키가 릴리스될 때까지 대기 (최대 500ms)
                 import ctypes
+                import ctypes.wintypes
+                user32 = ctypes.windll.user32
                 VK_CONTROL = 0x11
+                # 물리 Ctrl 키가 릴리스될 때까지 대기 (최대 500ms)
                 for _ in range(50):
-                    if not (ctypes.windll.user32.GetAsyncKeyState(VK_CONTROL) & 0x8000):
+                    if not (user32.GetAsyncKeyState(VK_CONTROL) & 0x8000):
                         break
                     import time; time.sleep(0.01)
                 # 클립보드에 복사
                 pyperclip.copy(text)
-                # Ctrl+V 시뮬레이션
-                keyboard.send('ctrl+v')
+                # Win32 API로 Ctrl+V 시뮬레이션 (keyboard 라이브러리 불필요)
+                VK_V = 0x56
+                KEYEVENTF_KEYUP = 0x0002
+                user32.keybd_event(VK_CONTROL, 0, 0, 0)
+                user32.keybd_event(VK_V, 0, 0, 0)
+                user32.keybd_event(VK_V, 0, KEYEVENTF_KEYUP, 0)
+                user32.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)
             except Exception as e:
                 print(f"스니펫 붙여넣기 오류: {e}")
 
@@ -662,11 +654,15 @@ class JarvisGUI(QMainWindow):
         threading.Timer(0.05, do_paste).start()
     
     def _install_snippet_hook(self):
-        """Win32 저수준 키보드 훅으로 스니펫 단축키 등록 (Ctrl 키 미차단)"""
+        """단일 Win32 저수준 훅으로 메모+스니펫 통합 (전용 스레드 + GetMessageW 블로킹)"""
         import ctypes
         import ctypes.wintypes
-        
-        # VK 코드 → 스니펫 텍스트 맵 구축
+
+        # --- 메모 단축키 파싱 ---
+        memo_key = self.hotkey_settings.get("memo_hotkey", "ctrl+shift+m")
+        self._memo_vk_combo = self._parse_hotkey_combo(memo_key)
+
+        # --- VK 코드 → 스니펫 텍스트 맵 구축 ---
         self._vk_snippet_map = {}
         for snippet in self.hotkey_settings.get("snippets", []):
             hk = snippet.get("hotkey", "")
@@ -679,82 +675,146 @@ class JarvisGUI(QMainWindow):
                         vk = self._key_to_vk(trigger_parts[0])
                         if vk is not None:
                             self._vk_snippet_map[vk] = text
-        
-        if not self._vk_snippet_map:
+
+        if not self._vk_snippet_map and not self._memo_vk_combo:
             self._snippet_hook_handle = None
+            self._snippet_hook_thread = None
             return
-        
-        user32 = ctypes.windll.user32
-        
-        # CallNextHookEx 인자 타입 명시 (64비트 lParam 오버플로 방지)
-        user32.CallNextHookEx.argtypes = [
-            ctypes.wintypes.HHOOK, ctypes.c_int,
-            ctypes.wintypes.WPARAM, ctypes.wintypes.LPARAM
-        ]
-        user32.CallNextHookEx.restype = ctypes.wintypes.LPARAM
-        
-        user32.SetWindowsHookExW.argtypes = [
-            ctypes.c_int, ctypes.c_void_p,
-            ctypes.wintypes.HINSTANCE, ctypes.wintypes.DWORD
-        ]
-        user32.SetWindowsHookExW.restype = ctypes.wintypes.HHOOK
-        
-        WH_KEYBOARD_LL = 13
-        WM_KEYDOWN = 0x0100
-        WM_SYSKEYDOWN = 0x0104
-        HC_ACTION = 0
-        VK_CONTROL = 0x11
-        
-        HOOKPROC = ctypes.CFUNCTYPE(
-            ctypes.wintypes.LPARAM, ctypes.c_int,
-            ctypes.wintypes.WPARAM, ctypes.wintypes.LPARAM
-        )
-        
-        class KBDLLHOOKSTRUCT(ctypes.Structure):
-            _fields_ = [
-                ("vkCode", ctypes.wintypes.DWORD),
-                ("scanCode", ctypes.wintypes.DWORD),
-                ("flags", ctypes.wintypes.DWORD),
-                ("time", ctypes.wintypes.DWORD),
-                ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
-            ]
-        
+
         vk_map = self._vk_snippet_map
+        memo_combo = self._memo_vk_combo
         paste_fn = self._paste_snippet
-        
-        @HOOKPROC
-        def hook_proc(nCode, wParam, lParam):
-            try:
-                if nCode >= 0 and wParam in (WM_KEYDOWN, WM_SYSKEYDOWN):
-                    kb = ctypes.cast(lParam, ctypes.POINTER(KBDLLHOOKSTRUCT)).contents
-                    if kb.vkCode in vk_map:
-                        # Ctrl 키가 눌려있는지 확인
-                        if user32.GetAsyncKeyState(VK_CONTROL) & 0x8000:
+        activate_memo_fn = self._activate_memo
+        self._hook_thread_id = None
+
+        def hook_thread_func():
+            """전용 스레드: 단일 훅 + 블로킹 GetMessageW 메시지 펌프"""
+            import ctypes
+            import ctypes.wintypes
+
+            user32 = ctypes.windll.user32
+
+            user32.CallNextHookEx.argtypes = [
+                ctypes.wintypes.HHOOK, ctypes.c_int,
+                ctypes.wintypes.WPARAM, ctypes.wintypes.LPARAM
+            ]
+            user32.CallNextHookEx.restype = ctypes.wintypes.LPARAM
+
+            user32.SetWindowsHookExW.argtypes = [
+                ctypes.c_int, ctypes.c_void_p,
+                ctypes.wintypes.HINSTANCE, ctypes.wintypes.DWORD
+            ]
+            user32.SetWindowsHookExW.restype = ctypes.wintypes.HHOOK
+
+            WH_KEYBOARD_LL = 13
+            WM_KEYDOWN = 0x0100
+            WM_SYSKEYDOWN = 0x0104
+            WM_QUIT = 0x0012
+            VK_CONTROL = 0x11
+            VK_SHIFT = 0x10
+
+            HOOKPROC = ctypes.CFUNCTYPE(
+                ctypes.wintypes.LPARAM, ctypes.c_int,
+                ctypes.wintypes.WPARAM, ctypes.wintypes.LPARAM
+            )
+
+            class KBDLLHOOKSTRUCT(ctypes.Structure):
+                _fields_ = [
+                    ("vkCode", ctypes.wintypes.DWORD),
+                    ("scanCode", ctypes.wintypes.DWORD),
+                    ("flags", ctypes.wintypes.DWORD),
+                    ("time", ctypes.wintypes.DWORD),
+                    ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
+                ]
+
+            @HOOKPROC
+            def hook_proc(nCode, wParam, lParam):
+                try:
+                    if nCode >= 0 and wParam in (WM_KEYDOWN, WM_SYSKEYDOWN):
+                        kb = ctypes.cast(lParam, ctypes.POINTER(KBDLLHOOKSTRUCT)).contents
+                        ctrl_down = bool(user32.GetAsyncKeyState(VK_CONTROL) & 0x8000)
+                        shift_down = bool(user32.GetAsyncKeyState(VK_SHIFT) & 0x8000)
+
+                        # 메모 단축키 체크 (예: Ctrl+Shift+M)
+                        if memo_combo and ctrl_down:
+                            need_shift, trigger_vk = memo_combo
+                            if kb.vkCode == trigger_vk and shift_down == need_shift:
+                                activate_memo_fn()
+                                return 1
+
+                        # 스니펫 단축키 체크 (예: Ctrl+1~9)
+                        if ctrl_down and not shift_down and kb.vkCode in vk_map:
                             text = vk_map[kb.vkCode]
                             threading.Timer(0.05, lambda: paste_fn(text)).start()
-                            return 1  # 숫자 키만 차단 (Ctrl은 이미 OS에 전달됨)
-            except Exception:
-                pass
-            return user32.CallNextHookEx(None, nCode, wParam, lParam)
-        
-        # GC 방지를 위해 참조 유지
-        self._hook_proc_ref = hook_proc
-        self._snippet_hook_handle = user32.SetWindowsHookExW(
-            WH_KEYBOARD_LL, hook_proc, None, 0
-        )
-        
-        if self._snippet_hook_handle:
-            print(f"✅ Win32 스니펫 훅 설치 완료 (매핑: {len(vk_map)}개)")
-        else:
-            print("❌ Win32 스니펫 훅 설치 실패")
-    
-    def _remove_snippet_hook(self):
-        """Win32 스니펫 키보드 훅 제거"""
-        if hasattr(self, '_snippet_hook_handle') and self._snippet_hook_handle:
-            import ctypes
-            ctypes.windll.user32.UnhookWindowsHookEx(self._snippet_hook_handle)
+                            return 1
+                except Exception:
+                    pass
+                return user32.CallNextHookEx(None, nCode, wParam, lParam)
+
+            # GC 방지용 참조
+            self._hook_proc_ref = hook_proc
+
+            hook_handle = user32.SetWindowsHookExW(
+                WH_KEYBOARD_LL, hook_proc, None, 0
+            )
+            self._snippet_hook_handle = hook_handle
+
+            # 이 스레드의 ID 저장 (종료 시 WM_QUIT 전송용)
+            self._hook_thread_id = ctypes.windll.kernel32.GetCurrentThreadId()
+
+            total = len(vk_map) + (1 if memo_combo else 0)
+            if hook_handle:
+                print(f"✅ 통합 키보드 훅 설치 완료 (단축키 {total}개, 전용 스레드)")
+            else:
+                print("❌ 통합 키보드 훅 설치 실패")
+                return
+
+            # 블로킹 GetMessageW 메시지 펌프 — CPU 사용률 0%
+            # WM_QUIT 수신 시 자동 종료
+            msg = ctypes.wintypes.MSG()
+            while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
+                user32.TranslateMessage(ctypes.byref(msg))
+                user32.DispatchMessageW(ctypes.byref(msg))
+
+            # 정리
+            user32.UnhookWindowsHookEx(hook_handle)
             self._snippet_hook_handle = None
             self._hook_proc_ref = None
+            self._hook_thread_id = None
+            print("🔓 통합 키보드 훅 제거됨")
+
+        self._snippet_hook_thread = threading.Thread(
+            target=hook_thread_func, daemon=True, name="HotkeyThread"
+        )
+        self._snippet_hook_thread.start()
+
+    def _parse_hotkey_combo(self, hotkey_str):
+        """단축키 문자열 → (need_shift, trigger_vk) 튜플로 파싱"""
+        if not hotkey_str:
+            return None
+        parts = [p.strip().lower() for p in hotkey_str.split("+")]
+        if "ctrl" not in parts:
+            return None
+        need_shift = "shift" in parts
+        trigger_parts = [p for p in parts if p not in ("ctrl", "shift", "alt")]
+        if not trigger_parts:
+            return None
+        vk = self._key_to_vk(trigger_parts[0])
+        if vk is None:
+            return None
+        return (need_shift, vk)
+
+    def _remove_snippet_hook(self):
+        """키보드 훅 제거 — WM_QUIT로 스레드 안전 종료"""
+        if hasattr(self, '_hook_thread_id') and self._hook_thread_id:
+            import ctypes
+            # WM_QUIT를 훅 스레드에 전송 → GetMessageW가 0 반환 → 루프 종료
+            ctypes.windll.user32.PostThreadMessageW(
+                self._hook_thread_id, 0x0012, 0, 0  # WM_QUIT
+            )
+        if hasattr(self, '_snippet_hook_thread') and self._snippet_hook_thread:
+            self._snippet_hook_thread.join(timeout=2)
+            self._snippet_hook_thread = None
     
     def _key_to_vk(self, key_str):
         """키 문자열을 Windows VK 코드로 변환"""
@@ -1174,7 +1234,7 @@ class JarvisGUI(QMainWindow):
         api_container_layout.addLayout(top_row)
         
         # 하단: 모델 버전
-        self.lbl_api_version = QLabel("Model: Gemini 3 Flash Preview")
+        self.lbl_api_version = QLabel("Model: Gemini 3.1 Flash Lite")
         self.lbl_api_version.setStyleSheet("color: #00aaaa; font-size: 8pt; background: transparent;")
         api_container_layout.addWidget(self.lbl_api_version)
 

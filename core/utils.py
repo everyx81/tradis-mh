@@ -9,8 +9,6 @@ import socket
 import threading
 from typing import Optional, Tuple
 
-import pdfplumber
-
 from .constants import PORT
 
 # --- Thread Locks ---
@@ -138,6 +136,7 @@ def cleanup_company_name(name: str) -> str:
 
 def extract_text(file_path: str) -> str:
     """PDF에서 텍스트 추출"""
+    import pdfplumber  # lazy import — 시작 시 로딩 방지
     text = ""
     try:
         with pdfplumber.open(file_path) as pdf:

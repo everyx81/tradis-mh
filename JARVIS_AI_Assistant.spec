@@ -39,8 +39,7 @@ hidden_imports = [
     'email',
     'email.header',
     'email.message',
-    # 글로벌 단축키 & 스니펫
-    'keyboard',
+    # 글로벌 단축키 & 스니펫 (keyboard 라이브러리 제거 — Win32 API 직접 사용)
     'pyperclip',
     # pywinauto (ReadyKorea 자동화)
     'pywinauto',

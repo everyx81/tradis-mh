@@ -49,7 +49,7 @@ class AutoRenamer:
         self.stop()
 
         if self.executor is None:
-            self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=6)
+            self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=3)
 
         eh = PDFHandler(self)
         self.observer = Observer()

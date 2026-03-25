@@ -813,29 +813,38 @@ class JarvisPanel(QWidget):
         super().__init__(parent)
         self._core_opacity = 0.0
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self._glow_cache = None
+        self._glow_cache_size = None
+
+    def resizeEvent(self, event):
+        self._glow_cache = None
+        super().resizeEvent(event)
 
     def paintEvent(self, event):
+        size = self.size()
+        if self._glow_cache is None or self._glow_cache_size != size:
+            from PyQt6.QtGui import QPixmap
+            pixmap = QPixmap(size)
+            pixmap.fill(Qt.GlobalColor.transparent)
+            p = QPainter(pixmap)
+            p.setRenderHint(QPainter.RenderHint.Antialiasing)
+            glow_color = QColor(128, 240, 255)
+            rect = self.rect().adjusted(10, 10, -10, -10)
+            for i in range(10):
+                glow_color.setAlpha(100 - i * 10)
+                p.setPen(QPen(glow_color, 1))
+                p.setBrush(Qt.BrushStyle.NoBrush)
+                r = rect.adjusted(-i, -i, i, i)
+                p.drawRoundedRect(r, 8+i, 8+i)
+            p.setPen(QPen(QColor("#80f0ff"), 1.5))
+            p.setBrush(QColor(5, 15, 30, 210))
+            p.drawRoundedRect(rect, 8, 8)
+            p.end()
+            self._glow_cache = pixmap
+            self._glow_cache_size = size
+
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        
-        # HUD Glow Effect (GlassFrame Style)
-        glow_color = QColor(128, 240, 255)
-        # 패딩을 약간 두어 글로우가 잘리게 않게 함
-        rect = self.rect().adjusted(10, 10, -10, -10)
-        
-        # 외부 글로우 (10겹)
-        for i in range(10):
-            glow_color.setAlpha(100 - i * 10)
-            painter.setPen(QPen(glow_color, 1))
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            r = rect.adjusted(-i, -i, i, i)
-            painter.drawRoundedRect(r, 8+i, 8+i)
-            
-        # 메인 테두리 및 배경
-        painter.setPen(QPen(QColor("#80f0ff"), 1.5))
-        # 배경색: HUD 스타일(진한 남색) + 기존 불투명도(210) 유지하여 내용 가독성 확보
-        painter.setBrush(QColor(5, 15, 30, 210))
-        painter.drawRoundedRect(rect, 8, 8)
+        painter.drawPixmap(0, 0, self._glow_cache)
 
     def get_core_opacity(self):
         return self._core_opacity
@@ -1355,24 +1364,39 @@ class GlassFrame(QFrame):
         super().__init__(parent)
         self.setContentsMargins(5, 5, 5, 5)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self._glow_cache = None  # 글로우 픽스맵 캐시
+        self._glow_cache_size = None
+
+    def resizeEvent(self, event):
+        self._glow_cache = None  # 크기 변경 시 캐시 무효화
+        super().resizeEvent(event)
 
     def paintEvent(self, event):
+        size = self.size()
+        # 캐시된 글로우 픽스맵 재사용 (매 paint마다 10회 반복 드로우 방지)
+        if self._glow_cache is None or self._glow_cache_size != size:
+            from PyQt6.QtGui import QPixmap
+            pixmap = QPixmap(size)
+            pixmap.fill(Qt.GlobalColor.transparent)
+            p = QPainter(pixmap)
+            p.setRenderHint(QPainter.RenderHint.Antialiasing)
+            glow_color = QColor(128, 240, 255)
+            rect = self.rect().adjusted(4, 4, -4, -4)
+            for i in range(10):
+                glow_color.setAlpha(100 - i * 10)
+                p.setPen(QPen(glow_color, 1))
+                p.setBrush(Qt.BrushStyle.NoBrush)
+                r = rect.adjusted(-i, -i, i, i)
+                p.drawRoundedRect(r, 5+i, 5+i)
+            p.setPen(QPen(QColor("#80f0ff"), 1))
+            p.setBrush(QColor(5, 15, 35, 80))
+            p.drawRoundedRect(rect, 5, 5)
+            p.end()
+            self._glow_cache = pixmap
+            self._glow_cache_size = size
+
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        
-        glow_color = QColor(128, 240, 255)
-        rect = self.rect().adjusted(4, 4, -4, -4)
-        
-        for i in range(10):
-            glow_color.setAlpha(100 - i * 10)
-            painter.setPen(QPen(glow_color, 1))
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            r = rect.adjusted(-i, -i, i, i)
-            painter.drawRoundedRect(r, 5+i, 5+i)
-            
-        painter.setPen(QPen(QColor("#80f0ff"), 1))
-        painter.setBrush(QColor(5, 15, 35, 80))
-        painter.drawRoundedRect(rect, 5, 5)
+        painter.drawPixmap(0, 0, self._glow_cache)
 
 
 class NeonButton(QPushButton):

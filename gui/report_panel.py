@@ -27,12 +27,16 @@ class ReportPanel(QWidget):
     """일일 보고서 생성 패널 - 실시간 미리보기 + 메일 발송"""
     
     log_signal = pyqtSignal(str)
-    
+    _advances_ready = pyqtSignal(list)
+    _advances_error = pyqtSignal(str)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.update_timer = QTimer()
         self.update_timer.setSingleShot(True)
         self.update_timer.timeout.connect(self._delayed_update)
+        self._advances_ready.connect(self._apply_advances_data)
+        self._advances_error.connect(lambda msg: JarvisMessageBox.critical(self, "오류", msg))
         
         # exe에서도 올바르게 동작하도록 get_run_dir() 사용
         from gui.utils import get_run_dir
@@ -977,59 +981,55 @@ class ReportPanel(QWidget):
         """Google Sheets에서 대납금 데이터 가져오기 (백그라운드 스레드)"""
         import threading
 
-        # 기존 데이터 덮어쓰기 확인 (UI 작업은 메인 스레드에서)
-        if self.table_advances.rowCount() > 0:
-            if not JarvisMessageBox.question(
-                self, "확인",
-                "기존 대납금 데이터를 Google Sheets 데이터로 교체하시겠습니까?"
-            ):
-                return
+        try:
+            # 기존 데이터 덮어쓰기 확인 (UI 작업은 메인 스레드에서)
+            if self.table_advances.rowCount() > 0:
+                if not JarvisMessageBox.question(
+                    self, "확인",
+                    "기존 대납금 데이터를 Google Sheets 데이터로 교체하시겠습니까?"
+                ):
+                    return
 
-        self.log_signal.emit("[REPORT] Google Sheets 데이터 로딩 중...")
+            self.log_signal.emit("[REPORT] Google Sheets 데이터 로딩 중...")
 
-        def _fetch_bg():
-            try:
-                from core.google_sheets import fetch_advances_from_sheet
-                advances = fetch_advances_from_sheet()
-                # 결과를 메인 스레드에서 UI 업데이트
-                from PyQt6.QtCore import QTimer
-                QTimer.singleShot(0, lambda: self._apply_advances_data(advances))
-            except FileNotFoundError as e:
-                from PyQt6.QtCore import QTimer
-                QTimer.singleShot(0, lambda: (
-                    JarvisMessageBox.warning(self, "인증 파일 없음", str(e)),
-                    self.log_signal.emit(f"[REPORT] Sheets 로드 실패: 인증 파일 없음")
-                ))
-            except Exception as e:
-                err_msg = str(e)
-                from PyQt6.QtCore import QTimer
-                QTimer.singleShot(0, lambda: (
-                    JarvisMessageBox.critical(self, "오류", f"Google Sheets 로드 실패:\n{err_msg}"),
-                    self.log_signal.emit(f"[REPORT] Sheets 로드 실패: {err_msg}")
-                ))
+            def _fetch_bg():
+                try:
+                    from core.google_sheets import fetch_advances_from_sheet
+                    advances = fetch_advances_from_sheet()
+                    self._advances_ready.emit(advances)
+                except FileNotFoundError as e:
+                    self._advances_error.emit(f"인증 파일 없음:\n{e}")
+                except Exception as e:
+                    self._advances_error.emit(f"Google Sheets 로드 실패:\n{e}")
 
-        threading.Thread(target=_fetch_bg, daemon=True).start()
+            threading.Thread(target=_fetch_bg, daemon=True).start()
+
+        except Exception as e:
+            JarvisMessageBox.critical(self, "오류", f"가져오기 실행 실패:\n{e}")
 
     def _apply_advances_data(self, advances):
         """Google Sheets에서 가져온 대납금 데이터를 UI에 적용 (메인 스레드)"""
-        if not advances:
-            JarvisMessageBox.information(self, "알림", "Google Sheets에서 가져온 대납금 데이터가 없습니다.")
-            return
+        try:
+            if not advances:
+                JarvisMessageBox.information(self, "알림", "Google Sheets에서 가져온 대납금 데이터가 없습니다.")
+                return
 
-        self.table_advances.setRowCount(0)
-        for item in advances:
-            self._add_row(
-                self.table_advances,
-                item.get('company', ''),
-                bl_no=item.get('bl_no', ''),
-                amount=item.get('amount', 0),
-                date=item.get('expected_date', ''),
-                confirmed=item.get('is_confirmed', False),
-                row_index=item.get('row_index')
-            )
-        self._schedule_update()
-        self.log_signal.emit(f"[REPORT] Google Sheets에서 대납금 {len(advances)}건 로드 완료")
-        JarvisMessageBox.information(self, "완료", f"대납금 {len(advances)}건을 가져왔습니다.")
+            self.table_advances.setRowCount(0)
+            for item in advances:
+                self._add_row(
+                    self.table_advances,
+                    item.get('company', ''),
+                    bl_no=item.get('bl_no', ''),
+                    amount=item.get('amount', 0),
+                    date=item.get('expected_date', ''),
+                    confirmed=item.get('is_confirmed', False),
+                    row_index=item.get('row_index')
+                )
+            self._schedule_update()
+            self.log_signal.emit(f"[REPORT] Google Sheets에서 대납금 {len(advances)}건 로드 완료")
+            JarvisMessageBox.information(self, "완료", f"대납금 {len(advances)}건을 가져왔습니다.")
+        except Exception as e:
+            JarvisMessageBox.critical(self, "데이터 적용 오류", f"{type(e).__name__}: {e}")
     
     def _update_sheets_report_date(self, report_date: str):
         """메일 발송 후 Google Sheets의 보고일자 열 업데이트 (백그라운드 스레드)

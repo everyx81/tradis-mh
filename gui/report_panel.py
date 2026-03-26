@@ -670,12 +670,12 @@ class ReportPanel(QWidget):
                 rows += f"""
                 <tr>
                     <td style="{STYLE_TD_CENTER} {border_style}">{i+1}</td>
-                    <td style="{STYLE_TD} {border_style}">{item['company']}</td>
-                    <td style="{STYLE_TD_RIGHT} {border_style}">{fmt(item['amount'])}원</td>
-                    <td style="{STYLE_TD_CENTER} {border_style}">{item.get('expected_date', '')}</td>
+                    <td style="{STYLE_TD} word-break: keep-all; {border_style}">{item['company']}</td>
+                    <td style="{STYLE_TD_RIGHT} {border_style}"><span style="white-space:nowrap">{fmt(item['amount'])}원</span></td>
+                    <td style="{STYLE_TD_CENTER} {border_style}"><span style="white-space:nowrap">{item.get('expected_date', '')}</span></td>
                     <td style="{STYLE_TD_CENTER_LAST} {border_style}">{status_char}</td>
                 </tr>"""
-                
+
             # 합계 행 추가
             total_amount = sum(int(item.get('amount', 0)) for item in data['receivables'])
             rows += f"""
@@ -717,15 +717,15 @@ class ReportPanel(QWidget):
                 # BL 번호 확인
                 bl_no_td = ""
                 if 'bl_no' in item:
-                    bl_no_td = f'<td style="{STYLE_TD} {border_style}">{item["bl_no"]}</td>'
-                
+                    bl_no_td = f'<td style="{STYLE_TD} overflow-wrap: break-word; {border_style}">{item["bl_no"]}</td>'
+
                 rows += f"""
                 <tr>
                     <td style="{STYLE_TD_CENTER} {border_style}">{i+1}</td>
-                    <td style="{STYLE_TD} {border_style}">{item['company']}</td>
+                    <td style="{STYLE_TD} word-break: keep-all; {border_style}">{item['company']}</td>
                     {bl_no_td}
-                    <td style="{STYLE_TD_RIGHT} {border_style}">{fmt(item['amount'])}원</td>
-                    <td style="{STYLE_TD_CENTER} {border_style}">{item.get('expected_date', '')}</td>
+                    <td style="{STYLE_TD_RIGHT} {border_style}"><span style="white-space:nowrap">{fmt(item['amount'])}원</span></td>
+                    <td style="{STYLE_TD_CENTER} {border_style}"><span style="white-space:nowrap">{item.get('expected_date', '')}</span></td>
                     <td style="{STYLE_TD_CENTER_LAST} {border_style}">{status_char}</td>
                 </tr>"""
 
@@ -748,12 +748,12 @@ class ReportPanel(QWidget):
             # 헤더 구성 (BL 포함 시 5열)
             if any('bl_no' in item for item in data['advances']):
                 adv_headers = f"""
-                        <th width="8%" style="{STYLE_TH}">No</th>
-                        <th width="27%" style="{STYLE_TH}">업체명</th>
-                        <th width="20%" style="{STYLE_TH}">BL 번호</th>
-                        <th width="20%" style="{STYLE_TH}">금액</th>
-                        <th width="15%" style="{STYLE_TH}">입금예정일</th>
-                        <th width="10%" style="{STYLE_TH_LAST}">확인</th>
+                        <th width="4%" style="{STYLE_TH}">No</th>
+                        <th width="15%" style="{STYLE_TH}">업체명</th>
+                        <th width="22%" style="{STYLE_TH}">BL 번호</th>
+                        <th width="25%" style="{STYLE_TH}">금액</th>
+                        <th width="26%" style="{STYLE_TH}">입금예정일</th>
+                        <th width="8%" style="{STYLE_TH_LAST}">확인</th>
                 """
             else:
                 adv_headers = f"""
@@ -765,7 +765,7 @@ class ReportPanel(QWidget):
                 """
                 
             content_advances = f"""
-            <table cellspacing="0" cellpadding="0" style="{STYLE_TABLE}">
+            <table cellspacing="0" cellpadding="0" style="{STYLE_TABLE} table-layout: fixed;">
                 <thead>
                     <tr>
                         {adv_headers}
@@ -784,6 +784,7 @@ class ReportPanel(QWidget):
         <html>
         <head>
             <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
         </head>
         <body style="{STYLE_BODY}">
             <div style="{STYLE_CONTAINER}">

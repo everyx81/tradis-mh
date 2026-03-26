@@ -694,6 +694,9 @@ class GroupCard(GlassFrame):
         is_visible = self.mapping_widget.isVisible()
         self.mapping_widget.setVisible(not is_visible)
         self.btn_toggle.setText("EXPAND" if is_visible else "COLLAPSE")
+        # 접을 때 매핑 기반으로 체크리스트 갱신 (접힌/펼친 뷰 불일치 방지)
+        if is_visible and self.mapping:
+            self._update_checklist_from_mapping()
     
     def _refresh_marking_display(self):
         """마킹된 파일 목록을 카드에 표시/갱신"""

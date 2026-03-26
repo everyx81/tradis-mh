@@ -205,7 +205,7 @@ class GroupCard(GlassFrame):
         if self.is_archive_only:
             btn_text = "폴더 정리"
         elif has_statement:
-            btn_text = "AI ANALYZE"
+            btn_text = "분석 중..."
         else:
             btn_text = "MATCH"
 
@@ -231,7 +231,7 @@ class GroupCard(GlassFrame):
             doc_list = "\n".join(f"  ✅ {v}" for v in docs.values())
             self.lbl_checklist.setText(f"수입신고필증 (정산서 없음 → 바로 폴더 정리)\n{doc_list}")
         elif has_statement:
-            self._update_checklist_basic()
+            self._auto_analyze_from_cache()
         else:
             summary_text = ", ".join(docs.values())
             self.lbl_checklist.setText(summary_text[:80] + "..." if len(summary_text) > 80 else summary_text)
@@ -260,9 +260,11 @@ class GroupCard(GlassFrame):
         self._run_amount_validation()
 
     def start_analysis(self):
+        if getattr(self, '_analyzing', False):
+            return
         # Import gemini_ocr at runtime to avoid circular imports
         from auto_rename import gemini_ocr
-        
+        self._analyzing = True
         self.btn_toggle.setText("Running...")
         self.btn_toggle.setEnabled(False)
         self.parent_widget.emit_log(f"Starting Analysis for ID: {self.text_id}")
@@ -295,6 +297,72 @@ class GroupCard(GlassFrame):
                 print(traceback.format_exc())
                 
         threading.Thread(target=run, daemon=True).start()
+
+    def _auto_analyze_from_cache(self):
+        """카드 생성 시 OCR 캐시 기반으로 자동 매핑 → 체크리스트 표시"""
+        try:
+            from auto_rename import gemini_ocr
+
+            statement_file = self.data['docs'].get("자금정산서") or self.data['docs'].get("정산서")
+            if not statement_file:
+                return
+
+            path = os.path.join(self.directory, statement_file)
+            cached = gemini_ocr._get_cached_result(path)
+            if not cached:
+                self.lbl_checklist.setText("⏳ OCR 캐시 대기 중...")
+                return
+
+            # 분석 중 중복 실행 방지: 버튼 비활성화
+            self.btn_toggle.setText("분석 중...")
+            self.btn_toggle.setEnabled(False)
+            self._analyzing = True
+
+            # 캐시 기반 매핑 실행 (백그라운드 스레드)
+            def run():
+                try:
+                    mode = "수입"
+                    if "수출신고필증" in self.data['docs']:
+                        mode = "수출"
+
+                    analysis = gemini_ocr.analyze_statement_for_merge(path)
+                    mapping = self.renamer._determine_merge_order(
+                        self.directory, statement_file, self.data['docs'], mode, analysis, self.text_id
+                    )
+                    self.mapping = mapping
+                    QTimer.singleShot(0, self._on_auto_analyze_done)
+                except Exception as e:
+                    print(f"[자동분석 오류] {e}")
+                    QTimer.singleShot(0, self._on_auto_analyze_fail)
+
+            threading.Thread(target=run, daemon=True).start()
+        except Exception as e:
+            print(f"[자동분석 초기화 오류] {e}")
+
+    def _on_auto_analyze_done(self):
+        """자동 분석 완료 후 체크리스트 갱신 (UI는 펼치지 않음)"""
+        self._analyzing = False
+        self._update_checklist_from_mapping()
+        self._run_amount_validation()
+        # 버튼: EXPAND (매핑 UI 펼치기)
+        self.btn_toggle.setText("펼치기")
+        self.btn_toggle.setEnabled(True)
+        try:
+            self.btn_toggle.clicked.disconnect()
+        except (RuntimeError, TypeError):
+            pass
+        self.btn_toggle.clicked.connect(self.refresh_mapping_ui)
+
+    def _on_auto_analyze_fail(self):
+        """자동 분석 실패 시 수동 분석 버튼으로 복원"""
+        self._analyzing = False
+        self.btn_toggle.setText("재분석")
+        self.btn_toggle.setEnabled(True)
+        try:
+            self.btn_toggle.clicked.disconnect()
+        except (RuntimeError, TypeError):
+            pass
+        self.btn_toggle.clicked.connect(self.start_analysis)
 
     def _update_checklist_basic(self):
         """캐시된 정산서 분석 결과를 활용하여 비용 항목까지 포함한 체크리스트 표시"""
@@ -376,15 +444,24 @@ class GroupCard(GlassFrame):
                                 break
 
                         # billing_items 기반 콘텐츠 매칭 (파일명 키워드 실패 시)
+                        # 조건: 키워드 + 금액 동시 일치해야 매칭 (오판 방지)
                         if not found:
-                            for v in docs.values():
+                            item_amt_for_bi = parse_amount(item_data.get("amount", 0) if isinstance(item_data, dict) else 0)
+                            fixed_keys = {"자금정산서", "정산서", "수입신고필증", "수출신고필증", "납부고지서", "수입세금계산서"}
+                            for doc_key, v in docs.items():
+                                if v in used_files or doc_key in fixed_keys:
+                                    continue
                                 fp = os.path.join(self.directory, v)
                                 f_cached = gemini_ocr._get_cached_result(fp)
                                 if f_cached:
                                     for bi in f_cached.get('billing_items', []):
                                         bi_upper = bi.get('name', '').upper().replace(' ', '')
-                                        if any(kw in bi_upper or bi_upper in kw for kw in search_kws):
+                                        bi_amt = parse_amount(bi.get('amount', 0))
+                                        kw_match = any(kw in bi_upper or bi_upper in kw for kw in search_kws)
+                                        amt_match = (item_amt_for_bi > 0 and bi_amt > 0 and item_amt_for_bi == bi_amt)
+                                        if kw_match and amt_match:
                                             found = True
+                                            used_files.append(v)
                                             break
                                 if found:
                                     break
@@ -481,14 +558,11 @@ class GroupCard(GlassFrame):
 
     def refresh_mapping_ui(self):
         self.mapping_widget.setVisible(True)
-        self.btn_toggle.setText("COLLAPSE")
+        self.btn_toggle.setText("접기")
         self.btn_toggle.setEnabled(True)
         try: self.btn_toggle.clicked.disconnect()
         except (RuntimeError, TypeError): pass
         self.btn_toggle.clicked.connect(self.toggle_view)
-        
-        # AI 분석 결과로 체크리스트 갱신 (비용 항목 포함)
-        self._update_checklist_from_mapping()
         
         # 기존 레이아웃 정리
         while self.mapping_layout.count():
@@ -693,10 +767,7 @@ class GroupCard(GlassFrame):
     def toggle_view(self):
         is_visible = self.mapping_widget.isVisible()
         self.mapping_widget.setVisible(not is_visible)
-        self.btn_toggle.setText("EXPAND" if is_visible else "COLLAPSE")
-        # 접을 때 매핑 기반으로 체크리스트 갱신 (접힌/펼친 뷰 불일치 방지)
-        if is_visible and self.mapping:
-            self._update_checklist_from_mapping()
+        self.btn_toggle.setText("펼치기" if is_visible else "접기")
     
     def _refresh_marking_display(self):
         """마킹된 파일 목록을 카드에 표시/갱신"""

@@ -140,11 +140,9 @@ def validate_mapping_amounts(mapping, directory):
                             used_indices.add(idx)
                             break
 
-            # [Bug 2 수정] total_amount 폴백: 단일 항목이거나 billing_items 없을 때만
+            # total_amount 폴백: 키워드 매칭 실패 시 total_amount 사용
             if not bi_matched:
-                if not billing_items or len(billing_items) == 1:
-                    file_amt = parse_amount(cached.get('total_amount', 0))
-                # 복수 항목인데 매칭 실패 → file_amt = 0 유지 (불일치로 표시)
+                file_amt = parse_amount(cached.get('total_amount', 0))
 
         # [Bug 1 수정] sum_files: 파일당 1번만 합산 (파일 total_amount 사용)
         if filename not in _summed_files:

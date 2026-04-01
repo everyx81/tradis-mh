@@ -285,22 +285,22 @@ class ExportMailSender:
         # ID 정규화 (공백 제거, 대문자화)
         normalized_id = identifier.replace(" ", "").upper()
         
-        # 파일명 패턴: (ID)수출신고필증.pdf
-        pattern = re.compile(r'\(([^)]+)\)수출신고필증\.pdf$', re.IGNORECASE)
-        
+        # 파일명 패턴: (ID)수출신고필증.pdf 또는 (ID)반송신고필증.pdf
+        pattern = re.compile(r'\(([^)]+)\)(?:수출|반송)신고필증\.pdf$', re.IGNORECASE)
+
         for filename in os.listdir(folder_path):
             if not filename.lower().endswith('.pdf'):
                 continue
-            
+
             match = pattern.search(filename)
             if match:
                 file_id = match.group(1).replace(" ", "").upper()
                 if file_id == normalized_id:
                     full_path = os.path.join(folder_path, filename)
-                    self.log(f"수출신고필증 발견: {filename}")
+                    self.log(f"수출/반송신고필증 발견: {filename}")
                     return full_path
-        
-        self.log(f"수출신고필증을 찾을 수 없음 (ID: {identifier})")
+
+        self.log(f"수출/반송신고필증을 찾을 수 없음 (ID: {identifier})")
         return None
     
     def send_reply(self, to_email: str, subject: str, attachment_path: str, 

@@ -197,7 +197,7 @@ class GroupCard(GlassFrame):
         
         docs = self.data['docs']
         has_statement = "자금정산서" in docs or "정산서" in docs
-        is_export_only = not has_statement and any('수출신고필증' in v for v in docs.values())
+        is_export_only = not has_statement and any('수출신고필증' in v or '반송신고필증' in v for v in docs.values())
         is_import_no_settlement = not has_statement and not is_export_only and any('수입신고필증' in v for v in docs.values())
         self.is_export_only = is_export_only
         self.is_archive_only = is_export_only or is_import_no_settlement
@@ -226,7 +226,8 @@ class GroupCard(GlassFrame):
         self.layout.addWidget(self.lbl_checklist)
         
         if is_export_only:
-            self.lbl_checklist.setText("✅ 수출신고필증 (정산서 없음 → 바로 폴더 정리)")
+            export_label = "반송신고필증" if any('반송신고필증' in v for v in docs.values()) else "수출신고필증"
+            self.lbl_checklist.setText(f"✅ {export_label} (정산서 없음 → 바로 폴더 정리)")
         elif is_import_no_settlement:
             doc_list = "\n".join(f"  ✅ {v}" for v in docs.values())
             self.lbl_checklist.setText(f"수입신고필증 (정산서 없음 → 바로 폴더 정리)\n{doc_list}")
@@ -272,7 +273,7 @@ class GroupCard(GlassFrame):
         def run():
             try:
                 mode = "수입"
-                if "수출신고필증" in self.data['docs']: mode = "수출"
+                if "수출신고필증" in self.data['docs'] or "반송신고필증" in self.data['docs']: mode = "수출"
                 
                 statement_file = self.data['docs'].get("자금정산서") or self.data['docs'].get("정산서")
                 
@@ -322,7 +323,7 @@ class GroupCard(GlassFrame):
             def run():
                 try:
                     mode = "수입"
-                    if "수출신고필증" in self.data['docs']:
+                    if "수출신고필증" in self.data['docs'] or "반송신고필증" in self.data['docs']:
                         mode = "수출"
 
                     analysis = gemini_ocr.analyze_statement_for_merge(path)
@@ -367,13 +368,13 @@ class GroupCard(GlassFrame):
     def _update_checklist_basic(self):
         """캐시된 정산서 분석 결과를 활용하여 비용 항목까지 포함한 체크리스트 표시"""
         docs = self.data['docs']
-        is_export = "수출신고필증" in docs
+        is_export = "수출신고필증" in docs or "반송신고필증" in docs
         
         # 기본 필수 서류
         if is_export:
             required = [
                 {"name": "자금정산서", "found": "자금정산서" in docs or "정산서" in docs},
-                {"name": "수출신고필증", "found": True},
+                {"name": "반송신고필증" if "반송신고필증" in docs else "수출신고필증", "found": True},
             ]
         else:
             required = [
@@ -447,7 +448,7 @@ class GroupCard(GlassFrame):
                         # 조건: 키워드 + 금액 동시 일치해야 매칭 (오판 방지)
                         if not found:
                             item_amt_for_bi = parse_amount(item_data.get("amount", 0) if isinstance(item_data, dict) else 0)
-                            fixed_keys = {"자금정산서", "정산서", "수입신고필증", "수출신고필증", "납부고지서", "수입세금계산서"}
+                            fixed_keys = {"자금정산서", "정산서", "수입신고필증", "수출신고필증", "반송신고필증", "납부고지서", "수입세금계산서"}
                             for doc_key, v in docs.items():
                                 if v in used_files or doc_key in fixed_keys:
                                     continue
@@ -924,6 +925,9 @@ class GroupCard(GlassFrame):
         if any('수입신고필증' in v for v in docs.values()):
             doc_label = "수입신고필증"
             log_prefix = "수입"
+        elif any('반송신고필증' in v for v in docs.values()):
+            doc_label = "반송신고필증"
+            log_prefix = "반송"
         else:
             doc_label = "수출신고필증"
             log_prefix = "수출"

@@ -242,8 +242,8 @@ class AutoRenamer:
                     # 이미 위에서 UI 갱신 시그널을 보냈지만, 파일명이 바뀌었으므로 한번 더 안전하게 보냄
                     if self.rename_complete_callback:
                         self.rename_complete_callback()
-                    # 수출신고필증이면 마킹 콜백 호출
-                    if "수출신고필증" in dt and self.export_declaration_callback:
+                    # 수출신고필증/반송신고필증이면 마킹 콜백 호출
+                    if ("수출신고필증" in dt or "반송신고필증" in dt) and self.export_declaration_callback:
                         self.export_declaration_callback(cn, iden, np)
                 except Exception as e:
                     self.log(f" -> [실패] 이름 변경 오류: {e}")
@@ -298,7 +298,13 @@ class AutoRenamer:
         if mo == "수입":
             m.append({'label': '[신고필증] 수입신고필증', 'filename': dm.get(DOC_TYPE_IMPORT_DECLARATION, '')})
         elif mo == "수출":
-            m.append({'label': '[신고필증] 수출신고필증', 'filename': dm.get(DOC_TYPE_EXPORT_DECLARATION, '')})
+            # 반송신고필증 우선 확인
+            from core.constants import DOC_TYPE_RETURN_DECLARATION
+            return_decl = dm.get(DOC_TYPE_RETURN_DECLARATION, '')
+            if return_decl:
+                m.append({'label': '[신고필증] 반송신고필증', 'filename': return_decl})
+            else:
+                m.append({'label': '[신고필증] 수출신고필증', 'filename': dm.get(DOC_TYPE_EXPORT_DECLARATION, '')})
         else:
             m.append({'label': '[신고필증] 신고필증', 'filename': ''})
         if mo == "수입":

@@ -1385,7 +1385,7 @@ class JarvisGUI(QMainWindow):
             for text_id, data in groups.items():
                 docs = data.get('docs', {})
                 has_statement = '자금정산서' in docs or '정산서' in docs
-                is_export = any('수출신고필증' in v for v in docs.values())
+                is_export = any('수출신고필증' in v or '반송신고필증' in v for v in docs.values())
                 is_import = any('수입신고필증' in v for v in docs.values())
                 if not has_statement and not is_export and not is_import:
                     self.emit_log(f"[건너뜀] {text_id}: 자금정산서/신고필증 없음")
@@ -2025,7 +2025,7 @@ class JarvisGUI(QMainWindow):
         attachment_path = self.mail_sender.find_export_declaration(folder_path, identifier)
         
         if not attachment_path:
-            JarvisMessageBox.warning(self, "파일 없음", f"수출신고필증을 찾을 수 없습니다.\n폴더: {folder_path}\nID: {identifier}")
+            JarvisMessageBox.warning(self, "파일 없음", f"수출/반송신고필증을 찾을 수 없습니다.\n폴더: {folder_path}\nID: {identifier}")
             return
         
         # 4. 답장 메일 발송

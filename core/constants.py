@@ -16,6 +16,7 @@ DOC_TYPE_PAYMENT_NOTICE = "납부고지서"
 DOC_TYPE_IMPORT_TAX_INVOICE = "수입세금계산서"
 DOC_TYPE_FEE_TAX_INVOICE = "통관수수료계산서"
 DOC_TYPE_EXPORT_DECLARATION = "수출신고필증"
+DOC_TYPE_RETURN_DECLARATION = "반송신고필증"
 DOC_TYPE_CONFORMITY_CERT = "적합성평가확인서"
 
 # 통관수수료계산서에 포함되는 수수료/비용 항목 목록
@@ -92,7 +93,7 @@ REQUIREMENT_DOC_KEYWORDS = [
 # 고정 슬롯 문서 키 (정산서 병합 시 순서 고정되는 문서 유형)
 FIXED_SLOT_KEYS = [
     "자금정산서", "정산서",
-    "수입신고필증", "수출신고필증",
+    "수입신고필증", "수출신고필증", "반송신고필증",
     "납부고지서",
     "수입세금계산서",
 ]

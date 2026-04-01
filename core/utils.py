@@ -29,7 +29,7 @@ RE_INV_GENERAL = re.compile(r'(Invoice|P/O|Ref|송품장)\s*(No|NO|번호|부호
 RE_FILE_PATTERN = re.compile(r'^.+?\(.+?\).+?\.pdf$')
 RE_INVALID_CHARS = re.compile(r'[\\/*?:"<>|]')
 RE_ID_PAREN = re.compile(r'\(([^()]+)\)')
-RE_DOC_TYPES_PIPE = "|".join(["정산서", "자금정산서", "수입신고필증", "납부고지서", "수입세금계산서", "통관수수료계산서", "수출신고필증", "자금청구서"])
+RE_DOC_TYPES_PIPE = "|".join(["정산서", "자금정산서", "수입신고필증", "납부고지서", "수입세금계산서", "통관수수료계산서", "수출신고필증", "반송신고필증", "자금청구서"])
 RE_DOC_MATCH = re.compile(fr'\(.*\)({RE_DOC_TYPES_PIPE})')
 
 RE_TAX_PAYER = re.compile(r'납\s*세\s*의\s*무\s*자')

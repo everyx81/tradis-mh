@@ -563,11 +563,15 @@ class AutoRenamer:
             uncl_files = [f for f in allp if f not in af]
 
             # 2차: 같은 폴더 내 모든 미할당 PDF (BL 불일치 포함)
+            # 고정 슬롯 문서는 금액 매칭 후보에서 제외 (다른 건의 정산서/필증이 매칭되는 오류 방지)
+            _fixed_doc_keywords = ("정산서", "신고필증", "납부고지서", "납부영수증", "세금계산서")
             if os.path.exists(dr):
                 for f in _all_dir_pdfs:
                     if f in af or f in uncl_files:
                         continue
                     if "청구서" in f and "계산서" not in f:
+                        continue
+                    if any(kw in f for kw in _fixed_doc_keywords):
                         continue
                     uncl_files.append(f)
 

@@ -477,12 +477,15 @@ class GroupCard(GlassFrame):
                             if item_amt > 0:
                                 uncl_amounts = {}
                                 if os.path.exists(self.directory):
+                                    _fixed_doc_kws = ("정산서", "신고필증", "납부고지서", "납부영수증", "세금계산서")
                                     for f in os.listdir(self.directory):
                                         if not f.lower().endswith('.pdf'):
                                             continue
                                         if f in fixed_slot_files or f in used_files:
                                             continue
                                         if "청구서" in f and "계산서" not in f:
+                                            continue
+                                        if any(kw in f for kw in _fixed_doc_kws):
                                             continue
                                         fp = os.path.join(self.directory, f)
                                         f_cached = gemini_ocr._get_cached_result(fp)

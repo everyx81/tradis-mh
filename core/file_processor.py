@@ -562,17 +562,20 @@ class AutoRenamer:
             # 1차: BL 일치 파일 중 미할당 파일
             uncl_files = [f for f in allp if f not in af]
 
-            # 2차: 같은 폴더 내 모든 미할당 PDF (BL 불일치 포함)
-            # 고정 슬롯 문서는 금액 매칭 후보에서 제외 (다른 건의 정산서/필증이 매칭되는 오류 방지)
-            _fixed_doc_keywords = ("정산서", "신고필증", "납부고지서", "납부영수증", "세금계산서")
+            # 2차: 같은 폴더 내 미할당 PDF (BL 불일치 파일 중 다른 건 제외)
             if os.path.exists(dr):
+                normalized_ti = normalize_id(ti) if ti else ""
                 for f in _all_dir_pdfs:
                     if f in af or f in uncl_files:
                         continue
                     if "청구서" in f and "계산서" not in f:
                         continue
-                    if any(kw in f for kw in _fixed_doc_keywords):
-                        continue
+                    # 파일에 BL번호가 있으면서 현재 건과 다른 BL이면 제외
+                    f_match = RE_ID_PAREN.search(f)
+                    if f_match and normalized_ti:
+                        f_id = normalize_id(f_match.group(1).strip())
+                        if f_id != normalized_ti:
+                            continue  # 다른 건의 파일 → 스킵
                     uncl_files.append(f)
 
             uncl_amounts = {}

@@ -59,12 +59,15 @@ def is_similar_id(id1: str, id2: str, threshold: float = 0.75) -> bool:
     if n1 == n2:
         return True
     
-    # 영문 접두어와 숫자 접미어 분리
+    # 영문 접두어와 숫자/영문 접미어 분리
     def split_id(s):
         # 끝에서부터 연속된 숫자를 접미어로 분리
         i = len(s)
         while i > 0 and s[i-1].isdigit():
             i -= 1
+        # 숫자 접미어가 없고 끝 1글자가 영문이면 연번(A/B/C)으로 간주
+        if i == len(s) and s and s[-1].isalpha():
+            return s[:-1], s[-1]
         return s[:i], s[i:]
     
     prefix1, suffix1 = split_id(n1)

@@ -91,7 +91,7 @@ class AutoRenamer:
 
         self.processing_files.clear()
 
-    def _wait_for_file_ready(self, fp, timeout=10):
+    def _wait_for_file_ready(self, fp, timeout=30):
         """파일 쓰기가 완료될 때까지 대기. 완료되면 True, 빈 파일이면 False."""
         elapsed = 0
         prev_size = -1
@@ -140,7 +140,7 @@ class AutoRenamer:
         try:
             if not is_initial:
                 # 파일 쓰기 완료 대기 (다운로드/복사 중인 파일 보호)
-                if not self._wait_for_file_ready(fp, timeout=10):
+                if not self._wait_for_file_ready(fp, timeout=30):
                     self.log(f" -> [건너뜀] 파일이 비어있거나 쓰기 미완료: {fn}")
                     return
             else:
@@ -148,6 +148,14 @@ class AutoRenamer:
                 # 초기 스캔에서도 0KB 파일은 건너뜀
                 if os.path.getsize(fp) == 0:
                     return
+
+            # 최소 파일 크기 체크 (10KB 미만은 불완전한 PDF로 간주)
+            try:
+                if os.path.getsize(fp) < 10240:
+                    self.log(f" -> [건너뜀] 파일 크기 부족 ({os.path.getsize(fp)} bytes): {fn}")
+                    return
+            except OSError:
+                return
 
             c, i, d, s = parse_renamed_filename(fn)
             if i:
@@ -164,6 +172,31 @@ class AutoRenamer:
             dt = res.get("doc_type", "Unknown")
             cn = res.get("company_name", "Unknown")
             iden = res.get("identifier", "Unknown")
+
+            # OCR 전체 실패 시 1회 재시도 (다운로드 미완료 파일 대응)
+            if dt == "Unknown" and cn == "Unknown" and iden == "Unknown":
+                self.log(f" -> [OCR 재시도] 전체 Unknown - 5초 후 재분석: {fn}")
+                time.sleep(5)
+                # 캐시 무효화 후 재분석
+                cache_path = gemini_ocr._get_cache_path(fp)
+                if os.path.exists(cache_path):
+                    try:
+                        import json as _json
+                        with open(cache_path, 'r', encoding='utf-8') as _cf:
+                            _cache = _json.load(_cf)
+                        _keys = [k for k in _cache if os.path.basename(fp) in k]
+                        for _k in _keys:
+                            del _cache[_k]
+                        with open(cache_path, 'w', encoding='utf-8') as _cf:
+                            _json.dump(_cache, _cf, ensure_ascii=False)
+                    except Exception:
+                        pass
+                res = extract_document_info_ai(fp)
+                dt = res.get("doc_type", "Unknown")
+                cn = res.get("company_name", "Unknown")
+                iden = res.get("identifier", "Unknown")
+                if dt != "Unknown" or cn != "Unknown":
+                    self.log(f" -> [OCR 재시도 성공] {dt} / {cn} / {iden}")
 
             # 수입자명이 전체 영문인지 판단 (한글이 포함되지 않음)
             # cn이 "Unknown"이면 무시하고 판별

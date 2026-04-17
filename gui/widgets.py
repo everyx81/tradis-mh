@@ -1412,15 +1412,8 @@ class NeonButton(QPushButton):
         self._is_primary = is_primary
         self._hover_progress = 0.0
         self._hover_anim = None
-
-        # 호버 시 파란 glow (카드와 동일 패턴)
-        from PyQt6.QtWidgets import QGraphicsDropShadowEffect
-        from PyQt6.QtGui import QColor
-        self._hover_shadow = QGraphicsDropShadowEffect(self)
-        self._hover_shadow.setBlurRadius(18)
-        self._hover_shadow.setOffset(0, 0)
-        self._hover_shadow.setColor(QColor(0, 180, 230, 0))
-        self.setGraphicsEffect(self._hover_shadow)
+        # 버튼은 drop shadow 없이 색상 보간만 (클릭 시 흔들림 방지)
+        self._hover_shadow = None
 
         self._apply_hover_state(0.0)
 
@@ -1469,15 +1462,23 @@ class NeonButton(QPushButton):
                     color: #e8f2ff;
                     font-weight: 600;
                     padding: 0 18px;
+                    margin: 0;
                     letter-spacing: 0.3px;
                     outline: none;
                 }}
-                QPushButton:focus {{ outline: none; }}
-                QPushButton:pressed {{ background: rgba(30, 88, 150, 210); }}
+                QPushButton:focus {{ outline: none; padding: 0 18px; margin: 0; }}
+                QPushButton:pressed {{
+                    background: rgba(30, 88, 150, 210);
+                    padding: 0 18px;
+                    margin: 0;
+                    border: 1px solid rgba({br_r}, {br_g}, {br_b}, {br_a});
+                }}
                 QPushButton:disabled {{
                     background: rgba(40, 55, 75, 90);
                     border: 1px solid rgba(100, 130, 160, 40);
                     color: #556070;
+                    padding: 0 18px;
+                    margin: 0;
                 }}
             """)
             glow_alpha = lerp(0, 120)
@@ -1493,15 +1494,23 @@ class NeonButton(QPushButton):
                     color: #c0d0e0;
                     font-weight: 600;
                     padding: 0 16px;
+                    margin: 0;
                     letter-spacing: 0.3px;
                     outline: none;
                 }}
-                QPushButton:focus {{ outline: none; }}
-                QPushButton:pressed {{ background: rgba(30, 55, 80, 220); }}
+                QPushButton:focus {{ outline: none; padding: 0 16px; margin: 0; }}
+                QPushButton:pressed {{
+                    background: rgba(30, 55, 80, 220);
+                    padding: 0 16px;
+                    margin: 0;
+                    border: 1px solid rgba({br_r}, {br_g}, {br_b}, {br_a});
+                }}
                 QPushButton:disabled {{
                     background: rgba(30, 40, 55, 80);
                     border: 1px solid rgba(80, 100, 130, 40);
                     color: #556070;
+                    padding: 0 16px;
+                    margin: 0;
                 }}
             """)
             glow_alpha = lerp(0, 100)

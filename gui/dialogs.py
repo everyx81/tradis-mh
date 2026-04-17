@@ -276,6 +276,7 @@ class IndependentCard(GlassFrame):
         self.setObjectName("IndependentCardRoot")
         self._hover_progress = 0.0
         self._hover_anim = None
+        self._toggle_in_progress = False
 
         # 호버 시 카드 주변 파란 glow
         from PyQt6.QtWidgets import QGraphicsDropShadowEffect
@@ -396,12 +397,35 @@ class IndependentCard(GlassFrame):
 
     # ── 부드러운 호버 애니메이션 ──
     def enterEvent(self, event):
-        self._animate_hover(1.0)
+        # 토글 중에는 호버 애니메이션 억제 (덜덜 떨림 방지)
+        if not getattr(self, '_toggle_in_progress', False):
+            self._animate_hover(1.0)
         super().enterEvent(event)
 
     def leaveEvent(self, event):
-        self._animate_hover(0.0)
+        if not getattr(self, '_toggle_in_progress', False):
+            self._animate_hover(0.0)
         super().leaveEvent(event)
+
+    def _suspend_hover_fx(self):
+        """토글 중 호버 애니메이션 + drop shadow 일시 정지 (깜빡임 방지)"""
+        if getattr(self, '_hover_anim', None) is not None:
+            try:
+                self._hover_anim.stop()
+            except RuntimeError:
+                pass
+        if hasattr(self, '_hover_shadow') and self._hover_shadow is not None:
+            self._hover_shadow.setEnabled(False)
+
+    def _resume_hover_fx(self):
+        """토글 완료 후 호버 효과 복원"""
+        self._toggle_in_progress = False
+        if hasattr(self, '_hover_shadow') and self._hover_shadow is not None:
+            self._hover_shadow.setEnabled(True)
+        if self.underMouse():
+            self._animate_hover(1.0)
+        else:
+            self._animate_hover(0.0)
 
     def _animate_hover(self, target):
         from PyQt6.QtCore import QVariantAnimation, QEasingCurve
@@ -478,10 +502,15 @@ class IndependentCard(GlassFrame):
 
     def toggle_collapse(self):
         """접기/펼치기 토글"""
+        # 토글 중 호버 애니메이션 억제 + drop shadow 일시 비활성화 (덜덜 떨림 방지)
+        self._toggle_in_progress = True
+        self._suspend_hover_fx()
         was_expanded = not self.is_collapsed
         self.is_collapsed = not self.is_collapsed
         self.body_widget.setVisible(not self.is_collapsed)
         self.lbl_arrow.setText("▶" if self.is_collapsed else "▼")
+        # 레이아웃 안정화 후 플래그 해제 + shadow 복원
+        QTimer.singleShot(120, self._resume_hover_fx)
         # 펼친 상태에서 파일 변경이 있었고 지금 접히는 중이면 폴더 재스캔
         # (이름 변경으로 분류가 바뀔 수 있어 다른 카드에도 반영 필요)
         if was_expanded and self.is_collapsed and self._dirty:
@@ -716,12 +745,37 @@ class GroupCard(GlassFrame):
 
     # ── 부드러운 호버 애니메이션 ──
     def enterEvent(self, event):
-        self._animate_hover(1.0)
+        # 토글 중에는 호버 애니메이션 억제 (덜덜 떨림 방지)
+        if not getattr(self, '_toggle_in_progress', False):
+            self._animate_hover(1.0)
         super().enterEvent(event)
 
     def leaveEvent(self, event):
-        self._animate_hover(0.0)
+        if not getattr(self, '_toggle_in_progress', False):
+            self._animate_hover(0.0)
         super().leaveEvent(event)
+
+    def _suspend_hover_fx(self):
+        """토글 중 호버 애니메이션 + drop shadow 일시 정지 (깜빡임 방지)"""
+        if getattr(self, '_hover_anim', None) is not None:
+            try:
+                self._hover_anim.stop()
+            except RuntimeError:
+                pass
+        # drop shadow 일시 비활성화 — 레이아웃 재계산 중 블러 재렌더링 방지
+        if hasattr(self, '_hover_shadow') and self._hover_shadow is not None:
+            self._hover_shadow.setEnabled(False)
+
+    def _resume_hover_fx(self):
+        """토글 완료 후 호버 효과 복원"""
+        self._toggle_in_progress = False
+        if hasattr(self, '_hover_shadow') and self._hover_shadow is not None:
+            self._hover_shadow.setEnabled(True)
+        # 현재 마우스 위치에 따라 호버 상태 재결정
+        if self.underMouse():
+            self._animate_hover(1.0)
+        else:
+            self._animate_hover(0.0)
 
     def _animate_hover(self, target):
         from PyQt6.QtCore import QVariantAnimation, QEasingCurve
@@ -778,6 +832,7 @@ class GroupCard(GlassFrame):
         self.setObjectName("GroupCardRoot")
         self._hover_progress = 0.0
         self._hover_anim = None
+        self._toggle_in_progress = False
 
         # 호버 시 카드 주변 파란 glow (QGraphicsDropShadowEffect)
         from PyQt6.QtWidgets import QGraphicsDropShadowEffect
@@ -976,9 +1031,13 @@ class GroupCard(GlassFrame):
 
     def toggle_collapse(self):
         """접기/펼치기 토글"""
+        # 토글 중 호버 애니메이션 억제 + drop shadow 일시 비활성화 (덜덜 떨림 방지)
+        self._toggle_in_progress = True
+        self._suspend_hover_fx()
         self.is_collapsed = not self.is_collapsed
         self.body_widget.setVisible(not self.is_collapsed)
         self.lbl_arrow.setText("▶" if self.is_collapsed else "▼")
+        QTimer.singleShot(120, self._resume_hover_fx)
 
     def _compute_status(self):
         """카드 상태 계산 → 'green'|'yellow'|'red'|'gray'

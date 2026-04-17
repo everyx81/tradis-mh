@@ -1561,7 +1561,48 @@ class JarvisGUI(QMainWindow):
         lbl_sec = QLabel("■ ID CLASSIFIED FILES (B/L, Invoice No.)")
         lbl_sec.setStyleSheet("color: #ddd; font-weight: bold; margin-top: 10px;")
         layout.addWidget(lbl_sec)
-        
+
+        # ── 상태 필터 바 (전체/완료/검토/미매칭) ──
+        self.current_card_filter = 'all'  # 'all' | 'green' | 'yellow' | 'red' | 'gray'
+        self.group_cards = []  # 필터 대상 카드 참조 저장
+
+        self.filter_bar = QWidget()
+        filter_layout = QHBoxLayout(self.filter_bar)
+        filter_layout.setContentsMargins(0, 2, 0, 2)
+        filter_layout.setSpacing(6)
+
+        def _make_filter_btn(key, label):
+            btn = QPushButton(label)
+            btn.setCheckable(True)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setStyleSheet("""
+                QPushButton {
+                    background: rgba(20,30,40,180); border: 1px solid #334;
+                    border-radius: 12px; padding: 4px 10px;
+                    color: #aac; font-size: 9pt;
+                }
+                QPushButton:hover { border-color: #00aaaa; color: #ccf; }
+                QPushButton:checked {
+                    background: rgba(0,170,170,60); border-color: #00ffff; color: #00ffff;
+                    font-weight: bold;
+                }
+            """)
+            btn.clicked.connect(lambda: self._apply_card_filter(key))
+            return btn
+
+        self.filter_btns = {
+            'all':    _make_filter_btn('all', '전체 0'),
+            'green':  _make_filter_btn('green', '🟢 0'),
+            'yellow': _make_filter_btn('yellow', '🟡 0'),
+            'red':    _make_filter_btn('red', '🔴 0'),
+            'gray':   _make_filter_btn('gray', '⚪ 0'),
+        }
+        for key in ('all', 'green', 'yellow', 'red', 'gray'):
+            filter_layout.addWidget(self.filter_btns[key])
+        filter_layout.addStretch()
+        self.filter_btns['all'].setChecked(True)
+        layout.addWidget(self.filter_bar)
+
         self.merge_scroll = QScrollArea()
         self.merge_scroll.setWidgetResizable(True)
         self.merge_scroll.setStyleSheet("background: transparent; border: none;")
@@ -1579,6 +1620,40 @@ class JarvisGUI(QMainWindow):
         self.lbl_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lbl_hint.setStyleSheet("color: #555; font-size: 14pt;")
         self.merge_layout.addWidget(self.lbl_hint)
+
+    def _apply_card_filter(self, key):
+        """필터 버튼 클릭 → 해당 상태 카드만 표시"""
+        self.current_card_filter = key
+        # 모든 버튼 체크 해제 후 선택된 것만 체크
+        for k, btn in self.filter_btns.items():
+            btn.setChecked(k == key)
+        # 카드 표시/숨김
+        for card in self.group_cards:
+            if not hasattr(card, 'get_status'):
+                card.setVisible(True)
+                continue
+            card.setVisible(key == 'all' or card.get_status() == key)
+
+    def _refresh_filter_counts(self):
+        """필터 버튼의 카운트 갱신"""
+        if not hasattr(self, 'filter_btns'):
+            return
+        counts = {'all': 0, 'green': 0, 'yellow': 0, 'red': 0, 'gray': 0}
+        for card in self.group_cards:
+            counts['all'] += 1
+            if hasattr(card, 'get_status'):
+                counts[card.get_status()] = counts.get(card.get_status(), 0) + 1
+        labels = {
+            'all':    f"전체 {counts['all']}",
+            'green':  f"🟢 {counts['green']}",
+            'yellow': f"🟡 {counts['yellow']}",
+            'red':    f"🔴 {counts['red']}",
+            'gray':   f"⚪ {counts['gray']}",
+        }
+        for key, btn in self.filter_btns.items():
+            btn.setText(labels[key])
+        # 현재 필터 재적용 (상태 바뀐 카드 반영)
+        self._apply_card_filter(self.current_card_filter)
 
     def setup_right_panel(self):
         # self.right_panel.setMaximumWidth(380) # 동적 제어를 위해 제거
@@ -1627,18 +1702,22 @@ class JarvisGUI(QMainWindow):
             while self.merge_layout.count():
                 child = self.merge_layout.takeAt(0)
                 if child.widget(): child.widget().deleteLater()
-                
+
+            # 카드 필터 대상 리스트 초기화
+            self.group_cards = []
+
             groups = report.get('groups', {})
             unclassified = report.get('unclassified', [])
             directory = report.get('directory', '')
             self.emit_log(f"Scan Report: {len(groups)} Groups, {len(unclassified)} Unclassified")
-            
+
             if directory: self.lbl_location.setText(f"Location: {directory}")
-            
+
             if not groups and not unclassified:
                 lbl = QLabel("No files to process.")
                 lbl.setStyleSheet("color: #777; font-size: 11pt;")
                 self.merge_layout.addWidget(lbl)
+                self._refresh_filter_counts()
                 return
 
             for text_id, data in groups.items():
@@ -1652,8 +1731,12 @@ class JarvisGUI(QMainWindow):
                 try:
                     card = GroupCard(self, self.renamer, directory, text_id, data, unclassified)
                     self.merge_layout.addWidget(card)
+                    self.group_cards.append(card)
+                    # 상태 변경 시 필터 카운트 갱신
+                    if hasattr(card, 'status_changed'):
+                        card.status_changed.connect(self._refresh_filter_counts)
                 except Exception as e: self.emit_log(f"Error creating card for {text_id}: {e}")
-                
+
             # 독립 문서 카드 (이체증 등)
             independent = report.get('independent', {})
             for doc_type, file_list in independent.items():
@@ -1661,6 +1744,9 @@ class JarvisGUI(QMainWindow):
                     from gui.dialogs import IndependentCard
                     card = IndependentCard(self, directory, doc_type, file_list)
                     self.merge_layout.addWidget(card)
+                    self.group_cards.append(card)
+                    if hasattr(card, 'status_changed'):
+                        card.status_changed.connect(self._refresh_filter_counts)
                 except Exception as e:
                     self.emit_log(f"Error creating independent card for {doc_type}: {e}")
 
@@ -1671,6 +1757,12 @@ class JarvisGUI(QMainWindow):
                 lbl_u.setStyleSheet("color: #aaaaaa;")
                 self.merge_layout.addWidget(lbl_u)
             self.merge_layout.addStretch()
+
+            # 필터 초기화 후 카운트 갱신
+            self.current_card_filter = 'all'
+            for k, btn in self.filter_btns.items():
+                btn.setChecked(k == 'all')
+            self._refresh_filter_counts()
         except Exception as e: self.emit_log(f"Critical error updating UI: {e}")
 
     def _on_merge_complete(self):

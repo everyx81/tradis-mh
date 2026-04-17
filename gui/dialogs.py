@@ -202,24 +202,53 @@ class DraggableFileList(QListWidget):
 class IndependentCard(GlassFrame):
     """BL 독립 문서 카드 (이체증 등) — 드래그앤드롭 지원"""
 
+    # 상태 변경 시그널 (필터 카운트 갱신용 - 독립 카드는 항상 green)
+    status_changed = pyqtSignal()
+
     def __init__(self, parent_widget, directory, doc_type, file_list):
         super().__init__()
         self.parent_widget = parent_widget
         self.directory = directory
         self.doc_type = doc_type
         self.file_list = file_list
+        self.is_collapsed = True  # 기본 접힘
+        # 독립 카드(이체증 등)는 사용자가 드래그 해야 함 → 조치 대기 = gray
+        self._status = 'gray'
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 10, 12, 10)
-        layout.setSpacing(6)
+        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setSpacing(2)
 
-        # 헤더
-        header = QHBoxLayout()
+        # ── 클릭 가능한 헤더 ──
+        self.header_widget = QWidget()
+        self.header_widget.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.header_widget.mousePressEvent = self._on_header_click
+        header = QHBoxLayout(self.header_widget)
+        header.setContentsMargins(0, 0, 0, 0)
+        header.setSpacing(6)
+
+        self.lbl_arrow = QLabel("▶")
+        self.lbl_arrow.setStyleSheet("color: #00aaaa; font-size: 10pt;")
+        self.lbl_arrow.setFixedWidth(14)
+        header.addWidget(self.lbl_arrow)
+
+        self.lbl_badge = QLabel("⚪")
+        self.lbl_badge.setStyleSheet("font-size: 11pt;")
+        self.lbl_badge.setFixedWidth(22)
+        header.addWidget(self.lbl_badge)
+
         lbl_title = QLabel(f"📋 {doc_type} ({len(file_list)}건)")
         lbl_title.setStyleSheet("color: #00cccc; font-weight: bold; font-size: 11pt;")
-        header.addWidget(lbl_title)
-        header.addStretch()
-        layout.addLayout(header)
+        lbl_title.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+        header.addWidget(lbl_title, 1)
+
+        layout.addWidget(self.header_widget)
+
+        # ── 본문 (접힘/펼침 대상) ──
+        self.body_widget = QWidget()
+        body_layout = QVBoxLayout(self.body_widget)
+        body_layout.setContentsMargins(4, 4, 4, 4)
+        body_layout.setSpacing(6)
 
         # 파일 목록 (드래그 가능)
         from PyQt6.QtWidgets import QAbstractItemView
@@ -239,13 +268,16 @@ class IndependentCard(GlassFrame):
             item.setData(Qt.ItemDataRole.UserRole, os.path.join(directory, f))
             self.list_widget.addItem(item)
 
-        layout.addWidget(self.list_widget)
+        body_layout.addWidget(self.list_widget)
 
         # 안내 텍스트
         lbl_hint = QLabel("↑ 드래그하여 사용 | 우클릭으로 관리")
         lbl_hint.setStyleSheet("color: rgba(255,255,255,0.4); font-size: 8pt;")
         lbl_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(lbl_hint)
+        body_layout.addWidget(lbl_hint)
+
+        layout.addWidget(self.body_widget)
+        self.body_widget.setVisible(False)  # 기본 접힘
 
         # 우클릭 메뉴
         self.list_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -259,6 +291,21 @@ class IndependentCard(GlassFrame):
         shortcut_f2 = QShortcut(QKeySequence(Qt.Key.Key_F2), self.list_widget)
         shortcut_f2.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
         shortcut_f2.activated.connect(self._rename_selected)
+
+    def _on_header_click(self, event):
+        """헤더 영역 클릭 → 접기/펼치기 토글 (좌클릭만)"""
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.toggle_collapse()
+
+    def toggle_collapse(self):
+        """접기/펼치기 토글"""
+        self.is_collapsed = not self.is_collapsed
+        self.body_widget.setVisible(not self.is_collapsed)
+        self.lbl_arrow.setText("▶" if self.is_collapsed else "▼")
+
+    def get_status(self):
+        """필터용 상태 반환 (독립 카드는 항상 green)"""
+        return self._status
 
     def _show_context_menu(self, pos):
         """우클릭 메뉴"""
@@ -420,6 +467,16 @@ class IndependentCard(GlassFrame):
                 JarvisMessageBox.warning(self, "삭제 실패", str(e))
 
 class GroupCard(GlassFrame):
+    # 상태 변경 시그널 (필터 카운트 갱신용)
+    status_changed = pyqtSignal()
+
+    STATUS_ICONS = {
+        'green': '🟢',
+        'yellow': '🟡',
+        'red': '🔴',
+        'gray': '⚪',
+    }
+
     def __init__(self, parent_widget, renamer, directory, text_id, data, unclassified, parent=None):
         super().__init__(parent)
         self.renamer = renamer
@@ -430,24 +487,75 @@ class GroupCard(GlassFrame):
         self.parent_widget = parent_widget
         self.mapping = []
         self.marked_files = []  # 마킹된 관련 파일 목록
-        
+        self.is_collapsed = True  # 기본 접힘 (밀도 우선)
+        self._status = 'gray'
+        # 검증 상태 (문자열 파싱 대신 변수로 관리):
+        #   None      = 아직 검증 안 함 (분석 전/중)
+        #   'no_items' = 검증할 비용 항목 없음
+        #   'green'    = 금액 100% 매칭
+        #   'yellow'   = 일부 불일치
+        #   'red'      = 크게 불일치
+        self._validation_status = None
+
         self.available_pdfs = ['(선택 안 함)'] + sorted(list(self.data['docs'].values())) + sorted(self.unclassified)
-        
+
         # 마킹 데이터 로드 (팝업에서 마킹한 파일)
         if hasattr(parent_widget, 'marked_data') and text_id in parent_widget.marked_data:
             self.marked_files = list(parent_widget.marked_data[text_id])
-        
+
         self.init_ui()
         
     def init_ui(self):
         self.layout = QVBoxLayout(self)
-        
-        header = QHBoxLayout()
-        lbl_header = QLabel(f"ID: {self.text_id} ({self.data['company']})")
-        lbl_header.setStyleSheet("color: #00ffff; font-weight: bold; font-size: 10pt;")
-        lbl_header.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        header.addWidget(lbl_header)
-        
+        self.layout.setContentsMargins(8, 6, 8, 6)
+        self.layout.setSpacing(2)
+
+        # ── 클릭 가능한 헤더 (전체 영역이 토글) ──
+        self.header_widget = QWidget()
+        self.header_widget.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.header_widget.mousePressEvent = self._on_header_click
+        header = QHBoxLayout(self.header_widget)
+        header.setContentsMargins(0, 0, 0, 0)
+        header.setSpacing(6)
+
+        # 접기/펼치기 화살표
+        self.lbl_arrow = QLabel("▶")
+        self.lbl_arrow.setStyleSheet("color: #00aaaa; font-size: 10pt;")
+        self.lbl_arrow.setFixedWidth(14)
+        header.addWidget(self.lbl_arrow)
+
+        # 상태 배지 (🟢🟡🔴⚪)
+        self.lbl_badge = QLabel(self.STATUS_ICONS['gray'])
+        self.lbl_badge.setStyleSheet("font-size: 11pt;")
+        self.lbl_badge.setFixedWidth(22)
+        header.addWidget(self.lbl_badge)
+
+        # ID·회사명·건수를 3분할:
+        # "ID: " (클릭 토글) + {text_id} (드래그-선택 복사) + " (회사명) · N건" (클릭 토글)
+        file_count = len(self.data.get('docs', {}))
+
+        lbl_prefix = QLabel("ID: ")
+        lbl_prefix.setStyleSheet("color: #00ffff; font-weight: bold; font-size: 10pt; background: transparent;")
+        lbl_prefix.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+        header.addWidget(lbl_prefix)
+
+        # ID 번호만 선택 가능 (드래그-선택 + Ctrl+C로 복사)
+        self.lbl_id = QLabel(self.text_id)
+        self.lbl_id.setStyleSheet("color: #00ffff; font-weight: bold; font-size: 10pt; background: transparent;")
+        self.lbl_id.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.lbl_id.setCursor(Qt.CursorShape.IBeamCursor)  # 텍스트 커서로 "선택 가능" 시각 힌트
+        self.lbl_id.setToolTip("드래그하여 선택 후 Ctrl+C로 복사")
+        header.addWidget(self.lbl_id)
+
+        lbl_rest = QLabel(f" ({self.data['company']}) · {file_count}건")
+        lbl_rest.setStyleSheet("color: #00ffff; font-weight: bold; font-size: 10pt; background: transparent;")
+        lbl_rest.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+        header.addWidget(lbl_rest, 1)
+
+        # 레거시 호환: 기존 self.lbl_header 참조가 남아있을 수 있으므로 에일리어스 유지
+        self.lbl_header = self.lbl_id
+
+        # 기존 버튼 로직 (변경 없음)
         docs = self.data['docs']
         has_statement = "자금정산서" in docs or "정산서" in docs
         is_export_only = not has_statement and any('수출신고필증' in v or '반송신고필증' in v for v in docs.values())
@@ -469,16 +577,22 @@ class GroupCard(GlassFrame):
         else:
             self.btn_toggle.clicked.connect(self.start_analysis)
         header.addWidget(self.btn_toggle)
-        
-        self.layout.addLayout(header)
-        
+
+        self.layout.addWidget(self.header_widget)
+
+        # ── 본문 (접힘/펼침 대상) ──
+        self.body_widget = QWidget()
+        body_layout = QVBoxLayout(self.body_widget)
+        body_layout.setContentsMargins(4, 4, 4, 4)
+        body_layout.setSpacing(4)
+
         # 필요 서류 체크리스트 (드래그/삭제/수정 지원)
         from PyQt6.QtWidgets import QAbstractItemView
         from PyQt6.QtGui import QShortcut, QKeySequence
         self.lbl_checklist = QLabel()
         self.lbl_checklist.setStyleSheet("color: #ccc; font-size: 9pt; background: transparent;")
         self.lbl_checklist.setWordWrap(True)
-        self.layout.addWidget(self.lbl_checklist)
+        body_layout.addWidget(self.lbl_checklist)
 
         self.file_list = DraggableFileList()
         self.file_list.setStyleSheet(
@@ -503,8 +617,8 @@ class GroupCard(GlassFrame):
 
         # 파일 목록 채우기
         self._refresh_file_list()
-        self.layout.addWidget(self.file_list)
-        
+        body_layout.addWidget(self.file_list)
+
         if is_export_only:
             export_label = "반송신고필증" if any('반송신고필증' in v for v in docs.values()) else "수출신고필증"
             self.lbl_checklist.setText(f"{export_label} (정산서 없음 → 바로 폴더 정리)")
@@ -515,22 +629,22 @@ class GroupCard(GlassFrame):
         else:
             summary_text = ", ".join(docs.values())
             self.lbl_checklist.setText(summary_text[:80] + "..." if len(summary_text) > 80 else summary_text)
-            
+
         # [NEW] 금액 100% 매칭 검증 상태 라벨
         self.lbl_amount_check = QLabel()
         self.lbl_amount_check.setStyleSheet("color: #ffaa00; font-size: 9pt; font-weight: bold;")
         self.lbl_amount_check.setWordWrap(True)
         self.lbl_amount_check.hide()
-        self.layout.addWidget(self.lbl_amount_check)
-        
+        body_layout.addWidget(self.lbl_amount_check)
+
         # ── 마킹 파일 표시 섹션 ──
         self.marking_widget = QWidget()
         self.marking_layout = QVBoxLayout(self.marking_widget)
         self.marking_layout.setContentsMargins(4, 2, 4, 2)
         self.marking_layout.setSpacing(2)
-        self.layout.addWidget(self.marking_widget)
+        body_layout.addWidget(self.marking_widget)
         self._refresh_marking_display()
-        
+
         # 체크리스트 영역도 우클릭 가능
         self.lbl_checklist.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.lbl_checklist.customContextMenuRequested.connect(self._fl_context_menu_from_checklist)
@@ -538,10 +652,79 @@ class GroupCard(GlassFrame):
         self.mapping_widget = QWidget()
         self.mapping_layout = QVBoxLayout(self.mapping_widget)
         self.mapping_widget.setVisible(False)
-        self.layout.addWidget(self.mapping_widget)
-        
+        body_layout.addWidget(self.mapping_widget)
+
+        self.layout.addWidget(self.body_widget)
+
+        # 기본 접힘 상태
+        self.body_widget.setVisible(False)
+
         # UI 구성 직후 초기 1회 검증 실행 (마킹된 파일 등 확인)
         self._run_amount_validation()
+        # 초기 상태 배지 계산
+        self._update_status_badge()
+
+    def _on_header_click(self, event):
+        """헤더 영역 클릭 → 접기/펼치기 토글 (좌클릭만)"""
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.toggle_collapse()
+
+    def toggle_collapse(self):
+        """접기/펼치기 토글"""
+        self.is_collapsed = not self.is_collapsed
+        self.body_widget.setVisible(not self.is_collapsed)
+        self.lbl_arrow.setText("▶" if self.is_collapsed else "▼")
+
+    def _compute_status(self):
+        """카드 상태 계산 → 'green'|'yellow'|'red'|'gray'
+
+        정의 (재정의):
+        - 🟢 이상없음: AI가 실제로 검증해서 금액 OK + 파일 누락 없음
+        - 🟡 주의: 금액 일부 불일치 OR 파일 일부 누락
+        - 🔴 문제: 금액 크게 불일치
+        - ⚪ 대기: 분석 중 / archive-only / 분석 실패 / 검증 항목 없음
+        """
+        # 분석 진행 중 → 대기
+        if getattr(self, '_analyzing', False):
+            return 'gray'
+        # Archive-only (폴더 정리만): 검증 불가 → 대기
+        if getattr(self, 'is_archive_only', False):
+            return 'gray'
+        # 매핑 없음 (미분석 or 분석 실패) → 대기
+        if not getattr(self, 'mapping', None):
+            return 'gray'
+
+        # 파일 누락 체크 (매핑 항목 중 파일이 없고 "포함" 라벨도 아닌 것)
+        missing = any(
+            not item.get('filename', '') and '포함' not in item.get('label', '')
+            for item in self.mapping
+        )
+
+        validation = getattr(self, '_validation_status', None)
+
+        # 우선순위: red > yellow > green > gray
+        if validation == 'red':
+            return 'red'
+        if validation == 'yellow' or missing:
+            return 'yellow'
+        if validation == 'green' and not missing:
+            return 'green'
+        # validation == 'no_items' (검증 스킵) or None (아직 검증 안 함) → 대기
+        return 'gray'
+
+    def _update_status_badge(self):
+        """상태 배지 갱신 + 변경 시 시그널 emit"""
+        new_status = self._compute_status()
+        if not hasattr(self, 'lbl_badge'):
+            return
+        self.lbl_badge.setText(self.STATUS_ICONS[new_status])
+        if new_status != self._status:
+            self._status = new_status
+            self.status_changed.emit()
+
+    def get_status(self):
+        """외부에서 현재 상태 조회 (필터용)"""
+        return self._status
 
     def start_analysis(self):
         if getattr(self, '_analyzing', False):
@@ -633,6 +816,7 @@ class GroupCard(GlassFrame):
         except (RuntimeError, TypeError):
             pass
         self.btn_toggle.clicked.connect(self.refresh_mapping_ui)
+        self._update_status_badge()
 
     def _on_auto_analyze_fail(self):
         """자동 분석 실패 시 수동 분석 버튼으로 복원"""
@@ -644,6 +828,7 @@ class GroupCard(GlassFrame):
         except (RuntimeError, TypeError):
             pass
         self.btn_toggle.clicked.connect(self.start_analysis)
+        self._update_status_badge()
 
     def _update_checklist_basic(self):
         """캐시된 정산서 분석 결과를 활용하여 비용 항목까지 포함한 체크리스트 표시"""
@@ -1776,17 +1961,29 @@ class GroupCard(GlassFrame):
             has_expense = any('비용: ' in item.get('label', '') for item in self.mapping) if self.mapping else False
             if not has_expense:
                 self.lbl_amount_check.hide()
+                # 매핑 없음 → 검증 불가 (초기 상태 유지)
+                self._validation_status = None
+                if hasattr(self, 'lbl_badge'):
+                    self._update_status_badge()
                 return
 
         # 비용 항목이 하나라도 있는지 확인
         has_expense_items = any('비용: ' in item.get('label', '') for item in self.mapping)
         if not has_expense_items:
             self.lbl_amount_check.hide()
+            # 비용 항목 없음 → 검증 스킵 (엣지 ①)
+            self._validation_status = 'no_items'
+            if hasattr(self, 'lbl_badge'):
+                self._update_status_badge()
             return
 
         self.lbl_amount_check.setText("⏳ 금액 검증 중...")
         self.lbl_amount_check.setStyleSheet("color: #aaaaaa; font-size: 9pt;")
         self.lbl_amount_check.show()
+        # 검증 시작 → 아직 결과 없음 (파일 누락 체크만 _compute_status에서 처리)
+        self._validation_status = None
+        if hasattr(self, 'lbl_badge'):
+            self._update_status_badge()
 
         if hasattr(self, '_validator_worker'):
             try:
@@ -1829,6 +2026,7 @@ class GroupCard(GlassFrame):
                 if item_all and sum_matched:
                     self.lbl_amount_check.setText("🟢 항목별/합산 금액 검증 완료")
                     self.lbl_amount_check.setStyleSheet("color: #00ff00; font-size: 9pt; font-weight: bold;")
+                    self._validation_status = 'green'
                 elif not item_all and sum_matched:
                     # 항목별 불일치이나 합산은 맞음 → OCR 오류 가능성
                     mismatched = [d for d in details if not d.get('matched') and not d.get('no_file')]
@@ -1838,10 +2036,12 @@ class GroupCard(GlassFrame):
                         names_str += f" 외 {len(mismatched)-3}건"
                     self.lbl_amount_check.setText(f"🟡 {names_str} 금액 불일치 (합산은 일치)")
                     self.lbl_amount_check.setStyleSheet("color: #ffaa00; font-size: 9pt; font-weight: bold;")
+                    self._validation_status = 'yellow'
                 elif item_all and not sum_matched:
                     diff = abs(sum_items - sum_files)
                     self.lbl_amount_check.setText(f"🟡 합산 불일치 (차이: {diff:,}원)")
                     self.lbl_amount_check.setStyleSheet("color: #ffaa00; font-size: 9pt; font-weight: bold;")
+                    self._validation_status = 'yellow'
                 else:
                     mismatched = [d for d in details if not d.get('matched') and not d.get('no_file')]
                     diff = abs(sum_items - sum_files)
@@ -1851,8 +2051,11 @@ class GroupCard(GlassFrame):
                         names_str += f" 외 {len(mismatched)-2}건"
                     self.lbl_amount_check.setText(f"🔴 {names_str} 금액 불일치, 합산 차이 {diff:,}원")
                     self.lbl_amount_check.setStyleSheet("color: #ff4444; font-size: 9pt; font-weight: bold;")
+                    self._validation_status = 'red'
             except Exception:
                 pass
+            # 금액 검증 결과에 따라 상태 배지 갱신 (파일 누락도 _compute_status에서 반영)
+            self._update_status_badge()
 
         self._validator_worker.finished.connect(_on_validated)
         self._validator_worker.start()

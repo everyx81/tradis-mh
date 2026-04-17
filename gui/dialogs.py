@@ -13,13 +13,65 @@ import threading
 from PyQt6.QtWidgets import (QWidget, QLabel, QVBoxLayout, QHBoxLayout, QApplication, QAbstractItemView,
                               QPushButton, QComboBox, QDialog, QMessageBox, QLineEdit, QTextEdit,
                               QListWidget, QListWidgetItem, QTableWidget, QTableWidgetItem,
-                              QFormLayout, QHeaderView)
+                              QFormLayout, QHeaderView, QFrame)
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QPropertyAnimation, QEasingCurve, QPoint, QParallelAnimationGroup, QMimeData, QUrl
 from PyQt6.QtGui import QPixmap, QImage, QCursor, QColor, QDrag
 
 from .widgets import GlassFrame, NeonButton
 from .utils import resource_path, generate_pdf_thumbnail
 from core.config import get_config_path
+
+
+# ── 모던 맥 스타일 버튼 (펼친 카드 내부 공용) ──
+_MODERN_BTN_STYLE = """
+    QPushButton {
+        background: rgba(20, 35, 55, 150);
+        border: 1px solid rgba(100, 160, 200, 50);
+        border-radius: 10px;
+        color: #c0d0e0;
+        font-size: 10pt;
+        font-weight: 600;
+        padding: 0 16px;
+        letter-spacing: 0.3px;
+        outline: none;
+    }
+    QPushButton:hover {
+        background: rgba(40, 70, 100, 200);
+        border: 1px solid rgba(100, 200, 240, 110);
+        color: #ffffff;
+    }
+    QPushButton:pressed {
+        background: rgba(30, 55, 80, 220);
+    }
+    QPushButton:focus { outline: none; }
+"""
+
+_MODERN_BTN_PRIMARY_STYLE = """
+    QPushButton {
+        background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+            stop:0 rgba(40, 108, 180, 180),
+            stop:1 rgba(28, 88, 150, 160));
+        border: 1px solid rgba(90, 165, 220, 110);
+        border-radius: 10px;
+        color: #e8f2ff;
+        font-size: 10pt;
+        font-weight: 600;
+        padding: 0 22px;
+        letter-spacing: 0.3px;
+        outline: none;
+    }
+    QPushButton:hover {
+        background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+            stop:0 rgba(55, 130, 205, 210),
+            stop:1 rgba(40, 108, 175, 190));
+        border: 1px solid rgba(120, 195, 245, 170);
+        color: #ffffff;
+    }
+    QPushButton:pressed {
+        background: rgba(30, 88, 150, 210);
+    }
+    QPushButton:focus { outline: none; }
+"""
 
 
 class IntroWindow(QWidget):
@@ -207,6 +259,9 @@ class IndependentCard(GlassFrame):
 
     def __init__(self, parent_widget, directory, doc_type, file_list):
         super().__init__()
+        # GlassFrame paintEvent 우회 (stylesheet 사용)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.parent_widget = parent_widget
         self.directory = directory
         self.doc_type = doc_type
@@ -214,10 +269,28 @@ class IndependentCard(GlassFrame):
         self.is_collapsed = True  # 기본 접힘
         # 독립 카드(이체증 등)는 사용자가 드래그 해야 함 → 조치 대기 = gray
         self._status = 'gray'
+        # 파일 변경 추적 (접을 때 전체 재스캔 판단용)
+        self._dirty = False
+
+        # 카드 자체에 모던한 배경 (호버 애니메이션용)
+        self.setObjectName("IndependentCardRoot")
+        self._hover_progress = 0.0
+        self._hover_anim = None
+
+        # 호버 시 카드 주변 파란 glow
+        from PyQt6.QtWidgets import QGraphicsDropShadowEffect
+        from PyQt6.QtGui import QColor
+        self._hover_shadow = QGraphicsDropShadowEffect(self)
+        self._hover_shadow.setBlurRadius(22)
+        self._hover_shadow.setOffset(0, 0)
+        self._hover_shadow.setColor(QColor(0, 180, 230, 0))
+        self.setGraphicsEffect(self._hover_shadow)
+
+        self._apply_card_bg(0.0)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 6, 8, 6)
-        layout.setSpacing(2)
+        layout.setContentsMargins(14, 10, 14, 10)
+        layout.setSpacing(4)
 
         # ── 클릭 가능한 헤더 ──
         self.header_widget = QWidget()
@@ -225,22 +298,24 @@ class IndependentCard(GlassFrame):
         self.header_widget.mousePressEvent = self._on_header_click
         header = QHBoxLayout(self.header_widget)
         header.setContentsMargins(0, 0, 0, 0)
-        header.setSpacing(6)
+        header.setSpacing(8)
 
         self.lbl_arrow = QLabel("▶")
-        self.lbl_arrow.setStyleSheet("color: #00aaaa; font-size: 10pt;")
-        self.lbl_arrow.setFixedWidth(14)
+        self.lbl_arrow.setStyleSheet("color: #6a8098; font-size: 10pt; background: transparent;")
+        self.lbl_arrow.setFixedWidth(12)
         header.addWidget(self.lbl_arrow)
 
-        self.lbl_badge = QLabel("⚪")
-        self.lbl_badge.setStyleSheet("font-size: 11pt;")
-        self.lbl_badge.setFixedWidth(22)
+        # 부드러운 glow dot (QPainter로 그린 QPixmap)
+        self.lbl_badge = QLabel()
+        self.lbl_badge.setFixedSize(14, 14)
+        self.lbl_badge.setPixmap(self._make_soft_dot_pixmap('#c8d0dc', 14))
+        self.lbl_badge.setStyleSheet("background: transparent; border: none;")
         header.addWidget(self.lbl_badge)
 
-        lbl_title = QLabel(f"📋 {doc_type} ({len(file_list)}건)")
-        lbl_title.setStyleSheet("color: #00cccc; font-weight: bold; font-size: 11pt;")
-        lbl_title.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
-        header.addWidget(lbl_title, 1)
+        self.lbl_title = QLabel(f"📄 {doc_type} ({len(file_list)}건)")
+        self.lbl_title.setStyleSheet("color: #a8bacc; font-weight: 500; font-size: 10.5pt; background: transparent;")
+        self.lbl_title.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+        header.addWidget(self.lbl_title, 1)
 
         layout.addWidget(self.header_widget)
 
@@ -250,16 +325,34 @@ class IndependentCard(GlassFrame):
         body_layout.setContentsMargins(4, 4, 4, 4)
         body_layout.setSpacing(6)
 
-        # 파일 목록 (드래그 가능)
+        # 파일 목록 (드래그 가능) — 맥 스타일 통일
         from PyQt6.QtWidgets import QAbstractItemView
         self.list_widget = DraggableFileList()
-        self.list_widget.setStyleSheet(
-            "QListWidget { background: rgba(20,25,35,150); border: 1px solid #444; "
-            "border-radius: 4px; color: #fff; font-size: 9pt; }"
-            "QListWidget::item { padding: 4px; }"
-            "QListWidget::item:hover { background: rgba(0,200,255,30); }"
-        )
-        self.list_widget.setFixedHeight(min(len(file_list) * 28 + 10, 150))
+        self.list_widget.setStyleSheet("""
+            QListWidget {
+                background: rgba(10, 20, 32, 120);
+                border: 1px solid rgba(100, 160, 200, 35);
+                border-radius: 10px;
+                color: #c0d0e0;
+                font-size: 9.5pt;
+                padding: 4px;
+                outline: none;
+            }
+            QListWidget::item {
+                padding: 6px 10px;
+                border-radius: 6px;
+                margin: 1px 0;
+            }
+            QListWidget::item:hover {
+                background: rgba(100, 180, 240, 28);
+                color: #e0eaf5;
+            }
+            QListWidget::item:selected {
+                background: rgba(100, 200, 240, 60);
+                color: #ffffff;
+            }
+        """)
+        self.list_widget.setFixedHeight(min(len(file_list) * 32 + 10, 180))
         self.list_widget.setDragEnabled(True)
         self.list_widget.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
 
@@ -271,8 +364,8 @@ class IndependentCard(GlassFrame):
         body_layout.addWidget(self.list_widget)
 
         # 안내 텍스트
-        lbl_hint = QLabel("↑ 드래그하여 사용 | 우클릭으로 관리")
-        lbl_hint.setStyleSheet("color: rgba(255,255,255,0.4); font-size: 8pt;")
+        lbl_hint = QLabel("↑ 드래그하여 사용  ·  우클릭으로 관리")
+        lbl_hint.setStyleSheet("color: rgba(140, 160, 180, 140); font-size: 8.5pt; letter-spacing: 0.2px; background: transparent;")
         lbl_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         body_layout.addWidget(lbl_hint)
 
@@ -292,6 +385,92 @@ class IndependentCard(GlassFrame):
         shortcut_f2.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
         shortcut_f2.activated.connect(self._rename_selected)
 
+    def paintEvent(self, event):
+        """GlassFrame의 글로우 paintEvent를 건너뛰고 스타일시트로 렌더"""
+        from PyQt6.QtWidgets import QStyle, QStyleOption
+        from PyQt6.QtGui import QPainter
+        opt = QStyleOption()
+        opt.initFrom(self)
+        p = QPainter(self)
+        self.style().drawPrimitive(QStyle.PrimitiveElement.PE_Widget, opt, p, self)
+
+    # ── 부드러운 호버 애니메이션 ──
+    def enterEvent(self, event):
+        self._animate_hover(1.0)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self._animate_hover(0.0)
+        super().leaveEvent(event)
+
+    def _animate_hover(self, target):
+        from PyQt6.QtCore import QVariantAnimation, QEasingCurve
+        if getattr(self, '_hover_anim', None) is not None:
+            try:
+                self._hover_anim.stop()
+            except RuntimeError:
+                pass
+        anim = QVariantAnimation(self)
+        anim.setStartValue(float(self._hover_progress))
+        anim.setEndValue(float(target))
+        anim.setDuration(420)
+        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        anim.valueChanged.connect(self._apply_card_bg)
+        anim.start()
+        self._hover_anim = anim
+
+    def _apply_card_bg(self, value):
+        self._hover_progress = float(value)
+        t = max(0.0, min(1.0, float(value)))
+
+        def lerp(a, b):
+            return int(a + (b - a) * t)
+
+        # 프리뷰와 동일 — 내부는 아주 약간만 밝아짐
+        g1_r = lerp(18, 22);  g1_g = lerp(28, 34);  g1_b = lerp(42, 50);  g1_a = lerp(140, 165)
+        g2_r = lerp(14, 18);  g2_g = lerp(24, 30);  g2_b = lerp(38, 46);  g2_a = lerp(115, 140)
+
+        br_r = lerp(100, 115)
+        br_g = lerp(180, 210)
+        br_b = lerp(240, 250)
+        br_a = lerp(60, 120)
+
+        self.setStyleSheet(f"""
+            #IndependentCardRoot {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 rgba({g1_r}, {g1_g}, {g1_b}, {g1_a}),
+                    stop:1 rgba({g2_r}, {g2_g}, {g2_b}, {g2_a}));
+                border: 1px solid rgba({br_r}, {br_g}, {br_b}, {br_a});
+                border-radius: 12px;
+            }}
+        """)
+
+        # 호버 시 카드 주변 파란 glow
+        if hasattr(self, '_hover_shadow') and self._hover_shadow is not None:
+            from PyQt6.QtGui import QColor
+            glow_alpha = lerp(0, 90)
+            self._hover_shadow.setColor(QColor(0, 180, 230, glow_alpha))
+
+    @staticmethod
+    def _make_soft_dot_pixmap(hex_color, size=14):
+        """부드러운 glow 있는 색상 원 QPixmap 생성"""
+        from PyQt6.QtGui import QPixmap, QPainter, QColor, QRadialGradient
+        pm = QPixmap(size, size)
+        pm.fill(Qt.GlobalColor.transparent)
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        c = QColor(hex_color)
+        grad = QRadialGradient(size/2, size/2, size/2)
+        grad.setColorAt(0.0, QColor(c.red(), c.green(), c.blue(), 255))
+        grad.setColorAt(0.35, QColor(c.red(), c.green(), c.blue(), 200))
+        grad.setColorAt(0.65, QColor(c.red(), c.green(), c.blue(), 90))
+        grad.setColorAt(1.0, QColor(c.red(), c.green(), c.blue(), 0))
+        p.setBrush(grad)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.drawEllipse(0, 0, size, size)
+        p.end()
+        return pm
+
     def _on_header_click(self, event):
         """헤더 영역 클릭 → 접기/펼치기 토글 (좌클릭만)"""
         if event.button() == Qt.MouseButton.LeftButton:
@@ -299,9 +478,24 @@ class IndependentCard(GlassFrame):
 
     def toggle_collapse(self):
         """접기/펼치기 토글"""
+        was_expanded = not self.is_collapsed
         self.is_collapsed = not self.is_collapsed
         self.body_widget.setVisible(not self.is_collapsed)
         self.lbl_arrow.setText("▶" if self.is_collapsed else "▼")
+        # 펼친 상태에서 파일 변경이 있었고 지금 접히는 중이면 폴더 재스캔
+        # (이름 변경으로 분류가 바뀔 수 있어 다른 카드에도 반영 필요)
+        if was_expanded and self.is_collapsed and self._dirty:
+            self._dirty = False
+            parent = self.parent_widget
+            if hasattr(parent, 'run_intelligent_merge'):
+                # 약간 지연해서 UI 전환이 먼저 끝나고 재스캔되도록
+                from PyQt6.QtCore import QTimer
+                QTimer.singleShot(150, parent.run_intelligent_merge)
+
+    def _update_title_count(self):
+        """헤더의 '(N건)' 카운트 즉시 갱신"""
+        if hasattr(self, 'lbl_title'):
+            self.lbl_title.setText(f"📋 {self.doc_type} ({self.list_widget.count()}건)")
 
     def get_status(self):
         """필터용 상태 반환 (독립 카드는 항상 green)"""
@@ -436,6 +630,7 @@ class IndependentCard(GlassFrame):
                 item.setText(new_name)
                 item.setData(Qt.ItemDataRole.UserRole, new_path)
                 self.parent_widget.emit_log(f"[독립문서] 이름 변경: {old_name} → {new_name}")
+                self._dirty = True  # 접을 때 재스캔 트리거
             except Exception as e:
                 from .dialogs import JarvisMessageBox
                 JarvisMessageBox.warning(self, "이름 변경 실패", str(e))
@@ -463,6 +658,8 @@ class IndependentCard(GlassFrame):
                 row = self.list_widget.row(item)
                 self.list_widget.takeItem(row)
                 self.parent_widget.emit_log(f"[독립문서] 삭제: {name}")
+                self._dirty = True  # 접을 때 재스캔 트리거
+                self._update_title_count()  # 헤더 건수 즉시 갱신
             except Exception as e:
                 JarvisMessageBox.warning(self, "삭제 실패", str(e))
 
@@ -479,6 +676,9 @@ class GroupCard(GlassFrame):
 
     def __init__(self, parent_widget, renamer, directory, text_id, data, unclassified, parent=None):
         super().__init__(parent)
+        # GlassFrame의 반투명 + 글로우 paintEvent 비활성화 (스타일시트 사용을 위해)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.renamer = renamer
         self.directory = directory
         self.text_id = text_id
@@ -504,58 +704,131 @@ class GroupCard(GlassFrame):
             self.marked_files = list(parent_widget.marked_data[text_id])
 
         self.init_ui()
-        
-    def init_ui(self):
-        self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(8, 6, 8, 6)
-        self.layout.setSpacing(2)
 
-        # ── 클릭 가능한 헤더 (전체 영역이 토글) ──
+    def paintEvent(self, event):
+        """GlassFrame의 글로우 paintEvent를 건너뛰고 스타일시트로 렌더"""
+        from PyQt6.QtWidgets import QStyle, QStyleOption
+        from PyQt6.QtGui import QPainter
+        opt = QStyleOption()
+        opt.initFrom(self)
+        p = QPainter(self)
+        self.style().drawPrimitive(QStyle.PrimitiveElement.PE_Widget, opt, p, self)
+
+    # ── 부드러운 호버 애니메이션 ──
+    def enterEvent(self, event):
+        self._animate_hover(1.0)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self._animate_hover(0.0)
+        super().leaveEvent(event)
+
+    def _animate_hover(self, target):
+        from PyQt6.QtCore import QVariantAnimation, QEasingCurve
+        if getattr(self, '_hover_anim', None) is not None:
+            try:
+                self._hover_anim.stop()
+            except RuntimeError:
+                pass
+        anim = QVariantAnimation(self)
+        anim.setStartValue(float(self._hover_progress))
+        anim.setEndValue(float(target))
+        anim.setDuration(420)
+        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        anim.valueChanged.connect(self._apply_card_bg)
+        anim.start()
+        self._hover_anim = anim
+
+    def _apply_card_bg(self, value):
+        """호버 진행도(0.0~1.0)에 따라 카드 그라데이션 배경/경계/glow 보간"""
+        self._hover_progress = float(value)
+        t = max(0.0, min(1.0, float(value)))
+
+        def lerp(a, b):
+            return int(a + (b - a) * t)
+
+        # 프리뷰와 동일 — 내부 색은 '아주 약간만' 밝아짐 (외곽 glow가 메인)
+        g1_r = lerp(18, 22);  g1_g = lerp(28, 34);  g1_b = lerp(42, 50);  g1_a = lerp(165, 190)
+        g2_r = lerp(14, 18);  g2_g = lerp(24, 30);  g2_b = lerp(38, 46);  g2_a = lerp(140, 165)
+
+        # 경계도 적당히 (base 70 유지 — 선명, hover는 약간만 강조)
+        br_r = lerp(100, 115)
+        br_g = lerp(180, 210)
+        br_b = lerp(240, 250)
+        br_a = lerp(70, 130)
+
+        self.setStyleSheet(f"""
+            #GroupCardRoot {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 rgba({g1_r}, {g1_g}, {g1_b}, {g1_a}),
+                    stop:1 rgba({g2_r}, {g2_g}, {g2_b}, {g2_a}));
+                border: 1px solid rgba({br_r}, {br_g}, {br_b}, {br_a});
+                border-radius: 14px;
+            }}
+        """)
+
+        # 주된 호버 표현은 카드 주변 파란 glow (drop shadow)
+        if hasattr(self, '_hover_shadow') and self._hover_shadow is not None:
+            from PyQt6.QtGui import QColor
+            glow_alpha = lerp(0, 120)
+            self._hover_shadow.setColor(QColor(0, 180, 230, glow_alpha))
+
+    def init_ui(self):
+        # 카드 자체에 모던한 배경 (호버 시 부드럽게 밝아지는 애니메이션)
+        self.setObjectName("GroupCardRoot")
+        self._hover_progress = 0.0
+        self._hover_anim = None
+
+        # 호버 시 카드 주변 파란 glow (QGraphicsDropShadowEffect)
+        from PyQt6.QtWidgets import QGraphicsDropShadowEffect
+        from PyQt6.QtGui import QColor
+        self._hover_shadow = QGraphicsDropShadowEffect(self)
+        self._hover_shadow.setBlurRadius(26)
+        self._hover_shadow.setOffset(0, 0)
+        self._hover_shadow.setColor(QColor(0, 180, 230, 0))  # 초기 투명
+        self.setGraphicsEffect(self._hover_shadow)
+
+        self._apply_card_bg(0.0)
+
+        self.layout = QVBoxLayout(self)
+        self.layout.setContentsMargins(20, 16, 20, 18)
+        self.layout.setSpacing(10)
+
+        # ── 클릭 가능한 헤더 ──
         self.header_widget = QWidget()
         self.header_widget.setCursor(Qt.CursorShape.PointingHandCursor)
         self.header_widget.mousePressEvent = self._on_header_click
         header = QHBoxLayout(self.header_widget)
         header.setContentsMargins(0, 0, 0, 0)
-        header.setSpacing(6)
+        header.setSpacing(12)
 
-        # 접기/펼치기 화살표
-        self.lbl_arrow = QLabel("▶")
-        self.lbl_arrow.setStyleSheet("color: #00aaaa; font-size: 10pt;")
-        self.lbl_arrow.setFixedWidth(14)
-        header.addWidget(self.lbl_arrow)
+        # ── ID Pill (상태 색 컨테이너 + 내부 dot + "ID :" + text_id) ──
+        self.id_pill = QFrame()
+        self.id_pill.setObjectName("IdPill")
+        pill_layout = QHBoxLayout(self.id_pill)
+        pill_layout.setContentsMargins(14, 7, 16, 7)
+        pill_layout.setSpacing(9)
 
-        # 상태 배지 (🟢🟡🔴⚪)
-        self.lbl_badge = QLabel(self.STATUS_ICONS['gray'])
-        self.lbl_badge.setStyleSheet("font-size: 11pt;")
-        self.lbl_badge.setFixedWidth(22)
-        header.addWidget(self.lbl_badge)
+        self.pill_dot = QLabel()
+        self.pill_dot.setObjectName("PillDot")
+        self.pill_dot.setFixedSize(11, 11)
+        pill_layout.addWidget(self.pill_dot)
 
-        # ID·회사명·건수를 3분할:
-        # "ID: " (클릭 토글) + {text_id} (드래그-선택 복사) + " (회사명) · N건" (클릭 토글)
-        file_count = len(self.data.get('docs', {}))
+        self.pill_label = QLabel("ID :")
+        self.pill_label.setObjectName("PillLabel")
+        pill_layout.addWidget(self.pill_label)
 
-        lbl_prefix = QLabel("ID: ")
-        lbl_prefix.setStyleSheet("color: #00ffff; font-weight: bold; font-size: 10pt; background: transparent;")
-        lbl_prefix.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
-        header.addWidget(lbl_prefix)
+        self.pill_id = QLabel(self.text_id)
+        self.pill_id.setObjectName("PillId")
+        self.pill_id.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.pill_id.setCursor(Qt.CursorShape.IBeamCursor)
+        self.pill_id.setToolTip("드래그하여 선택 후 Ctrl+C로 복사")
+        pill_layout.addWidget(self.pill_id)
 
-        # ID 번호만 선택 가능 (드래그-선택 + Ctrl+C로 복사)
-        self.lbl_id = QLabel(self.text_id)
-        self.lbl_id.setStyleSheet("color: #00ffff; font-weight: bold; font-size: 10pt; background: transparent;")
-        self.lbl_id.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        self.lbl_id.setCursor(Qt.CursorShape.IBeamCursor)  # 텍스트 커서로 "선택 가능" 시각 힌트
-        self.lbl_id.setToolTip("드래그하여 선택 후 Ctrl+C로 복사")
-        header.addWidget(self.lbl_id)
+        header.addWidget(self.id_pill)
+        header.addStretch(1)
 
-        lbl_rest = QLabel(f" ({self.data['company']}) · {file_count}건")
-        lbl_rest.setStyleSheet("color: #00ffff; font-weight: bold; font-size: 10pt; background: transparent;")
-        lbl_rest.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
-        header.addWidget(lbl_rest, 1)
-
-        # 레거시 호환: 기존 self.lbl_header 참조가 남아있을 수 있으므로 에일리어스 유지
-        self.lbl_header = self.lbl_id
-
-        # 기존 버튼 로직 (변경 없음)
+        # 기존 버튼 로직 결정
         docs = self.data['docs']
         has_statement = "자금정산서" in docs or "정산서" in docs
         is_export_only = not has_statement and any('수출신고필증' in v or '반송신고필증' in v for v in docs.values())
@@ -563,15 +836,16 @@ class GroupCard(GlassFrame):
         self.is_export_only = is_export_only
         self.is_archive_only = is_export_only or is_import_no_settlement
 
+        # ── 액션 버튼 (NeonButton — 부드러운 420ms 호버 + 파란 glow 통일) ──
         if self.is_archive_only:
             btn_text = "폴더 정리"
         elif has_statement:
             btn_text = "분석 중..."
         else:
-            btn_text = "MATCH"
+            btn_text = "매칭"
 
         self.btn_toggle = NeonButton(btn_text, color="cyan")
-        self.btn_toggle.setFixedSize(100, 30)
+        self.btn_toggle.setMinimumWidth(92)
         if self.is_archive_only:
             self.btn_toggle.clicked.connect(self._archive_export_only)
         else:
@@ -579,6 +853,21 @@ class GroupCard(GlassFrame):
         header.addWidget(self.btn_toggle)
 
         self.layout.addWidget(self.header_widget)
+
+        # ── 카드 하단 서브 텍스트 (ID 반복 + 회사명 + 건수) ──
+        file_count = len(self.data.get('docs', {}))
+        self.lbl_body_text = QLabel(f"{self.text_id}  ({self.data['company']}) · {file_count}건")
+        self.lbl_body_text.setStyleSheet(
+            "color: #a8bacc; font-size: 10pt; background: transparent; padding-left: 4px;"
+        )
+        self.lbl_body_text.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.layout.addWidget(self.lbl_body_text)
+
+        # 레거시 호환
+        self.lbl_header = self.pill_id
+        self.lbl_id = self.pill_id
+        self.lbl_arrow = QLabel()    # 더미 (구 코드 호환)
+        self.lbl_badge = QLabel()    # 더미 (구 코드 호환)
 
         # ── 본문 (접힘/펼침 대상) ──
         self.body_widget = QWidget()
@@ -590,17 +879,33 @@ class GroupCard(GlassFrame):
         from PyQt6.QtWidgets import QAbstractItemView
         from PyQt6.QtGui import QShortcut, QKeySequence
         self.lbl_checklist = QLabel()
-        self.lbl_checklist.setStyleSheet("color: #ccc; font-size: 9pt; background: transparent;")
+        self.lbl_checklist.setStyleSheet("color: #a8bacc; font-size: 9.5pt; background: transparent; letter-spacing: 0.2px;")
         self.lbl_checklist.setWordWrap(True)
         body_layout.addWidget(self.lbl_checklist)
 
         self.file_list = DraggableFileList()
-        self.file_list.setStyleSheet(
-            "QListWidget { background: transparent; border: none; color: #ccc; font-size: 9pt; }"
-            "QListWidget::item { padding: 1px 0px; }"
-            "QListWidget::item:selected { background: rgba(0,200,255,60); color: #ffffff; }"
-            "QListWidget::item:hover { background: rgba(255,255,255,15); }"
-        )
+        self.file_list.setStyleSheet("""
+            QListWidget {
+                background: transparent;
+                border: none;
+                color: #a8bacc;
+                font-size: 9.5pt;
+                padding: 2px;
+            }
+            QListWidget::item {
+                padding: 4px 8px;
+                border-radius: 6px;
+                margin: 1px 0;
+            }
+            QListWidget::item:selected {
+                background: rgba(100, 200, 240, 60);
+                color: #ffffff;
+            }
+            QListWidget::item:hover {
+                background: rgba(100, 180, 240, 25);
+                color: #e0eaf5;
+            }
+        """)
         self.file_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.file_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.file_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -712,12 +1017,73 @@ class GroupCard(GlassFrame):
         # validation == 'no_items' (검증 스킵) or None (아직 검증 안 함) → 대기
         return 'gray'
 
+    # 상태별 pill 스타일 — 프리뷰와 일치 (동일 색 계열 통일, 약간 뿌연 반투명 느낌)
+    PILL_STYLES = {
+        'green': {
+            # 약한 반투명 녹색 배경 + 진한 녹색 dot + 옅은 녹색톤 흰색 텍스트
+            'bg': 'qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 rgba(52,199,89,64), stop:1 rgba(40,170,75,46))',
+            'border': 'rgba(52,199,89,115)',
+            'text': '#a8f0c0',
+            'dot': '#34c759',
+        },
+        'yellow': {
+            'bg': 'qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 rgba(255,214,10,51), stop:1 rgba(230,190,0,38))',
+            'border': 'rgba(255,214,10,115)',
+            'text': '#ffe680',
+            'dot': '#ffd60a',
+        },
+        'red': {
+            'bg': 'qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 rgba(255,69,58,64), stop:1 rgba(220,50,45,46))',
+            'border': 'rgba(255,69,58,128)',
+            'text': '#ffa8a0',
+            'dot': '#ff453a',
+        },
+        'gray': {
+            'bg': 'rgba(200,210,220,25)',
+            'border': 'rgba(200,210,220,65)',
+            'text': '#d8e0ea',
+            'dot': '#ffffff',
+        },
+    }
+
+    def _apply_pill_style(self, status):
+        """ID pill에 상태 색 적용"""
+        if not hasattr(self, 'id_pill'):
+            return
+        s = self.PILL_STYLES.get(status, self.PILL_STYLES['gray'])
+        self.id_pill.setStyleSheet(f"""
+            QFrame#IdPill {{
+                background: {s['bg']};
+                border: 1px solid {s['border']};
+                border-radius: 14px;
+            }}
+            QLabel#PillDot {{
+                background: {s['dot']};
+                border-radius: 5px;
+            }}
+            QLabel#PillLabel {{
+                color: {s['text']};
+                font-size: 10.5pt;
+                font-weight: 500;
+                background: transparent;
+                border: none;
+            }}
+            QLabel#PillId {{
+                color: {s['text']};
+                font-family: 'Consolas', 'Monaco', monospace;
+                font-size: 11pt;
+                font-weight: 700;
+                letter-spacing: 0.5px;
+                background: transparent;
+                border: none;
+            }}
+        """)
+
     def _update_status_badge(self):
         """상태 배지 갱신 + 변경 시 시그널 emit"""
         new_status = self._compute_status()
-        if not hasattr(self, 'lbl_badge'):
-            return
-        self.lbl_badge.setText(self.STATUS_ICONS[new_status])
+        # ID pill 색상 적용
+        self._apply_pill_style(new_status)
         if new_status != self._status:
             self._status = new_status
             self.status_changed.emit()
@@ -732,7 +1098,7 @@ class GroupCard(GlassFrame):
         # Import gemini_ocr at runtime to avoid circular imports
         from auto_rename import gemini_ocr
         self._analyzing = True
-        self.btn_toggle.setText("Running...")
+        self.btn_toggle.setText("분석 중...")
         self.btn_toggle.setEnabled(False)
         self.parent_widget.emit_log(f"Starting Analysis for ID: {self.text_id}")
         
@@ -1032,7 +1398,13 @@ class GroupCard(GlassFrame):
         self.lbl_checklist.setText("  ".join(parts) + summary)
 
     def refresh_mapping_ui(self):
+        # 카드가 접혀있으면 먼저 펼침 (body_widget이 숨김이면 내부 mapping_widget도 안 보임)
+        if getattr(self, 'is_collapsed', False):
+            self.toggle_collapse()
         self.mapping_widget.setVisible(True)
+        # 매핑 UI 표시 시 중복되는 파일 목록 숨김
+        if hasattr(self, 'file_list'):
+            self.file_list.setVisible(False)
         self.btn_toggle.setText("접기")
         self.btn_toggle.setEnabled(True)
         try: self.btn_toggle.clicked.disconnect()
@@ -1048,39 +1420,51 @@ class GroupCard(GlassFrame):
         self.combo_list = []  # 콤보박스 참조 저장
         
         arrow_btn_style = """
-            QPushButton { 
-                background: #002233; border: 1px solid #005555; border-radius: 4px; 
-                color: #00aaaa; font-size: 11px; font-weight: bold;
+            QPushButton {
+                background: rgba(20, 35, 55, 150);
+                border: 1px solid rgba(100, 160, 200, 45);
+                border-radius: 8px;
+                color: #8aa5c0; font-size: 10px; font-weight: 600;
             }
-            QPushButton:hover { background: #003344; border: 1px solid #00aaaa; color: #00ffff; }
-            QPushButton:disabled { color: #333; border: 1px solid #222; }
+            QPushButton:hover {
+                background: rgba(40, 65, 95, 200);
+                border: 1px solid rgba(100, 200, 240, 130);
+                color: #ffffff;
+            }
+            QPushButton:disabled { color: #333c48; border: 1px solid rgba(80, 100, 120, 30); }
         """
-        
+
         for idx, item in enumerate(self.mapping):
             row_widget = QWidget()
-            row_widget.setMinimumHeight(36)
+            row_widget.setObjectName("MappingRow")
+            row_widget.setMinimumHeight(40)
             row_widget.setStyleSheet("""
-                QWidget { 
-                    background-color: rgba(0, 30, 50, 150); 
-                    border: 1px solid #004444; 
-                    border-radius: 4px; 
+                QWidget#MappingRow {
+                    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                        stop:0 rgba(18, 28, 42, 150),
+                        stop:1 rgba(14, 24, 38, 130));
+                    border: 1px solid rgba(100, 180, 240, 35);
+                    border-radius: 10px;
+                }
+                QWidget#MappingRow:hover {
+                    border: 1px solid rgba(100, 200, 240, 90);
                 }
             """)
             row_layout = QHBoxLayout(row_widget)
-            row_layout.setContentsMargins(8, 4, 8, 4)
-            row_layout.setSpacing(6)
-            
+            row_layout.setContentsMargins(10, 6, 10, 6)
+            row_layout.setSpacing(8)
+
             # ▲/▼ 버튼
             btn_up = QPushButton("▲")
-            btn_up.setFixedSize(22, 22)
+            btn_up.setFixedSize(24, 24)
             btn_up.setStyleSheet(arrow_btn_style)
             btn_up.setToolTip("파일을 위로 이동")
             btn_up.setEnabled(idx > 0)
             btn_up.clicked.connect(lambda _, i=idx: self._swap_files(i, i - 1))
             row_layout.addWidget(btn_up)
-            
+
             btn_down = QPushButton("▼")
-            btn_down.setFixedSize(22, 22)
+            btn_down.setFixedSize(24, 24)
             btn_down.setStyleSheet(arrow_btn_style)
             btn_down.setToolTip("파일을 아래로 이동")
             btn_down.setEnabled(idx < len(self.mapping) - 1)
@@ -1109,13 +1493,16 @@ class GroupCard(GlassFrame):
             combo.currentTextChanged.connect(lambda text, c=combo: c.setToolTip(text))
             combo.setStyleSheet("""
                 QComboBox {
-                    background-color: #001122;
-                    color: #00ffff;
-                    border: 1px solid #00aaaa;
-                    border-radius: 4px;
-                    padding: 4px 8px;
+                    background: rgba(12, 22, 35, 180);
+                    color: #c0d5ea;
+                    border: 1px solid rgba(100, 180, 240, 45);
+                    border-radius: 8px;
+                    padding: 5px 10px;
                     min-width: 180px;
                     font-size: 10pt;
+                }
+                QComboBox:hover {
+                    border: 1px solid rgba(100, 200, 240, 100);
                 }
                 QComboBox::drop-down {
                     border: none;
@@ -1123,54 +1510,56 @@ class GroupCard(GlassFrame):
                 }
                 QComboBox::down-arrow {
                     image: none;
-                    border-left: 5px solid transparent;
-                    border-right: 5px solid transparent;
-                    border-top: 6px solid #00aaaa;
-                    margin-right: 5px;
+                    border-left: 4px solid transparent;
+                    border-right: 4px solid transparent;
+                    border-top: 5px solid #8aa5c0;
+                    margin-right: 8px;
                 }
                 QComboBox QAbstractItemView {
-                    background-color: #001122;
-                    color: #00ffff;
-                    selection-background-color: #00aaaa;
+                    background: rgba(15, 25, 38, 250);
+                    color: #c0d5ea;
+                    selection-background-color: rgba(100, 200, 240, 60);
                     selection-color: #ffffff;
-                    border: 1px solid #00aaaa;
-                }
-                QToolTip {
-                    background-color: #001122;
-                    color: #00ffff;
-                    border: 1px solid #00aaaa;
-                    padding: 5px;
-                    font-size: 9pt;
+                    border: 1px solid rgba(100, 180, 240, 80);
+                    border-radius: 6px;
+                    padding: 4px;
                 }
             """)
             row_layout.addWidget(combo, stretch=1)
             self.combo_list.append(combo)
-            
+
             btn_preview = QPushButton("🔍")
-            btn_preview.setFixedSize(26, 26)
+            btn_preview.setFixedSize(28, 28)
             btn_preview.setStyleSheet("""
-                QPushButton { background: #002233; border: 1px solid #005555; border-radius: 4px; }
-                QPushButton:hover { background: #003344; border: 1px solid #00aaaa; }
+                QPushButton {
+                    background: rgba(20, 35, 55, 150);
+                    border: 1px solid rgba(100, 160, 200, 45);
+                    border-radius: 8px;
+                }
+                QPushButton:hover {
+                    background: rgba(40, 65, 95, 200);
+                    border: 1px solid rgba(100, 200, 240, 130);
+                }
             """)
             btn_preview.setToolTip("📄 파일 미리보기")
             btn_preview.clicked.connect(lambda _, c=combo: self._show_thumbnail_popup(c.currentText()))
             row_layout.addWidget(btn_preview)
             
             lbl = QLabel(f"➡ {item['label']}")
-            
-            # 매칭 상태에 따른 라벨 색상 분기
+
+            # 매칭 상태에 따른 라벨 색상 (모던·차분 톤)
             has_file = bool(item.get('filename', ''))
             is_included = '포함' in item['label']
             if item.get('matched_by_amount', False):
-                lbl.setStyleSheet("color: #00BFFF; background: transparent; font-weight: bold;")
+                lbl.setStyleSheet("color: #64b5ef; background: transparent; font-weight: 600; font-size: 10pt;")
                 lbl.setToolTip("총금액 비교로 매칭되었습니다.")
             elif not has_file and not is_included:
-                lbl.setStyleSheet("color: #ff4444; background: transparent; font-weight: bold;")
+                lbl.setStyleSheet("color: #ff7e7e; background: transparent; font-weight: 600; font-size: 10pt;")
                 lbl.setToolTip("계산서 매칭 안 됨")
             elif is_included:
-                lbl.setStyleSheet("color: #00aaaa; background: transparent;")
+                lbl.setStyleSheet("color: #8aa5c0; background: transparent; font-size: 10pt;")
             else:
-                lbl.setStyleSheet("color: #00ffff; background: transparent;")
+                lbl.setStyleSheet("color: #a8c5e0; background: transparent; font-size: 10pt;")
                 
             lbl.setMinimumWidth(120)
             row_layout.addWidget(lbl)
@@ -1182,10 +1571,10 @@ class GroupCard(GlassFrame):
         
         btn_row = QHBoxLayout()
         btn_row.setSpacing(8)
-        btn_add_row = NeonButton("+ 행 추가", color="cyan")
+        btn_add_row = NeonButton("＋  행 추가", color="cyan")
         btn_add_row.clicked.connect(self.add_unclassified_row)
         btn_row.addWidget(btn_add_row)
-            
+
         btn_exec = NeonButton("합치기 실행", color="cyan", is_primary=True)
         btn_exec.clicked.connect(self.execute_merge)
         btn_row.addWidget(btn_exec)
@@ -1240,9 +1629,21 @@ class GroupCard(GlassFrame):
         self.refresh_mapping_ui()
 
     def toggle_view(self):
+        # 카드 본문이 접혀있으면 먼저 펼침 (그래야 mapping_widget이 보임)
+        if getattr(self, 'is_collapsed', False):
+            self.toggle_collapse()
+            self.mapping_widget.setVisible(True)
+            if hasattr(self, 'file_list'):
+                self.file_list.setVisible(False)
+            self.btn_toggle.setText("접기"); self.btn_toggle.setToolTip("접기")
+            return
         is_visible = self.mapping_widget.isVisible()
         self.mapping_widget.setVisible(not is_visible)
+        # 매핑 표시/숨김에 따라 파일 목록은 반대로
+        if hasattr(self, 'file_list'):
+            self.file_list.setVisible(is_visible)
         self.btn_toggle.setText("펼치기" if is_visible else "접기")
+        self.btn_toggle.setToolTip("펼치기" if is_visible else "접기")
     
     def _refresh_file_list(self):
         """파일 목록 위젯 갱신"""
@@ -1253,9 +1654,11 @@ class GroupCard(GlassFrame):
             item = QListWidgetItem(f"  ✅ {f}")
             item.setData(Qt.ItemDataRole.UserRole, os.path.join(self.directory, f))
             self.file_list.addItem(item)
-        # 높이 자동 조정 (컴팩트)
-        h = max(self.file_list.count() * 22, 22)
-        self.file_list.setFixedHeight(min(h, 150))
+        # 높이 자동 조정 — 아이템당 30px (padding 4+4 + 텍스트 + 여유)
+        per_item = 30
+        count = self.file_list.count()
+        h = max(count * per_item + 6, per_item)
+        self.file_list.setFixedHeight(min(h, 260))
 
     def _fl_context_menu(self, pos):
         """파일 목록 우클릭 메뉴"""
@@ -1483,10 +1886,9 @@ class GroupCard(GlassFrame):
             if self.is_export_only and hasattr(self, 'btn_toggle'):
                 self.btn_toggle.setText("폴더 정리")
             
-            # 기존과 동일한 파일 추가 버튼 표시
-            btn_add = NeonButton("📂 파일 추가", color="orange")
-            btn_add.setFixedHeight(26)
-            btn_add.setFixedWidth(110)
+            # 모던 파일 추가 버튼 (NeonButton 통일)
+            btn_add = NeonButton("📁  파일 추가", color="cyan")
+            btn_add.setFixedWidth(120)
             btn_add.clicked.connect(self._add_marking_files)
             self.marking_layout.addWidget(btn_add)
             return
@@ -1527,10 +1929,9 @@ class GroupCard(GlassFrame):
             row_widget.setStyleSheet("background: transparent;")
             self.marking_layout.addWidget(row_widget)
         
-        # 파일 추가 버튼
-        btn_add = NeonButton("📂 파일 추가", color="orange")
-        btn_add.setFixedHeight(26)
-        btn_add.setFixedWidth(110)
+        # 파일 추가 버튼 (NeonButton 통일)
+        btn_add = NeonButton("📁  파일 추가", color="cyan")
+        btn_add.setFixedWidth(120)
         btn_add.clicked.connect(self._add_marking_files)
         self.marking_layout.addWidget(btn_add)
     

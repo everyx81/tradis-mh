@@ -84,7 +84,8 @@ class FileManagerWidget(QWidget):
         
         # 1. MOVE TARGET (폴더 리스트)
         target_header = QHBoxLayout()
-        self.lbl_target_title = QLabel("1. 이동 대상")
+        self.lbl_target_title = QLabel("1. TARGET FOLDERS (0)")
+        self.lbl_target_title.setStyleSheet("color: #e0eaf5; font-size: 10pt; font-weight: 600; letter-spacing: 0.3px;")
         target_header.addWidget(self.lbl_target_title)
         target_header.addStretch()
         
@@ -109,7 +110,9 @@ class FileManagerWidget(QWidget):
         
         # 2. FILES TO MOVE
         file_header = QHBoxLayout()
-        file_header.addWidget(QLabel("2. 이동할 파일 (드래그해서 추가)"))
+        _lbl_add = QLabel("2. ADD FOLDERS (DRAG & DROP)")
+        _lbl_add.setStyleSheet("color: #e0eaf5; font-size: 10pt; font-weight: 600; letter-spacing: 0.3px;")
+        file_header.addWidget(_lbl_add)
         file_header.addStretch()
         left_layout.addLayout(file_header)
         
@@ -120,6 +123,75 @@ class FileManagerWidget(QWidget):
         self.list_widget.refresh_needed.connect(lambda: self._load_folder_contents(self.list_widget.current_folder) if self.list_widget.current_folder else None)
         self.list_widget.mail_send_requested.connect(self._on_mail_send_requested)
         self.list_widget.mail_preconnect_requested.connect(self._preconnect_imap)
+
+        # ── 드롭존 빈 상태 오버레이 (라인 아이콘 + "No Folders ⌘") ──
+        self.drop_overlay = QWidget(self.list_widget.viewport())
+        self.drop_overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.drop_overlay.setStyleSheet("background: transparent;")
+        ov_layout = QVBoxLayout(self.drop_overlay)
+        ov_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        ov_layout.setSpacing(14)
+
+        # 큰 라인 아트 폴더-다운 아이콘 (QPainter로 직접 드로우)
+        from PyQt6.QtGui import QPixmap, QPainter, QPen, QColor
+        from PyQt6.QtCore import QRect
+
+        def _make_tray_down_icon(size=72, color_rgba=(150, 180, 210, 200), stroke=2):
+            pm = QPixmap(size, size)
+            pm.fill(Qt.GlobalColor.transparent)
+            p = QPainter(pm)
+            p.setRenderHint(QPainter.RenderHint.Antialiasing)
+            pen = QPen(QColor(*color_rgba))
+            pen.setWidth(stroke)
+            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+            p.setPen(pen)
+
+            # 트레이(rounded rect) 외곽
+            tray_x, tray_y, tray_w, tray_h = 8, 16, size - 16, size - 24
+            p.drawRoundedRect(tray_x, tray_y, tray_w, tray_h, 10, 10)
+
+            # 중앙 다운 화살표 (세로선 + 화살촉)
+            cx = size // 2
+            arrow_top = tray_y + 10
+            arrow_bottom = tray_y + tray_h - 14
+            # 세로 막대
+            p.drawLine(cx, arrow_top, cx, arrow_bottom)
+            # 화살촉 (V 모양)
+            head = 7
+            p.drawLine(cx - head, arrow_bottom - head, cx, arrow_bottom)
+            p.drawLine(cx + head, arrow_bottom - head, cx, arrow_bottom)
+
+            p.end()
+            return pm
+
+        _icon_box = QLabel()
+        _icon_box.setPixmap(_make_tray_down_icon(size=72, color_rgba=(150, 180, 210, 170), stroke=2))
+        _icon_box.setStyleSheet("background: transparent; border: none;")
+        _icon_box.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        ov_layout.addWidget(_icon_box)
+
+        _lbl_empty = QLabel("No Folders  ⌘")
+        _lbl_empty.setStyleSheet("color: rgba(150, 170, 190, 180); font-size: 10.5pt; font-weight: 500; letter-spacing: 0.3px; background: transparent; border: none;")
+        _lbl_empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        ov_layout.addWidget(_lbl_empty)
+
+        # 뷰포트 크기 변경 시 오버레이도 갱신
+        orig_resize = self.list_widget.resizeEvent
+        def _on_list_resize(ev):
+            orig_resize(ev)
+            vp = self.list_widget.viewport()
+            self.drop_overlay.setGeometry(0, 0, vp.width(), vp.height())
+        self.list_widget.resizeEvent = _on_list_resize
+
+        # 아이템 수에 따라 오버레이 표시/숨김
+        def _update_overlay_visibility():
+            self.drop_overlay.setVisible(self.list_widget.count() == 0)
+        self.list_widget.model().rowsInserted.connect(lambda *_: _update_overlay_visibility())
+        self.list_widget.model().rowsRemoved.connect(lambda *_: _update_overlay_visibility())
+        self.list_widget.model().modelReset.connect(_update_overlay_visibility)
+        QTimer.singleShot(0, _update_overlay_visibility)
+
         left_layout.addWidget(self.list_widget)
         
         # 하단 버튼
@@ -805,10 +877,10 @@ class FileManagerWidget(QWidget):
                 self.emit_log(f"[상태] 폴더 '{current}'가 삭제되어 파일 목록 초기화")
                     
             if self.target_subfolders:
-                self.lbl_target_title.setText(f"1. 이동 대상 ({len(self.target_subfolders)}건)")
+                self.lbl_target_title.setText(f"1. TARGET FOLDERS ({len(self.target_subfolders)})")
             else:
-                self.list_target.addItem(QListWidgetItem("(No Folders)"))
-                self.lbl_target_title.setText("1. 이동 대상 (0)")
+                self.list_target.addItem(QListWidgetItem("No Folders  ⌘"))
+                self.lbl_target_title.setText("1. TARGET FOLDERS (0)")
                 # 폴더가 없으면 FILES TO MOVE도 초기화
                 self.list_widget.clear()
                 self.current_target_folder = None
@@ -817,9 +889,9 @@ class FileManagerWidget(QWidget):
         except Exception as e:
             print(f"Error in refresh_targets: {e}")
             if hasattr(self, 'target_subfolders'):
-                self.lbl_target_title.setText(f"1. 이동 대상 ({len(self.target_subfolders)}건)")
+                self.lbl_target_title.setText(f"1. TARGET FOLDERS ({len(self.target_subfolders)})")
             else:
-                self.lbl_target_title.setText("1. 이동 대상 (0)")
+                self.lbl_target_title.setText("1. TARGET FOLDERS (0)")
 
     def _on_target_folder_clicked(self, item):
         folder_name = item.data(Qt.ItemDataRole.UserRole)

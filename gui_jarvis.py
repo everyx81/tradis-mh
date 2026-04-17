@@ -465,61 +465,80 @@ class JarvisGUI(QMainWindow):
         # Apply global stylesheet to the whole window
         self.setStyleSheet(GLOBAL_STYLESHEET)
         
-        # Outer container for rounded corners
-        self.outer_container = QFrame(self)
+        # Shadow wrapper: 중앙 위젯을 감싸고 외곽에 패딩을 둬서 drop shadow가 렌더될 공간 확보
+        _shadow_wrapper = QWidget(self)
+        _shadow_wrapper.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        _wrap_layout = QVBoxLayout(_shadow_wrapper)
+        _wrap_layout.setContentsMargins(22, 22, 22, 22)
+        _wrap_layout.setSpacing(0)
+
+        # Outer container for rounded corners (컨텐츠 루트)
+        self.outer_container = QFrame()
         self.outer_container.setObjectName("OuterContainer")
-        self.setCentralWidget(self.outer_container)
+        self.outer_container.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        _wrap_layout.addWidget(self.outer_container)
+        self.setCentralWidget(_shadow_wrapper)
+
+        # 드롭 섀도 (맥 스타일 — 테두리 대신 부드러운 외곽 그림자)
+        from PyQt6.QtWidgets import QGraphicsDropShadowEffect
+        from PyQt6.QtGui import QColor
+        _shadow = QGraphicsDropShadowEffect(self.outer_container)
+        _shadow.setBlurRadius(40)
+        _shadow.setOffset(0, 6)
+        _shadow.setColor(QColor(0, 0, 0, 200))
+        self.outer_container.setGraphicsEffect(_shadow)
         
         # Total Layout
         total_layout = QVBoxLayout(self.outer_container)
         total_layout.setContentsMargins(0, 0, 0, 10)
         total_layout.setSpacing(0)
         
-        # 0. Custom Title Bar
+        # 0. Custom Title Bar — macOS 트래픽 라이트 (좌측 정렬: close|min|max)
         self.title_bar = QFrame()
-        self.title_bar.setFixedHeight(50)
+        self.title_bar.setFixedHeight(40)
         self.title_bar.setStyleSheet("background: transparent; border: none;")
         tb_layout = QHBoxLayout(self.title_bar)
-        tb_layout.setContentsMargins(20, 0, 20, 0)
-        
-        tb_layout.addStretch()
-        
-        # 최소화 버튼 (macOS 스타일 원형)
-        self.btn_minimize = QPushButton("")
-        self.btn_minimize.setFixedSize(14, 14)
-        self.btn_minimize.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_minimize.setStyleSheet("""
-            QPushButton {
-                background-color: #febc2e;
-                border: none;
-                border-radius: 7px;
-            }
-            QPushButton:hover {
-                background-color: #e5a520;
-            }
-        """)
-        self.btn_minimize.clicked.connect(self._show_mini_window)
-        tb_layout.addWidget(self.btn_minimize)
+        tb_layout.setContentsMargins(18, 0, 18, 0)
+        tb_layout.setSpacing(8)
 
-        tb_layout.addSpacing(8)
-
-        # 닫기 버튼 (macOS 스타일 원형)
+        # 닫기 (빨간색)
         self.btn_close = QPushButton("")
-        self.btn_close.setFixedSize(14, 14)
+        self.btn_close.setFixedSize(13, 13)
         self.btn_close.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_close.setStyleSheet("""
-            QPushButton {
-                background-color: #ff5f57;
-                border: none;
-                border-radius: 7px;
-            }
-            QPushButton:hover {
-                background-color: #e04640;
-            }
+            QPushButton { background-color: #ff5f57; border: none; border-radius: 6px; }
+            QPushButton:hover { background-color: #e04640; }
         """)
         self.btn_close.clicked.connect(self.close)
+        self.btn_close.setToolTip("닫기")
         tb_layout.addWidget(self.btn_close)
-        
+
+        # 최소화 (노란색)
+        self.btn_minimize = QPushButton("")
+        self.btn_minimize.setFixedSize(13, 13)
+        self.btn_minimize.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_minimize.setStyleSheet("""
+            QPushButton { background-color: #febc2e; border: none; border-radius: 6px; }
+            QPushButton:hover { background-color: #e5a520; }
+        """)
+        self.btn_minimize.clicked.connect(self._show_mini_window)
+        self.btn_minimize.setToolTip("최소화")
+        tb_layout.addWidget(self.btn_minimize)
+
+        # 최대화/복원 (녹색)
+        self.btn_maximize = QPushButton("")
+        self.btn_maximize.setFixedSize(13, 13)
+        self.btn_maximize.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_maximize.setStyleSheet("""
+            QPushButton { background-color: #28c840; border: none; border-radius: 6px; }
+            QPushButton:hover { background-color: #1fa030; }
+        """)
+        self.btn_maximize.clicked.connect(self._toggle_maximize)
+        self.btn_maximize.setToolTip("최대화/복원")
+        tb_layout.addWidget(self.btn_maximize)
+
+        tb_layout.addStretch()
+
         total_layout.addWidget(self.title_bar)
         
         # 1. Main Content Grid (3 Columns: LeftStack, Right, NavBar)
@@ -542,11 +561,24 @@ class JarvisGUI(QMainWindow):
         mk1_layout.setContentsMargins(0, 0, 0, 0)
         mk1_layout.setSpacing(2)
 
-        self.left_panel = GlassFrame()
+        # 모던 패널 스타일 (GlassFrame의 사이안 glow 대신 차분한 QFrame)
+        _panel_style = """
+            QFrame#ModernPanel {
+                background: rgba(14, 24, 38, 140);
+                border: 1px solid rgba(120, 200, 245, 60);
+                border-radius: 14px;
+            }
+        """
+
+        self.left_panel = QFrame()
+        self.left_panel.setObjectName("ModernPanel")
+        self.left_panel.setStyleSheet(_panel_style)
         self.setup_left_panel()
         mk1_layout.addWidget(self.left_panel)
 
-        self.middle_panel = GlassFrame()
+        self.middle_panel = QFrame()
+        self.middle_panel.setObjectName("ModernPanel")
+        self.middle_panel.setStyleSheet(_panel_style)
         self.setup_middle_panel()
         mk1_layout.addWidget(self.middle_panel, stretch=1)
 
@@ -554,7 +586,9 @@ class JarvisGUI(QMainWindow):
         self.main_layout.addWidget(self.left_content_stack, 0, 0)
 
         # --- RIGHT PANEL (FileManager) ---
-        self.right_panel = GlassFrame()
+        self.right_panel = QFrame()
+        self.right_panel.setObjectName("ModernPanel")
+        self.right_panel.setStyleSheet(_panel_style)
         self.setup_right_panel()
         self.main_layout.addWidget(self.right_panel, 0, 1)
 
@@ -1386,30 +1420,29 @@ class JarvisGUI(QMainWindow):
     def mouseReleaseEvent(self, event):
         self.drag_pos = None
 
+    def mouseDoubleClickEvent(self, event):
+        """타이틀바 더블클릭 시 최대화/복원 (맥 스타일)"""
+        if event.pos().y() < 50 and event.button() == Qt.MouseButton.LeftButton:
+            self._toggle_maximize()
+            event.accept()
+
+    def _toggle_maximize(self):
+        """창 최대화/복원 토글"""
+        if self.isMaximized():
+            self.showNormal()
+        else:
+            self.showMaximized()
+
     def load_background(self):
+        # Iron Man 배경 비활성화 — 깔끔한 단색 배경 사용
         self.bg_pixmap = None
-        bg_path = resource_path("jarvis_bg.png")
-        if os.path.exists(bg_path):
-            self.bg_pixmap = QPixmap(bg_path)
-            if not hasattr(self, 'bg_label'):
-                self.bg_label = QLabel(self.outer_container)
-                self.bg_label.lower()
-                self.bg_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-                self.bg_effect = QGraphicsOpacityEffect(self.bg_label)
-                self.bg_label.setGraphicsEffect(self.bg_effect)
-                self.bg_anim = QPropertyAnimation(self.bg_effect, b"opacity")
-                self.bg_anim.setDuration(12000)
-                self.bg_anim.setStartValue(0.0)
-                self.bg_anim.setEndValue(1.0)
-                self.bg_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-                self.bg_effect.setOpacity(0.0)
 
     def start_bg_animation(self):
+        # Iron Man 배경 비활성화 — 전역 GLOBAL_STYLESHEET의 #OuterContainer radial gradient 사용
+        # 이전에 cyan 경계로 덮어쓰던 로직 제거
         if hasattr(self, 'bg_anim'):
             self.bg_anim.start()
             self._update_bg_label()
-        else:
-            self.outer_container.setStyleSheet("#OuterContainer { background-color: #0d1117; border: 3px solid #00ffff; border-radius: 30px; }")
 
     def _update_bg_label(self):
         if hasattr(self, 'bg_label') and self.bg_pixmap:
@@ -1436,22 +1469,24 @@ class JarvisGUI(QMainWindow):
         title_box = QVBoxLayout()
         title_box.setSpacing(0)
         lbl_title = QLabel("TRADIS MH")
-        lbl_title.setStyleSheet("color: #00ffff; font-family: Impact; font-size: 38pt; letter-spacing: 3px;")
+        lbl_title.setStyleSheet("color: #ffffff; font-family: Impact; font-size: 38pt; letter-spacing: 3px;")
         title_box.addWidget(lbl_title)
 
         lbl_by = QLabel("by M.H. Choi")
-        lbl_by.setStyleSheet("color: #447799; font-size: 11pt; font-style: italic; letter-spacing: 1px; background: transparent; margin-left: 2px;")
+        lbl_by.setStyleSheet("color: #6a7a8a; font-size: 11pt; font-style: italic; letter-spacing: 1px; background: transparent; margin-left: 2px;")
         title_box.addWidget(lbl_by)
         layout.addLayout(title_box)
 
         # Subtitle
         lbl_sub = QLabel("AUTO RENAMER")
-        lbl_sub.setStyleSheet("color: #005577; font-weight: bold; letter-spacing: 4px;")
+        lbl_sub.setStyleSheet("color: #5a6a7a; font-weight: bold; letter-spacing: 4px;")
         layout.addWidget(lbl_sub)
         layout.addSpacing(10)
-        
+
         # Target Directory
-        layout.addWidget(QLabel("감시 폴더"))
+        _wf = QLabel("WATCH FOLDER")
+        _wf.setStyleSheet("color: #6a7a8a; font-size: 9pt; font-weight: 600; letter-spacing: 1.3px;")
+        layout.addWidget(_wf)
         path_layout = QHBoxLayout()
         self.line_path = QLineEdit()
         self.line_path.setReadOnly(True)
@@ -1466,42 +1501,46 @@ class JarvisGUI(QMainWindow):
         layout.addLayout(path_layout)
         layout.addSpacing(10)
         
-        # API Settings - HUD 스타일 컨테이너
+        # API Settings - 맥 스타일 차분한 컨테이너
         api_container = QFrame()
         api_container.setStyleSheet("""
             QFrame {
-                background-color: rgba(5, 15, 30, 150);
-                border: 1px solid rgba(0, 255, 255, 100);
-                border-radius: 8px;
+                background-color: rgba(15, 28, 44, 100);
+                border: 1px solid rgba(100, 160, 200, 22);
+                border-radius: 12px;
             }
         """)
         api_container_layout = QVBoxLayout(api_container)
-        api_container_layout.setContentsMargins(12, 10, 12, 10)
-        api_container_layout.setSpacing(6)
-        
-        # 상단: 상태 + 버튼
+        api_container_layout.setContentsMargins(14, 12, 14, 12)
+        api_container_layout.setSpacing(10)
+
+        # 상단: 상태 + API 버튼
         top_row = QHBoxLayout()
+        top_row.setSpacing(8)
         self.lbl_api_status = QLabel("● AI STATUS: CHECKING...")
-        self.lbl_api_status.setStyleSheet("color: #888; font-size: 9pt; font-weight: bold; background: transparent;")
+        self.lbl_api_status.setStyleSheet("color: #8aa0b5; font-size: 9.5pt; font-weight: 500; background: transparent; border: none; letter-spacing: 0.2px;")
         top_row.addWidget(self.lbl_api_status)
         top_row.addStretch()
-        
+
         self.btn_api_settings = NeonButton("API", color="cyan")
-        self.btn_api_settings.setFixedSize(45, 24)
+        self.btn_api_settings.setFixedHeight(28)
+        self.btn_api_settings.setMinimumWidth(54)
+        self.btn_api_settings.setMaximumWidth(60)
         self.btn_api_settings.clicked.connect(self.open_api_settings)
         top_row.addWidget(self.btn_api_settings)
         api_container_layout.addLayout(top_row)
         
-        # 하단: 모델 버전
+        # 모델/앱 버전 정보 (작고 muted — 정보성)
         self.lbl_api_version = QLabel("Model: Gemini 3.1 Flash Lite")
-        self.lbl_api_version.setStyleSheet("color: #00aaaa; font-size: 8pt; background: transparent;")
+        self.lbl_api_version.setStyleSheet("color: #4a5a6a; font-size: 8pt; background: transparent;")
+        self.lbl_api_version.hide()  # 깔끔한 UI를 위해 숨김 (필요 시 표시)
         api_container_layout.addWidget(self.lbl_api_version)
 
-        # 앱 버전
         self.lbl_app_version = QLabel(f"{APP_NAME} v{__version__}")
-        self.lbl_app_version.setStyleSheet("color: #00aaaa; font-size: 9pt; font-weight: bold; background: transparent;")
+        self.lbl_app_version.setStyleSheet("color: #4a5a6a; font-size: 8pt; background: transparent;")
+        self.lbl_app_version.hide()  # 깔끔한 UI를 위해 숨김
         api_container_layout.addWidget(self.lbl_app_version)
-        
+
         layout.addWidget(api_container)
         layout.addSpacing(10)
         
@@ -1510,21 +1549,25 @@ class JarvisGUI(QMainWindow):
         self.update_api_status(bool(get_api_key()))
         
         # Monitoring
-        layout.addWidget(QLabel("MONITORING"))
+        _mn = QLabel("MONITORING")
+        _mn.setStyleSheet("color: #6a7a8a; font-size: 9pt; font-weight: 600; letter-spacing: 1.3px;")
+        layout.addWidget(_mn)
         act_layout = QHBoxLayout()
-        self.btn_start = NeonButton("시작")
+        self.btn_start = NeonButton("START")
         self.btn_start.clicked.connect(self.start_monitoring)
-        self.btn_stop = NeonButton("중지", color="orange")
+        self.btn_stop = NeonButton("STOP", color="orange")
         self.btn_stop.clicked.connect(self.stop_monitoring)
         self.btn_stop.setEnabled(False)
-        
+
         act_layout.addWidget(self.btn_start)
         act_layout.addWidget(self.btn_stop)
         layout.addLayout(act_layout)
         layout.addStretch()
-        
+
         # Logs
-        layout.addWidget(QLabel("SYSTEM LOGS"))
+        _lg = QLabel("SYSTEM LOGS")
+        _lg.setStyleSheet("color: #6a7a8a; font-size: 9pt; font-weight: 600; letter-spacing: 1.3px;")
+        layout.addWidget(_lg)
         self.log_area = QTextEdit()
         self.log_area.setReadOnly(True)
         self.log_area.setMinimumHeight(400)
@@ -1535,31 +1578,32 @@ class JarvisGUI(QMainWindow):
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(10)
         
-        lbl_title = QLabel("FOLDER FILE MANAGEMENT & MERGE")
-        lbl_title.setStyleSheet("font-size: 16pt; font-weight: bold; color: #00ffff; letter-spacing: 1px;")
+        lbl_title = QLabel('폴더 및 파일 관리 <span style="color:#6a7a8a; font-weight:400; font-size:12pt;">(FOLDER &amp; FILE MANAGEMENT)</span>')
+        lbl_title.setStyleSheet("font-size: 16pt; font-weight: 600; color: #ffffff; letter-spacing: 0.5px;")
         lbl_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl_title.setTextFormat(Qt.TextFormat.RichText)
         layout.addWidget(lbl_title)
-        
+        layout.addSpacing(18)  # 제목과 Location/재스캔 사이 여백
+
         info_row = QHBoxLayout()
         self.lbl_location = QLabel("Location: (Not Selected)")
         self.lbl_location.setStyleSheet("color: #aaa; font-size: 10pt;")
         info_row.addWidget(self.lbl_location)
         info_row.addStretch()
-        
+
         btn_rescan = NeonButton("폴더 재스캔", color="cyan")
-        btn_rescan.setFixedSize(140, 32)
+        btn_rescan.setFixedSize(140, 34)
         btn_rescan.clicked.connect(self.run_intelligent_merge)
         info_row.addWidget(btn_rescan)
         layout.addLayout(info_row)
         
         line = QFrame()
-        line.setFrameShape(QFrame.Shape.HLine)
-        line.setFrameShadow(QFrame.Shadow.Sunken)
-        line.setStyleSheet("background-color: #00aaaa;")
+        line.setFixedHeight(1)
+        line.setStyleSheet("background-color: rgba(100, 160, 200, 30); border: none;")
         layout.addWidget(line)
         
-        lbl_sec = QLabel("■ ID CLASSIFIED FILES (B/L, Invoice No.)")
-        lbl_sec.setStyleSheet("color: #ddd; font-weight: bold; margin-top: 10px;")
+        lbl_sec = QLabel("ID CLASSIFIED FILES (B/L, Invoice No.)")
+        lbl_sec.setStyleSheet("color: #8a9aac; font-size: 10pt; font-weight: 500; letter-spacing: 0.3px; margin-top: 10px;")
         layout.addWidget(lbl_sec)
 
         # ── 상태 필터 바 (전체/완료/검토/미매칭) ──
@@ -1571,20 +1615,64 @@ class JarvisGUI(QMainWindow):
         filter_layout.setContentsMargins(0, 2, 0, 2)
         filter_layout.setSpacing(6)
 
+        # QPainter로 부드러운 glow dot 아이콘 생성 (이모지 아크릴 느낌 제거)
+        from PyQt6.QtGui import QPixmap, QPainter, QColor, QRadialGradient
+        from PyQt6.QtCore import QSize
+
+        def _make_soft_dot_icon(hex_color, size=22):
+            pm = QPixmap(size, size)
+            pm.fill(Qt.GlobalColor.transparent)
+            p = QPainter(pm)
+            p.setRenderHint(QPainter.RenderHint.Antialiasing)
+            c = QColor(hex_color)
+            # 외곽 glow
+            grad = QRadialGradient(size/2, size/2, size/2)
+            grad.setColorAt(0.0, QColor(c.red(), c.green(), c.blue(), 255))
+            grad.setColorAt(0.35, QColor(c.red(), c.green(), c.blue(), 200))
+            grad.setColorAt(0.65, QColor(c.red(), c.green(), c.blue(), 90))
+            grad.setColorAt(1.0, QColor(c.red(), c.green(), c.blue(), 0))
+            p.setBrush(grad)
+            p.setPen(Qt.PenStyle.NoPen)
+            p.drawEllipse(0, 0, size, size)
+            p.end()
+            return pm
+
+        dot_colors = {
+            'all':    None,        # 'all'은 dot 없음 (텍스트만)
+            'green':  '#34c759',
+            'yellow': '#ffd60a',
+            'red':    '#ff453a',
+            'gray':   '#c8d0dc',
+        }
+        self._filter_dot_icons = {k: (_make_soft_dot_icon(v) if v else None) for k, v in dot_colors.items()}
+
         def _make_filter_btn(key, label):
             btn = QPushButton(label)
             btn.setCheckable(True)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            # 아이콘 (soft glow dot)
+            if self._filter_dot_icons[key] is not None:
+                from PyQt6.QtGui import QIcon
+                btn.setIcon(QIcon(self._filter_dot_icons[key]))
+                btn.setIconSize(QSize(14, 14))
             btn.setStyleSheet("""
                 QPushButton {
-                    background: rgba(20,30,40,180); border: 1px solid #334;
-                    border-radius: 12px; padding: 4px 10px;
-                    color: #aac; font-size: 9pt;
+                    background: rgba(20,30,40,140);
+                    border: 1px solid rgba(100,160,200,40);
+                    border-radius: 14px;
+                    padding: 5px 14px 5px 10px;
+                    color: #8a9aac; font-size: 9pt; font-weight: 600;
+                    text-align: center;
                 }
-                QPushButton:hover { border-color: #00aaaa; color: #ccf; }
+                QPushButton:hover {
+                    background: rgba(30,50,75,160);
+                    border-color: rgba(100,200,240,80);
+                    color: #c0d0e0;
+                }
                 QPushButton:checked {
-                    background: rgba(0,170,170,60); border-color: #00ffff; color: #00ffff;
-                    font-weight: bold;
+                    background: rgba(70,160,200,60);
+                    border-color: rgba(100,200,240,140);
+                    color: #a8e0ff;
                 }
             """)
             btn.clicked.connect(lambda: self._apply_card_filter(key))
@@ -1592,10 +1680,10 @@ class JarvisGUI(QMainWindow):
 
         self.filter_btns = {
             'all':    _make_filter_btn('all', '전체 0'),
-            'green':  _make_filter_btn('green', '🟢 0'),
-            'yellow': _make_filter_btn('yellow', '🟡 0'),
-            'red':    _make_filter_btn('red', '🔴 0'),
-            'gray':   _make_filter_btn('gray', '⚪ 0'),
+            'green':  _make_filter_btn('green', '0'),
+            'yellow': _make_filter_btn('yellow', '0'),
+            'red':    _make_filter_btn('red', '0'),
+            'gray':   _make_filter_btn('gray', '0'),
         }
         for key in ('all', 'green', 'yellow', 'red', 'gray'):
             filter_layout.addWidget(self.filter_btns[key])
@@ -1645,10 +1733,10 @@ class JarvisGUI(QMainWindow):
                 counts[card.get_status()] = counts.get(card.get_status(), 0) + 1
         labels = {
             'all':    f"전체 {counts['all']}",
-            'green':  f"🟢 {counts['green']}",
-            'yellow': f"🟡 {counts['yellow']}",
-            'red':    f"🔴 {counts['red']}",
-            'gray':   f"⚪ {counts['gray']}",
+            'green':  f"{counts['green']}",
+            'yellow': f"{counts['yellow']}",
+            'red':    f"{counts['red']}",
+            'gray':   f"{counts['gray']}",
         }
         for key, btn in self.filter_btns.items():
             btn.setText(labels[key])
@@ -1751,11 +1839,16 @@ class JarvisGUI(QMainWindow):
                     self.emit_log(f"Error creating independent card for {doc_type}: {e}")
 
             if unclassified:
-                self.merge_layout.addWidget(QLabel("UNCLASSIFIED FILES"))
-                lbl_u = QLabel(", ".join(unclassified))
-                lbl_u.setWordWrap(True)
-                lbl_u.setStyleSheet("color: #aaaaaa;")
-                self.merge_layout.addWidget(lbl_u)
+                try:
+                    # 미분류도 IndependentCard로 표시 (이름변경/삭제 우클릭 메뉴 지원)
+                    from gui.dialogs import IndependentCard
+                    unclass_card = IndependentCard(self, directory, "미분류 (Unclassified)", unclassified)
+                    self.merge_layout.addWidget(unclass_card)
+                    self.group_cards.append(unclass_card)
+                    if hasattr(unclass_card, 'status_changed'):
+                        unclass_card.status_changed.connect(self._refresh_filter_counts)
+                except Exception as e:
+                    self.emit_log(f"Error creating unclassified card: {e}")
             self.merge_layout.addStretch()
 
             # 필터 초기화 후 카운트 갱신
@@ -2052,11 +2145,11 @@ class JarvisGUI(QMainWindow):
     def update_api_status(self, connected: bool):
         if hasattr(self, 'lbl_api_status'):
             if connected:
-                self.lbl_api_status.setText("● AI STATUS: CONNECTED")
-                self.lbl_api_status.setStyleSheet("color: #00ff00; font-size: 8pt; font-weight: bold;")
+                self.lbl_api_status.setText('<span style="color:#34c759;">●</span> <span style="color:#a8c0db;">AI STATUS: CONNECTED</span>')
+                self.lbl_api_status.setStyleSheet("font-size: 9.5pt; font-weight: 500; background: transparent; border: none; letter-spacing: 0.2px;")
             else:
-                self.lbl_api_status.setText("● AI STATUS: API KEY REQUIRED")
-                self.lbl_api_status.setStyleSheet("color: #ff3333; font-size: 8pt; font-weight: bold;")
+                self.lbl_api_status.setText('<span style="color:#ff6a6a;">●</span> <span style="color:#a8c0db;">AI STATUS: API KEY REQUIRED</span>')
+                self.lbl_api_status.setStyleSheet("font-size: 9.5pt; font-weight: 500; background: transparent; border: none; letter-spacing: 0.2px;")
 
     def run_intelligent_merge(self):
         if hasattr(self, 'is_analyzing') and self.is_analyzing: return

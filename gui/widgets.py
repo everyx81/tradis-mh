@@ -1400,69 +1400,111 @@ class GlassFrame(QFrame):
 
 
 class NeonButton(QPushButton):
-    """Button with glow effect (Cyan or Orange) - Custom Paint"""
+    """Mac-style button with smooth 420ms hover animation + blue outer glow"""
     def __init__(self, text, parent=None, color="cyan", is_primary=False):
         super().__init__(text, parent)
-        self.setFont(QFont("Malgun Gothic", 10, QFont.Weight.Bold))
+        self.setFont(QFont("Malgun Gothic", 10, QFont.Weight.DemiBold))
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFixedHeight(36)
-        
+        self.setFixedHeight(34)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+
         self.color_type = color
-        
-        if color == "orange":
-            base_col = "#ffaa00"
-            bg_col = "rgba(255, 170, 0, 20)"
-            hover_col = "rgba(255, 170, 0, 50)"
-        else:
-            base_col = "#80f0ff"
-            bg_col = "rgba(128, 240, 255, 15)"
-            hover_col = "rgba(128, 240, 255, 45)"
-            
-        if is_primary:
+        self._is_primary = is_primary
+        self._hover_progress = 0.0
+        self._hover_anim = None
+
+        # 호버 시 파란 glow (카드와 동일 패턴)
+        from PyQt6.QtWidgets import QGraphicsDropShadowEffect
+        from PyQt6.QtGui import QColor
+        self._hover_shadow = QGraphicsDropShadowEffect(self)
+        self._hover_shadow.setBlurRadius(18)
+        self._hover_shadow.setOffset(0, 0)
+        self._hover_shadow.setColor(QColor(0, 180, 230, 0))
+        self.setGraphicsEffect(self._hover_shadow)
+
+        self._apply_hover_state(0.0)
+
+    def enterEvent(self, event):
+        if self.isEnabled():
+            self._animate_hover(1.0)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self._animate_hover(0.0)
+        super().leaveEvent(event)
+
+    def _animate_hover(self, target):
+        from PyQt6.QtCore import QVariantAnimation, QEasingCurve
+        if self._hover_anim is not None:
+            try: self._hover_anim.stop()
+            except RuntimeError: pass
+        anim = QVariantAnimation(self)
+        anim.setStartValue(float(self._hover_progress))
+        anim.setEndValue(float(target))
+        anim.setDuration(420)
+        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        anim.valueChanged.connect(self._apply_hover_state)
+        anim.start()
+        self._hover_anim = anim
+
+    def _apply_hover_state(self, value):
+        from PyQt6.QtGui import QColor
+        self._hover_progress = float(value)
+        t = max(0.0, min(1.0, float(value)))
+        def lerp(a, b):
+            return int(a + (b - a) * t)
+
+        if self._is_primary:
+            # 프라이머리: 차분한 블루, 살짝만 밝아짐
+            bg1_r = lerp(40, 50); bg1_g = lerp(108, 125); bg1_b = lerp(180, 200)
+            bg2_r = lerp(28, 38); bg2_g = lerp(88, 105);  bg2_b = lerp(150, 170)
+            br_r = lerp(90, 115); br_g = lerp(165, 195); br_b = lerp(220, 245); br_a = lerp(110, 175)
             self.setStyleSheet(f"""
                 QPushButton {{
-                    background-color: {bg_col};
-                    border: 2px solid {base_col};
+                    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                        stop:0 rgba({bg1_r}, {bg1_g}, {bg1_b}, 190),
+                        stop:1 rgba({bg2_r}, {bg2_g}, {bg2_b}, 170));
+                    border: 1px solid rgba({br_r}, {br_g}, {br_b}, {br_a});
                     border-radius: 10px;
-                    color: {base_col};
-                    padding: 4px 10px;
+                    color: #e8f2ff;
+                    font-weight: 600;
+                    padding: 0 18px;
+                    letter-spacing: 0.3px;
+                    outline: none;
                 }}
-                QPushButton:hover {{
-                    background-color: {hover_col};
-                    border: 2px solid {base_col};
-                }}
-                QPushButton:pressed {{
-                    background-color: {base_col};
-                    color: black;
-                }}
+                QPushButton:focus {{ outline: none; }}
+                QPushButton:pressed {{ background: rgba(30, 88, 150, 210); }}
                 QPushButton:disabled {{
-                    background-color: rgba(50, 50, 50, 100);
-                    border: 1px solid #333;
-                    color: #555;
+                    background: rgba(40, 55, 75, 90);
+                    border: 1px solid rgba(100, 130, 160, 40);
+                    color: #556070;
                 }}
             """)
+            glow_alpha = lerp(0, 120)
         else:
+            # 일반: base rgba(20,35,55,150) → hover 약간 밝아짐
+            bg_r = lerp(20, 30);  bg_g = lerp(35, 52);  bg_b = lerp(55, 80);  bg_a = lerp(150, 190)
+            br_r = lerp(120, 130); br_g = lerp(200, 225); br_b = lerp(245, 255); br_a = lerp(95, 170)
             self.setStyleSheet(f"""
                 QPushButton {{
-                    background-color: rgba(255, 255, 255, 5);
-                    border: 1px solid #555;
+                    background: rgba({bg_r}, {bg_g}, {bg_b}, {bg_a});
+                    border: 1px solid rgba({br_r}, {br_g}, {br_b}, {br_a});
                     border-radius: 10px;
-                    color: #ccc;
-                    padding: 4px 10px;
+                    color: #c0d0e0;
+                    font-weight: 600;
+                    padding: 0 16px;
+                    letter-spacing: 0.3px;
+                    outline: none;
                 }}
-                QPushButton:hover {{
-                    background-color: {hover_col};
-                    border: 2px solid {base_col};
-                    color: {base_col};
-                }}
-                QPushButton:pressed {{
-                    background-color: {hover_col};
-                    border: 1px solid {base_col};
-                    color: {base_col};
-                }}
+                QPushButton:focus {{ outline: none; }}
+                QPushButton:pressed {{ background: rgba(30, 55, 80, 220); }}
                 QPushButton:disabled {{
-                    background-color: rgba(30, 30, 30, 100);
-                    border: 1px solid #333;
-                    color: #444;
+                    background: rgba(30, 40, 55, 80);
+                    border: 1px solid rgba(80, 100, 130, 40);
+                    color: #556070;
                 }}
             """)
+            glow_alpha = lerp(0, 100)
+
+        if hasattr(self, '_hover_shadow') and self._hover_shadow is not None:
+            self._hover_shadow.setColor(QColor(0, 180, 230, glow_alpha))

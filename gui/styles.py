@@ -5,60 +5,76 @@ JARVIS HUD 스타일 Qt 스타일시트 모음
 
 # --- GLOBAL STYLESHEET ---
 GLOBAL_STYLESHEET = """
+/* 툴팁 — 카드 아이콘 버튼 설명 표시 */
+QToolTip {
+    background-color: rgba(30, 50, 75, 240);
+    color: #e8f0fa;
+    border: 1px solid rgba(100, 200, 255, 120);
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-family: 'Malgun Gothic';
+    font-size: 10pt;
+    font-weight: 500;
+}
 QMainWindow {
     background-color: rgba(5, 10, 15, 230);
 }
 #OuterContainer {
-    background-color: rgba(5, 15, 25, 100);
-    border: 1px solid rgba(0, 255, 255, 150);
-    border-radius: 6px;
+    background: qradialgradient(cx:0.5, cy:0.4, radius:1.1, fx:0.5, fy:0.4,
+        stop:0    rgba(30, 70, 110, 255),
+        stop:0.5  rgba(15, 30, 50, 255),
+        stop:1    rgba(7, 14, 24, 255));
+    border: none;
+    border-radius: 14px;
 }
 QLabel {
     color: #a9b7c6;
     font-family: 'Malgun Gothic';
     font-size: 10pt;
 }
-/* Tech Style Input Fields */
+/* 맥 스타일 입력/콤보/텍스트 위젯 */
 QLineEdit {
-    background-color: rgba(5, 20, 35, 100) !important;
-    border: 1px solid rgba(0, 255, 255, 150);
-    border-radius: 4px;
-    color: #00ffff !important;
-    padding: 8px 10px;
-    font-family: 'Consolas', 'Malgun Gothic';
+    background-color: rgba(15, 28, 44, 180) !important;
+    border: 1px solid rgba(100, 160, 200, 40);
+    border-radius: 10px;
+    color: #c0d5ea !important;
+    padding: 8px 12px;
+    font-family: 'Malgun Gothic';
     font-size: 10pt;
-    selection-background-color: rgba(0, 255, 255, 80);
+    selection-background-color: rgba(100, 200, 240, 80);
 }
 QLineEdit:focus {
-    border: 1px solid #00ffff;
-    background-color: rgba(5, 30, 50, 150) !important;
+    border: 1px solid rgba(100, 200, 240, 120);
+    background-color: rgba(22, 38, 58, 200) !important;
 }
 QComboBox {
-    background-color: rgba(5, 20, 35, 100) !important;
-    border: 1px solid rgba(0, 255, 255, 150);
-    border-radius: 4px;
-    color: #00ffff !important;
-    padding: 5px 15px;
+    background-color: rgba(15, 28, 44, 180) !important;
+    border: 1px solid rgba(100, 160, 200, 40);
+    border-radius: 10px;
+    color: #c0d5ea !important;
+    padding: 6px 14px;
 }
 QComboBox:hover {
-    background-color: rgba(0, 255, 255, 20) !important;
+    border: 1px solid rgba(100, 200, 240, 100);
 }
 QComboBox::drop-down {
     border: none;
     background: transparent;
 }
 QComboBox QAbstractItemView {
-    background-color: #050f15;
-    color: #00ffff;
-    selection-background-color: rgba(0, 255, 255, 50);
+    background-color: rgba(18, 30, 46, 250);
+    color: #c0d5ea;
+    selection-background-color: rgba(100, 200, 240, 60);
     selection-color: #ffffff;
-    border: 1px solid #00ffff;
+    border: 1px solid rgba(100, 180, 240, 80);
+    border-radius: 6px;
+    padding: 4px;
 }
 QTextEdit {
-    background-color: rgba(5, 15, 25, 80) !important;
-    border: 1px solid rgba(0, 255, 255, 100);
-    border-radius: 4px;
-    color: #cceeff !important;
+    background-color: rgba(10, 20, 32, 180) !important;
+    border: 1px solid rgba(100, 160, 200, 30);
+    border-radius: 10px;
+    color: #a8bacc !important;
     font-family: 'Consolas';
     font-size: 10pt;
     padding: 10px;
@@ -254,25 +270,25 @@ MENU_STYLESHEET = """
 # DropListWidget 기본 스타일시트
 DROP_LIST_STYLESHEET = """
     QListWidget {
-        background-color: rgba(2, 11, 20, 30);
-        border: 2px solid #335566;
-        border-radius: 15px;
-        color: #ffffff;
+        background: rgba(10, 20, 32, 100);
+        border: 1px solid rgba(100, 160, 200, 35);
+        border-radius: 12px;
+        color: #c0d0e0;
         font-size: 10pt;
-        padding: 5px;
+        padding: 6px;
+        outline: none;
     }
     QListWidget::item {
-        padding: 8px;
-        border-bottom: 1px solid rgba(0, 255, 255, 10);
+        padding: 8px 10px;
+        border-radius: 6px;
+        margin: 1px 0;
     }
     QListWidget::item:selected {
-        background-color: rgba(0, 255, 255, 40);
-        color: #00ffff;
-        border: 1px solid #00ffff;
-        border-radius: 5px;
+        background: rgba(100, 200, 240, 60);
+        color: #ffffff;
     }
     QListWidget::item:hover {
-        background-color: rgba(255, 255, 255, 10);
+        background: rgba(100, 180, 240, 25);
     }
 """
 
@@ -376,26 +392,30 @@ TREE_VIEW_STYLESHEET = """
 }
 """
 
-# FileManagerWidget list_target 스타일시트
+# FileManagerWidget list_target 스타일시트 (맥 스타일)
 TARGET_LIST_STYLESHEET = """
     QListWidget {
-        background-color: rgba(2, 11, 20, 80);
-        border: 2px solid #335566;
-        border-radius: 10px;
-        color: #ffffff;
-        font-size: 9pt;
-        padding: 5px;
+        background: rgba(10, 20, 32, 120);
+        border: 1px solid rgba(100, 160, 200, 35);
+        border-radius: 12px;
+        color: #c0d0e0;
+        font-size: 9.5pt;
+        padding: 6px;
         outline: none;
     }
     QListWidget:focus {
-        border: 2px solid #00ffff;
+        border: 1px solid rgba(100, 200, 240, 110);
     }
     QListWidget::item {
-        padding: 5px;
-        border-radius: 3px;
+        padding: 6px 8px;
+        border-radius: 6px;
+        margin: 1px 0;
     }
     QListWidget::item:selected {
-        background-color: rgba(0, 255, 255, 40);
-        color: #00ffff;
+        background: rgba(100, 200, 240, 60);
+        color: #ffffff;
+    }
+    QListWidget::item:hover {
+        background: rgba(100, 180, 240, 25);
     }
 """

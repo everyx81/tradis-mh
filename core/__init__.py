@@ -31,7 +31,9 @@ from .utils import (
 
 from .ocr import GeminiOCR, gemini_ocr, extract_document_info_ai
 
-from .screen_ai import ScreenAI, screen_ai
+# screen_ai는 readykorea_automation에서만 사용되며 거기서 lazy-load됨.
+# 여기서 eager import하면 pyautogui까지 끌려와 시작 시간 ~320ms 증가하므로 제외.
+# 접근이 필요할 때는: from core.screen_ai import screen_ai
 
 from .file_processor import AutoRenamer, PDFHandler
 

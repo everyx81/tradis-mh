@@ -23,8 +23,8 @@ hidden_imports = [
     'google.genai.types',
     'PIL',
     'PIL.Image',
-    'pdf2image',
-    'fitz',  # PyMuPDF
+    'fitz',  # PyMuPDF (core/file_processor.py PDF 병합에서 lazy import)
+    'pypdfium2',  # gui_jarvis.py / gui/utils.py PDF 미리보기에서 lazy import
     'winotify',
     'keyring',
     'keyring.backends',
@@ -74,6 +74,7 @@ hidden_imports = [
     'core.constants',
     'core.utils',
     'core.ocr',
+    'core.screen_ai',  # __init__.py에서 제거됨 - readykorea_automation에서 lazy import
     'core.file_processor',
     'core.archiver',
     'core.google_sheets',

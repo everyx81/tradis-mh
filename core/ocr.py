@@ -36,18 +36,29 @@ class GeminiOCR:
 
 2. identifier (식별 번호) - [매우 중요]:
    - 문서 내에서 B/L 번호 또는 Invoice 번호를 반드시 찾아 추출하세요.
-   - [주의] 13133으로 시작하는 번호는 '신고번호'이며, identifier가 절대 아닙니다!
-     예시: 13133-26-000199X, HSIV-26011513133-26-000199X 등은 신고번호입니다.
-   - B/L 번호는 보통 선사 코드로 시작합니다 (예: HDMU, COSU, MAEU, ONEY 등)
+   - [주의] 다음은 B/L 번호가 아닙니다. 절대 identifier로 추출하지 마세요:
+     • 신고번호 (예: 13133-26-000199X, HSIV-26011513133-26-000199X)
+     • 접수번호, 승인번호, 관리번호, 세관번호, 신고확인번호
+     • 사업자등록번호, 통관고유부호
+     • 문서 상단이나 하단의 행정 관리용 번호
    - [중요] 수출신고필증/반송신고필증의 경우: "송품장부호" 필드가 Invoice 번호입니다. 반드시 송품장부호를 identifier로 추출하세요.
-   - [필독] 명확한 B/L 또는 Invoice 번호가 확인되지 않는 경우, 승인번호나 관리번호 등을 무리하게 유추하지 말고 반드시 'Unknown'을 반환하세요. 잘못된 번호 추출보다 Unknown을 반환하는 것이 필수입니다.
+   - [필독] 명확한 B/L 또는 Invoice 번호가 확인되지 않는 경우, 다른 번호를 무리하게 유추하지 말고 반드시 'Unknown'을 반환하세요. 잘못된 번호 추출보다 Unknown을 반환하는 것이 필수입니다.
 
 3. id_type: 'BL' 또는 'Invoice'
 
 4. doc_type (문서 종류 결정 - [매우 중요]):
-   A. [절대 기준] 다음 제목이 명확히 보이면 그대로 사용하세요:
-      - '수입신고필증', '수입신고서', '수출신고필증', '수출신고서', '반송신고필증', '자금정산서', '자금청구서', '납부고지서', '수입세금계산서', '적합성평가확인서'
-      - [중요] 제목에 '반송'이 포함된 수출신고필증(예: '반송수출신고필증', '반송신고필증')은 반드시 '반송신고필증'으로 반환하세요. '수출신고필증'이 아닙니다.
+   A. [절대 기준] 문서 제목을 그대로 정확히 읽어 반환하세요:
+      - 자주 등장하는 제목 예시: '수입신고필증', '수입신고서', '수출신고필증', '수출신고서', '반송신고필증', '자금정산서', '자금청구서', '납부고지서', '수입세금계산서', '적합성평가확인서', '이체증'
+      - [이체증 특별 규칙] 은행 이체 확인증/이체증인 경우:
+        • doc_type: '이체증'
+        • company_name: **받는분통장표시** (받는 분 이름/상호)를 추출하세요.
+        • identifier: 'Unknown'
+        • total_amount: 이체 금액
+      - [중요 — 구분이 필요한 문서들]:
+        • '자금정산서'와 '자금청구서'는 **다른 문서**입니다. 제목을 정확히 읽어 구분하세요.
+        • '수입신고서'와 '수입신고필증'은 **다른 문서**입니다. 구분하세요.
+        • '수출신고서'와 '수출신고필증'은 **다른 문서**입니다. 구분하세요.
+      - 문서에 적힌 제목이 예시에 없더라도 임의로 바꾸지 말고 적힌 그대로 반환하세요. (시스템이 후처리로 표준화합니다)
 
    B. [내용 기반 심층 분석]
       - 제목이 '세금계산서', '전자세금계산서', '계산서', '청구서', '영수증', '입금표' 등 범용적인 명칭일 경우, **반드시 품목/비고/내용을 분석**하여 실질에 맞는 이름을 부여하세요.
@@ -120,38 +131,19 @@ class GeminiOCR:
             return cached_result
 
         try:
-            import pypdfium2 as pdfium
             from google.genai import types
 
             with open(fp, 'rb') as f:
                 pdf_bytes = f.read()
 
-            img_data = None
-            with pdf_lock:
-                pdf = pdfium.PdfDocument(pdf_bytes)
-                try:
-                    if len(pdf) > 0:
-                        p = pdf[0]
-                        bitmap = p.render(scale=1.5)
-                        pil_image = bitmap.to_pil()
-                        img_byte_arr = io.BytesIO()
-                        try:
-                            pil_image.save(img_byte_arr, format='JPEG', quality=70)
-                            img_data = img_byte_arr.getvalue()
-                        finally:
-                            img_byte_arr.close()
-                            pil_image.close()  # 메모리 즉시 해제 (~13MB/페이지)
-                finally:
-                    pdf.close()
-
-            if not img_data:
+            if not pdf_bytes:
                 return {"company_name": "Unknown", "identifier": "Unknown", "id_type": "Unknown", "doc_type": "Unknown"}
 
             response = client.models.generate_content(
                 model=f"models/{self.model_id}",
                 contents=[
                     self.base_prompt,
-                    types.Part.from_bytes(data=img_data, mime_type="image/jpeg")
+                    types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf")
                 ]
             )
             text_response = response.text.strip()
@@ -161,6 +153,11 @@ class GeminiOCR:
                 text_response = match.group(0)
 
             result = json.loads(text_response)
+
+            # doc_type 표준 정규화
+            from .utils import normalize_doc_type
+            if "doc_type" in result:
+                result["doc_type"] = normalize_doc_type(result["doc_type"])
 
             # --- 결과 캐싱 저장 (모든 파일) ---
             self._save_to_cache(fp, result)
@@ -197,18 +194,30 @@ class GeminiOCR:
 
             entry = cache[filename]
             file_mtime = os.path.getmtime(fp)
+            file_size = os.path.getsize(fp)
 
+            # 수정시간이 변경됐으면 캐시 무효
             if file_mtime > entry.get('mtime', 0):
                 return None
+            # 파일 크기가 다르면 캐시 무효 (동명 파일 교체 감지)
+            # 단, 기존 캐시(size 필드 없음)는 하위 호환을 위해 통과
+            cached_size = entry.get('size')
+            if cached_size is not None and file_size != cached_size:
+                return None
 
-            return entry.get('result')
+            result = entry.get('result')
+            # 기존 캐시에 정규화되지 않은 doc_type이 있으면 로드 시점에 정규화
+            if result and 'doc_type' in result:
+                from .utils import normalize_doc_type
+                result['doc_type'] = normalize_doc_type(result['doc_type'])
+            return result
         except Exception as e:
             print(f"캐시 읽기 오류: {e}")
             return None
 
     def _save_to_cache(self, fp, result):
         """결과를 캐시에 저장 (최적화: indent 제거, O(n) 정리)"""
-        MAX_CACHE_SIZE = 200
+        MAX_CACHE_SIZE = 500
 
         with cache_lock:
             try:
@@ -222,9 +231,11 @@ class GeminiOCR:
 
                 filename = os.path.basename(fp)
                 file_mtime = os.path.getmtime(fp)
+                file_size = os.path.getsize(fp)
 
                 cache[filename] = {
                     'mtime': file_mtime,
+                    'size': file_size,
                     'cached_at': time.time(),
                     'result': result
                 }

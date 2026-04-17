@@ -43,7 +43,7 @@ from gui.styles import GLOBAL_STYLESHEET
 from gui.utils import resource_path, get_run_dir
 from gui.widgets import GlassFrame, NeonButton
 from gui.mk3_widgets import MK3ScheduleOnlyWidget, MK3MemoOnlyWidget
-from gui.dialogs import IntroWindow, GroupCard, MarkingPopup
+from gui.dialogs import IntroWindow, GroupCard
 from gui.panels import FileManagerWidget
 from gui.jarvis_toast import get_toast_handler, show_custom_toast  # [NEW] Custom Toast Imports
 from version import __version__, APP_NAME
@@ -56,9 +56,11 @@ class JarvisGUI(QMainWindow):
     log_signal = pyqtSignal(str)
     merge_signal = pyqtSignal(dict)
     merge_complete_signal = pyqtSignal()  # 병합 완료 시 emit
+    shipping_search_signal = pyqtSignal(str, str)  # 선적서류 검색 (bl_number, target_folder)
+    merge_verify_signal = pyqtSignal(object)  # 병합 검증 실패 팝업 요청
+    move_failed_signal = pyqtSignal(list)  # 파일 이동 실패 알림 [(name, reason)]
     rename_trigger_signal = pyqtSignal()  # 파일 이름 변경 완료 시 emit (디바운싱 트리거)
     export_update_signal = pyqtSignal(object)  # 수출 자동화 UI 업데이트용
-    marking_request_signal = pyqtSignal(str, str, str)  # 수출신고필증 마킹 요청 (company, invoice_id, filepath)
     update_check_done = pyqtSignal(dict)  # 업데이트 확인 완료 시그널
     download_progress_signal = pyqtSignal(int)  # 다운로드 진행률 시그널
     download_complete_signal = pyqtSignal(object)  # 다운로드 완료 시그널 (path or None)
@@ -88,11 +90,8 @@ class JarvisGUI(QMainWindow):
         )
         self.archiver = Archiver(import_root="", export_root="", log_callback=self.emit_log)
         
-        # 수출신고필증 마킹 관련
-        self.marking_queue = []  # 대기열: [(company, invoice_id, filepath), ...]
-        self.marking_popup_active = False  # 현재 팝업 표시 중 여부
+        # 카드 [파일 추가] 버튼이 사용하는 첨부 데이터 저장소
         self.marked_data = {}  # {invoice_id: [{'name': str, 'path': str, 'icon': str}, ...]}
-        self.renamer.export_declaration_callback = self._on_export_declaration_renamed
         
         # 메일 모니터 초기화 (기능 제거됨)
         self.mail_monitor = None
@@ -119,8 +118,10 @@ class JarvisGUI(QMainWindow):
         self.log_signal.connect(self.append_log)
         self.merge_signal.connect(self._update_middle_panel)
         self.merge_complete_signal.connect(self._on_merge_complete)
+        self.shipping_search_signal.connect(self._on_shipping_search)
+        self.merge_verify_signal.connect(self._on_merge_verify_failed)
+        self.move_failed_signal.connect(self._on_move_failed)
         self.rename_trigger_signal.connect(self.trigger_debounced_refresh)
-        self.marking_request_signal.connect(self._show_marking_popup)
         # 메일 모니터링 UI 자동 갱신 (기능 제거됨)
         # self.export_update_signal.connect(self._update_veronica_ui)
         
@@ -128,6 +129,8 @@ class JarvisGUI(QMainWindow):
         # 주의: rk_auto_input_clicked, send_mail_clicked는 setup_right_panel()에서 연결됨
         self.file_manager.item_deleted.connect(self._on_mail_item_deleted_reset) # 목록 삭제 시 초기화
         self.file_manager.admin_unlocked.connect(self._on_admin_unlocked)  # 관리자 잠금 해제
+        self.file_manager.settings_changed.connect(self.save_settings)  # 폴더 설정 변경 즉시 저장
+        self.file_manager.startup_guide_requested.connect(self._show_startup_guide)  # 시작 가이드 재표시
         
         # Everything 자동 시작 (검색 기능 활성화) - 비동기 실행으로 프리징 방지
         threading.Thread(target=self._start_everything, daemon=True).start()
@@ -152,7 +155,257 @@ class JarvisGUI(QMainWindow):
         self.download_complete_signal.connect(self._on_download_complete)
         QTimer.singleShot(3000, self._check_update_async)
 
-    
+        # 첫 실행 가이드 (UI 초기화 완료 후)
+        QTimer.singleShot(1500, self._show_startup_guide_if_needed)
+
+    def _show_startup_guide_if_needed(self):
+        """guide_completed 플래그 확인 후 가이드 표시"""
+        from core.config import load_config
+        config = load_config()
+        if config.get("guide_completed"):
+            return
+        self._show_startup_guide()
+
+    def _show_startup_guide(self):
+        """첫 실행 시작 가이드 다이얼로그"""
+        from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout,
+                                     QLabel, QWidget, QGraphicsDropShadowEffect)
+        from PyQt6.QtGui import QFont
+
+        pages = [
+            # === 소개 ===
+            {
+                "title": "TRADIS MH 소개",
+                "content": (
+                    "수입 통관 서류를 AI로 자동 분석하고\n"
+                    "분류/병합하는 프로그램입니다.\n\n"
+                    "전체 흐름:\n"
+                    "PDF 투입 → AI 분석 → 이름변경\n"
+                    "→ 카드 매칭 → 합치기 → 선적서류 추가\n"
+                    "→ 서버 이동"
+                ),
+            },
+            # === 설정 안내 ===
+            {
+                "title": "① API 키 설정",
+                "content": (
+                    "AI 문서 분석에 필요한 키입니다.\n"
+                    "관리자에게 발급받아 입력하세요.\n\n"
+                    "설정 위치:\n"
+                    "좌측 사이드바 → API 톱니바퀴 아이콘"
+                ),
+            },
+            {
+                "title": "② 감시 폴더 설정",
+                "content": (
+                    "이 폴더에 PDF를 넣으면\n"
+                    "자동으로 AI 분석 및 이름 변경됩니다.\n\n"
+                    "파일 이름 앞에 \"10.\"을 붙이면\n"
+                    "이름 변경 대상에서 제외됩니다.\n\n"
+                    "설정 위치:\n"
+                    "좌측 사이드바 → 감시 폴더"
+                ),
+            },
+            {
+                "title": "③ 서버 경로 설정",
+                "content": (
+                    "정리된 파일이 최종 이동되는\n"
+                    "서버 폴더를 설정합니다.\n\n"
+                    "설정 위치:\n"
+                    "설정 탭 → 수입 서버 경로 설정\n"
+                    "설정 탭 → 수출 서버 경로 설정"
+                ),
+            },
+            {
+                "title": "④ 선적서류 경로 설정",
+                "content": (
+                    "합치기 완료 후 관련 선적서류를\n"
+                    "자동 검색하여 추가하는 폴더입니다.\n\n"
+                    "설정 위치:\n"
+                    "설정 탭 → 선적서류 경로 설정"
+                ),
+            },
+            # === 사용 방법 ===
+            {
+                "title": "사용법 ① 파일 분석",
+                "content": (
+                    "1. 좌측 사이드바에서 [시작] 클릭\n"
+                    "2. 감시 폴더에 PDF 파일을 넣기\n"
+                    "3. AI가 자동으로 분석하여 이름 변경\n\n"
+                    "분석 완료 후 중앙에\n"
+                    "B/L별 카드가 생성됩니다."
+                ),
+            },
+            {
+                "title": "사용법 ② 합치기 / 폴더 정리",
+                "content": (
+                    "1. 카드를 펼치면 매칭된 서류 목록 표시\n"
+                    "2. 자동 매칭이 안 된 항목은 수동으로\n"
+                    "   파일을 선택하거나 행을 추가할 수 있습니다.\n"
+                    "3. [합치기 실행] 또는 [폴더 정리] 클릭\n\n"
+                    "수입/수출 모두 완료 후 선적서류를 자동 검색합니다.\n"
+                    "누락된 파일은 카드의 [📂 파일 추가] 버튼으로\n"
+                    "수동 첨부할 수 있습니다."
+                ),
+            },
+            {
+                "title": "사용법 ③ 서버 이동",
+                "content": (
+                    "합치기가 완료되면 우측 패널의\n"
+                    "[이동 대상] 목록에 폴더가 나타납니다.\n\n"
+                    "1. 이동할 폴더를 선택\n"
+                    "2. [→ 수입] 또는 [→ 수출] 버튼 클릭\n"
+                    "3. 설정된 서버 경로로 자동 이동\n\n"
+                    "ESC 키로 미니 윈도우 전환 가능"
+                ),
+            },
+        ]
+
+        current_page = [0]
+
+        dlg = QDialog(self)
+        dlg.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        dlg.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        dlg.setFixedWidth(480)
+
+        container = QWidget(dlg)
+        container.setObjectName("guide_dlg")
+        container.setStyleSheet("""
+            #guide_dlg {
+                background-color: rgba(45, 50, 60, 235);
+                border: 1px solid rgba(100, 110, 120, 0.5);
+                border-radius: 20px;
+            }
+        """)
+        shadow = QGraphicsDropShadowEffect(dlg)
+        shadow.setBlurRadius(30)
+        shadow.setXOffset(0)
+        shadow.setYOffset(5)
+        shadow.setColor(Qt.GlobalColor.black)
+        container.setGraphicsEffect(shadow)
+
+        outer = QVBoxLayout(dlg)
+        outer.setContentsMargins(10, 10, 10, 10)
+        outer.addWidget(container)
+
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(30, 30, 30, 24)
+        layout.setSpacing(15)
+
+        # 페이지 번호
+        lbl_page = QLabel("1/5")
+        lbl_page.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl_page.setFont(QFont("Segoe UI", 9))
+        lbl_page.setStyleSheet("color: rgba(255,255,255,0.4); background: transparent;")
+        layout.addWidget(lbl_page)
+
+        # 타이틀
+        lbl_title = QLabel("")
+        lbl_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl_title.setFont(QFont("Segoe UI", 16, QFont.Weight.Bold))
+        lbl_title.setStyleSheet("color: #00ffff; background: transparent;")
+        layout.addWidget(lbl_title)
+
+        # 내용
+        lbl_content = QLabel("")
+        lbl_content.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl_content.setFont(QFont("Segoe UI", 11))
+        lbl_content.setStyleSheet("color: rgba(255,255,255,0.85); background: transparent; line-height: 1.5;")
+        lbl_content.setWordWrap(True)
+        layout.addWidget(lbl_content)
+
+        layout.addSpacing(10)
+
+        # 버튼
+        from PyQt6.QtWidgets import QPushButton
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(10)
+
+        _btn_style_gray = """
+            QPushButton { background-color: rgba(100,105,115,180); border: 1px solid rgba(150,155,165,0.5);
+                border-radius: 12px; color: #fff; padding: 8px 20px; }
+            QPushButton:hover { background-color: rgba(120,125,135,200); }
+        """
+        _btn_style_cyan = """
+            QPushButton { background-color: rgba(30,35,45,200); border: 2px solid #00d4ff;
+                border-radius: 12px; color: #00d4ff; padding: 8px 20px; }
+            QPushButton:hover { background-color: rgba(0,212,255,40); border-color: #00ffff; color: #00ffff; }
+        """
+
+        btn_skip = QPushButton("건너뛰기")
+        btn_skip.setFixedHeight(40)
+        btn_skip.setFont(QFont("Segoe UI", 10))
+        btn_skip.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_skip.setStyleSheet(_btn_style_gray)
+        btn_row.addWidget(btn_skip)
+
+        btn_prev = QPushButton("이전")
+        btn_prev.setFixedHeight(40)
+        btn_prev.setFont(QFont("Segoe UI", 10))
+        btn_prev.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_prev.setStyleSheet(_btn_style_gray)
+        btn_row.addWidget(btn_prev)
+
+        btn_next = QPushButton("다음")
+        btn_next.setFixedHeight(40)
+        btn_next.setFont(QFont("Segoe UI", 10, QFont.Weight.Medium))
+        btn_next.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_next.setStyleSheet(_btn_style_cyan)
+        btn_row.addWidget(btn_next)
+
+        layout.addLayout(btn_row)
+
+        def update_page():
+            p = pages[current_page[0]]
+            lbl_page.setText(f"{current_page[0]+1}/{len(pages)}")
+            lbl_title.setText(p["title"])
+            lbl_content.setText(p["content"])
+            btn_prev.setVisible(current_page[0] > 0)
+            if current_page[0] == len(pages) - 1:
+                btn_next.setText("완료")
+            else:
+                btn_next.setText("다음")
+
+        def on_next():
+            if current_page[0] >= len(pages) - 1:
+                _save_guide_completed()
+                dlg.accept()
+            else:
+                current_page[0] += 1
+                update_page()
+
+        def on_prev():
+            if current_page[0] > 0:
+                current_page[0] -= 1
+                update_page()
+
+        def on_skip():
+            _save_guide_completed()
+            dlg.reject()
+
+        def _save_guide_completed():
+            try:
+                cfg_path = get_config_path()
+                if os.path.exists(cfg_path):
+                    with open(cfg_path, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                else:
+                    data = {}
+                data["guide_completed"] = True
+                tmp = cfg_path + ".tmp"
+                with open(tmp, 'w', encoding='utf-8') as f:
+                    json.dump(data, f, ensure_ascii=False, indent=4)
+                os.replace(tmp, cfg_path)
+            except Exception:
+                pass
+
+        btn_next.clicked.connect(on_next)
+        btn_prev.clicked.connect(on_prev)
+        btn_skip.clicked.connect(on_skip)
+
+        update_page()
+        dlg.exec()
+
     def _migrate_credentials_to_keyring(self):
         """기존 config.json의 민감정보를 Windows Credential Manager로 이동 (최초 1회)"""
         try:
@@ -518,6 +771,12 @@ class JarvisGUI(QMainWindow):
         self.left_content_stack.setCurrentIndex(0)
         self._on_navbar_clicked("정산")
     
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Escape:
+            self._show_mini_window()
+        else:
+            super().keyPressEvent(event)
 
     def closeEvent(self, event):
         try:
@@ -1192,7 +1451,7 @@ class JarvisGUI(QMainWindow):
         layout.addSpacing(10)
         
         # Target Directory
-        layout.addWidget(QLabel("TARGET DIRECTORY"))
+        layout.addWidget(QLabel("감시 폴더"))
         path_layout = QHBoxLayout()
         self.line_path = QLineEdit()
         self.line_path.setReadOnly(True)
@@ -1253,9 +1512,9 @@ class JarvisGUI(QMainWindow):
         # Monitoring
         layout.addWidget(QLabel("MONITORING"))
         act_layout = QHBoxLayout()
-        self.btn_start = NeonButton("START")
+        self.btn_start = NeonButton("시작")
         self.btn_start.clicked.connect(self.start_monitoring)
-        self.btn_stop = NeonButton("STOP", color="orange")
+        self.btn_stop = NeonButton("중지", color="orange")
         self.btn_stop.clicked.connect(self.stop_monitoring)
         self.btn_stop.setEnabled(False)
         
@@ -1287,7 +1546,7 @@ class JarvisGUI(QMainWindow):
         info_row.addWidget(self.lbl_location)
         info_row.addStretch()
         
-        btn_rescan = NeonButton("RESCAN FOLDER", color="cyan")
+        btn_rescan = NeonButton("폴더 재스캔", color="cyan")
         btn_rescan.setFixedSize(140, 32)
         btn_rescan.clicked.connect(self.run_intelligent_merge)
         info_row.addWidget(btn_rescan)
@@ -1395,6 +1654,16 @@ class JarvisGUI(QMainWindow):
                     self.merge_layout.addWidget(card)
                 except Exception as e: self.emit_log(f"Error creating card for {text_id}: {e}")
                 
+            # 독립 문서 카드 (이체증 등)
+            independent = report.get('independent', {})
+            for doc_type, file_list in independent.items():
+                try:
+                    from gui.dialogs import IndependentCard
+                    card = IndependentCard(self, directory, doc_type, file_list)
+                    self.merge_layout.addWidget(card)
+                except Exception as e:
+                    self.emit_log(f"Error creating independent card for {doc_type}: {e}")
+
             if unclassified:
                 self.merge_layout.addWidget(QLabel("UNCLASSIFIED FILES"))
                 lbl_u = QLabel(", ".join(unclassified))
@@ -1412,6 +1681,63 @@ class JarvisGUI(QMainWindow):
         self._debounced_refresh()
         # 백그라운드 메일 프리페치
         self._prefetch_mail_cache()
+
+    def _on_move_failed(self, failed_list):
+        """파일 이동 실패 알림 팝업 (메인 스레드)"""
+        if not failed_list:
+            return
+        from gui.dialogs import JarvisMessageBox
+        items_text = "\n".join(f"  ❌ {name} — {reason}" for name, reason in failed_list[:10])
+        if len(failed_list) > 10:
+            items_text += f"\n  ... 외 {len(failed_list)-10}건"
+        msg = f"다음 파일을 확인해 주세요:\n\n{items_text}"
+        JarvisMessageBox.warning(self, "파일 처리 알림", msg)
+
+    def _on_merge_verify_failed(self, data):
+        """병합 검증 실패 팝업 (메인 스레드)"""
+        from gui.dialogs import JarvisMessageBox
+        failed_files = data['failed_files']
+        total = data['total']
+        success_pages = data['success_pages']
+        event = data['event']
+        result_holder = data['result']
+
+        failed_text = "\n".join(f"  ❌ {f} ({reason})" for f, reason in failed_files)
+        msg = (f"{total}개 중 {len(failed_files)}개 파일 병합 실패\n\n"
+               f"{failed_text}\n\n"
+               f"성공: {success_pages}페이지")
+
+        dlg = JarvisMessageBox(self, "병합 검증 실패", msg, JarvisMessageBox.Warning)
+        dlg.add_button("취소", "cancel", "gray")
+        dlg.add_button("무시하고 진행", "ignore", "gray")
+        dlg.add_button("다시 합치기", "retry", "cyan")
+        dlg.exec()
+
+        result_holder['action'] = dlg.result_value or "cancel"
+        event.set()  # 백그라운드 스레드 대기 해제
+
+    def _on_shipping_search(self, bl_number, target_folder):
+        """선적서류 자동 검색 (합치기/폴더정리 완료 후 트리거)"""
+        if not hasattr(self, 'file_manager'):
+            return
+        fm = self.file_manager
+        matches = fm.scan_shipping_docs_for_bl(bl_number)
+        if matches:
+            action, selected = fm._show_shipping_docs_dialog(bl_number, matches, target_folder)
+            if action and selected:
+                failed = fm.move_shipping_docs(selected, target_folder, mode=action)
+                fm.refresh_targets()
+                self.emit_log(f"[선적서류] {bl_number} {len(selected) - len(failed or [])}건 이동 완료")
+                # 이동 실패가 있으면 알림 팝업
+                if failed:
+                    self.move_failed_signal.emit(failed)
+        else:
+            # 미발견 → FOLDER TREE를 선적서류폴더로 이동
+            shipping_root = getattr(fm.archiver, 'export_docs_root', '')
+            if shipping_root and os.path.exists(shipping_root):
+                fm.file_browser.navigate_to(shipping_root)
+                fm.current_path_label.setText(f"경로: {shipping_root}")
+                self.emit_log(f"[선적서류] {bl_number} 미발견 → 선적서류폴더로 이동")
 
     def _prefetch_mail_cache(self):
         """병합 완료 후 정산서 파일의 B/L 번호로 메일을 미리 검색하여 캐시에 저장"""
@@ -1627,7 +1953,7 @@ class JarvisGUI(QMainWindow):
     def stop_monitoring(self):
         self.renamer.stop()
         self.btn_start.setEnabled(True)
-        self.btn_start.setText("START")
+        self.btn_start.setText("시작")
         self.btn_stop.setEnabled(False)
         self.emit_log("Monitoring Stopped.")
 
@@ -1708,7 +2034,9 @@ class JarvisGUI(QMainWindow):
             if os.path.exists(cfg):
                 with open(cfg, 'r', encoding='utf-8') as f: data = json.load(f)
             else: data = {}
-            data["target_path"] = self.line_path.text()
+            # 빈 값으로 기존 설정을 덮어쓰지 않도록 보호
+            target = self.line_path.text()
+            if target: data["target_path"] = target
             if self.archiver.import_root: data["import_root"] = self.archiver.import_root
             if self.archiver.export_root: data["export_root"] = self.archiver.export_root
             if self.archiver.export_docs_root: data["export_docs_root"] = self.archiver.export_docs_root
@@ -1717,10 +2045,17 @@ class JarvisGUI(QMainWindow):
             # 미니 윈도우 위치 저장
             if hasattr(self, 'mini_window_saved_pos') and self.mini_window_saved_pos:
                 data["mini_window_pos"] = self.mini_window_saved_pos
-            with open(cfg, 'w', encoding='utf-8') as f:
+            # Atomic write: 임시 파일에 쓰고 rename (중간 종료 시 파일 손상 방지)
+            tmp_cfg = cfg + ".tmp"
+            with open(tmp_cfg, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=4)
+            # Windows: os.replace는 atomic (대상 파일이 있어도 덮어씀)
+            os.replace(tmp_cfg, cfg)
         except Exception as e:
             print(f"Settings save error: {e}")
+            # 임시 파일 잔존 방지
+            try: os.unlink(cfg + ".tmp")
+            except OSError: pass
     
     def _show_mini_window(self):
         if hasattr(self, 'mini_window') and self.mini_window: self.mini_window.close()
@@ -1818,6 +2153,7 @@ class JarvisGUI(QMainWindow):
         self.mini_window.mousePressEvent = mini_mouse_press
         self.mini_window.mouseMoveEvent = mini_mouse_move
         self.mini_window.mouseReleaseEvent = mini_mouse_release
+        self.mini_window.mouseDoubleClickEvent = lambda e: self._restore_from_mini()
         
         # 저장된 위치 또는 기본 위치에 배치
         screen = QApplication.primaryScreen().geometry()
@@ -2122,57 +2458,6 @@ class JarvisGUI(QMainWindow):
             
         self._add_rk_log("❌ 사용자에 의해 항목 삭제됨 (초기화)")
 
-    # ──────────── 수출신고필증 마킹 ────────────
-
-    def _on_export_declaration_renamed(self, company, invoice_id, filepath):
-        """수출신고필증 이름변경 콜백 (워커 스레드에서 호출됨)"""
-        # 시그널로 메인 스레드에 전달
-        self.marking_request_signal.emit(company, invoice_id, filepath)
-
-    def _show_marking_popup(self, company, invoice_id, filepath):
-        """마킹 팝업 표시 (메인 스레드)"""
-        # 대기열에 추가
-        self.marking_queue.append((company, invoice_id, filepath))
-        self.emit_log(f"[마킹] 대기열 추가: {company}({invoice_id})")
-        
-        # 현재 팝업이 없으면 바로 표시
-        if not self.marking_popup_active:
-            self._process_next_marking()
-
-    def _process_next_marking(self):
-        """대기열의 다음 마킹 팝업 처리"""
-        if not self.marking_queue:
-            self.marking_popup_active = False
-            # 모든 마킹 완료 → 카드 새로고침 (marked_data 반영)
-            if self.marked_data:
-                self.rename_trigger_signal.emit()
-            return
-        
-        self.marking_popup_active = True
-        company, invoice_id, filepath = self.marking_queue.pop(0)
-        
-        export_docs_root = getattr(self.archiver, 'export_docs_root', '') or ''
-        
-        popup = MarkingPopup(
-            parent=self,
-            company=company,
-            invoice_id=invoice_id,
-            filepath=filepath,
-            export_docs_root=export_docs_root
-        )
-        
-        result = popup.exec()
-        
-        if result and not popup.was_skipped and popup.marked_files:
-            self.marked_data[invoice_id] = popup.marked_files
-            file_names = [f['name'] for f in popup.marked_files]
-            self.emit_log(f"[마킹] {company}({invoice_id}) → {len(popup.marked_files)}개 파일 마킹: {', '.join(file_names)}")
-        else:
-            self.emit_log(f"[마킹] {company}({invoice_id}) → 건너뜀")
-        
-        # 대기열에 다음 항목이 있으면 처리
-        QTimer.singleShot(300, self._process_next_marking)
-
     # ── 관리자 모드 ──────────────────────────────────────────
 
     def _on_admin_unlocked(self):
@@ -2406,6 +2691,13 @@ class JarvisGUI(QMainWindow):
             return
 
         self.emit_log(f"[업데이트] v{self._new_ver} 다운로드 완료. 업데이트를 설치합니다...")
+
+        # 업데이트 종료 시 closeEvent가 발생하지 않을 수 있으므로 미리 저장
+        try:
+            self.save_settings()
+            self.emit_log("[업데이트] 설정 저장 완료.")
+        except Exception as e:
+            print(f"[업데이트] 설정 저장 실패: {e}")
 
         if apply_update(tmp_path):
             # PyInstaller _MEI 폴더 정리를 위해 정상 종료 필수

@@ -7,3 +7,13 @@ dist/
 credentials.json
 data/
 .claude/
+
+# 빌드/크래시 로그
+build_log.txt
+crash_log.txt
+
+# C 소스 (exe 빌드 아티팩트)
+cli.c
+
+# 업무 문서 (미추적)
+일일보고/

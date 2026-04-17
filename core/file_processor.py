@@ -17,11 +17,13 @@ from watchdog.events import FileSystemEventHandler
 from .constants import (
     DOC_TYPE_IMPORT_DECLARATION, DOC_TYPE_EXPORT_DECLARATION,
     DOC_TYPE_PAYMENT_NOTICE, DOC_TYPE_IMPORT_TAX_INVOICE,
-    FEE_INVOICE_ITEMS, EXPENSE_SYNONYMS, REQUIREMENT_DOC_KEYWORDS
+    FEE_INVOICE_ITEMS, EXPENSE_SYNONYMS, REQUIREMENT_DOC_KEYWORDS,
+    INDEPENDENT_DOC_TYPES
 )
 from .utils import (
     sanitize_filename, get_unique_filename, cleanup_company_name,
-    parse_renamed_filename, RE_ID_PAREN, normalize_id, is_similar_id
+    parse_renamed_filename, RE_ID_PAREN, normalize_id, is_similar_id,
+    is_prefix_match_id
 )
 from .ocr import gemini_ocr, extract_document_info_ai
 
@@ -34,7 +36,6 @@ class AutoRenamer:
         self.log_callback = log_callback
         self.merge_request_callback = merge_request_callback
         self.rename_complete_callback = rename_complete_callback
-        self.export_declaration_callback = None  # 수출신고필증 마킹 콜백
         self.executor = None
         self.processing_files = set()
 
@@ -173,6 +174,10 @@ class AutoRenamer:
             cn = res.get("company_name", "Unknown")
             iden = res.get("identifier", "Unknown")
 
+            # doc_type 표준 정규화 (이중 안전망)
+            from core.utils import normalize_doc_type
+            dt = normalize_doc_type(dt)
+
             # OCR 전체 실패 시 1회 재시도 (다운로드 미완료 파일 대응)
             if dt == "Unknown" and cn == "Unknown" and iden == "Unknown":
                 self.log(f" -> [OCR 재시도] 전체 Unknown - 5초 후 재분석: {fn}")
@@ -205,6 +210,32 @@ class AutoRenamer:
             if cn != "Unknown":
                 if not re.search(r'[가-힣]', cn):
                     is_english_only = True
+
+            # 독립 문서 (이체증 등) 전용 이름 패턴
+            from core.constants import INDEPENDENT_DOC_TYPES
+            if dt in INDEPENDENT_DOC_TYPES:
+                amt = res.get("total_amount", 0)
+                try:
+                    amt_val = int(str(amt).replace(',', '').replace('원', ''))
+                except ValueError:
+                    amt_val = 0
+                cn = sanitize_filename(cn).replace(" ", "")
+                nn = f"{dt}_{cn}_{amt_val}.pdf" if amt_val else f"{dt}_{cn}.pdf"
+                dir_name = os.path.dirname(fp)
+                np = os.path.join(dir_name, nn)
+                if fn != nn:
+                    if os.path.exists(np):
+                        np = get_unique_filename(np)
+                        nn = os.path.basename(np)
+                    try:
+                        os.rename(fp, np)
+                        self.log(f" -> [성공] {nn}")
+                        gemini_ocr._update_cache_key(fp, np)
+                        if self.rename_complete_callback:
+                            self.rename_complete_callback()
+                    except Exception as e:
+                        self.log(f" -> [실패] 이름 변경 오류: {e}")
+                return
 
             if dt == "Unknown" or iden == "Unknown" or is_english_only:
                 amt = res.get("total_amount", 0)
@@ -260,7 +291,12 @@ class AutoRenamer:
             cn = sanitize_filename(cn).replace(" ", "")
             iden = sanitize_filename(iden).replace(" ", "").upper()
 
-            nn = f"{cn}({iden}){dt}.pdf"
+            from core.config import get_custom_naming
+            _naming = get_custom_naming()
+            try:
+                nn = _naming["file_pattern"].format(company=cn, bl=iden, doctype=dt, amount="")
+            except (KeyError, ValueError):
+                nn = f"{cn}({iden}){dt}.pdf"
             dir_name = os.path.dirname(fp)
             np = os.path.join(dir_name, nn)
 
@@ -275,9 +311,6 @@ class AutoRenamer:
                     # 이미 위에서 UI 갱신 시그널을 보냈지만, 파일명이 바뀌었으므로 한번 더 안전하게 보냄
                     if self.rename_complete_callback:
                         self.rename_complete_callback()
-                    # 수출신고필증/반송신고필증이면 마킹 콜백 호출
-                    if ("수출신고필증" in dt or "반송신고필증" in dt) and self.export_declaration_callback:
-                        self.export_declaration_callback(cn, iden, np)
                 except Exception as e:
                     self.log(f" -> [실패] 이름 변경 오류: {e}")
         finally:
@@ -288,10 +321,36 @@ class AutoRenamer:
         files = [f for f in os.listdir(dr) if f.lower().endswith('.pdf')]
         groups = {}
         uncl = []
+        independent_groups = {}  # 독립 문서 그룹 {doc_type: [파일 목록]}
+        # 카드 그룹에 포함하지 않는 문서 유형
+        _EXCLUDE_DOC_TYPES = {"수입신고서", "자금청구서"}
+
         for f in files:
+            # 독립 문서 (이체증 등) → 파일명 앞부분으로 판별
+            _indie_matched = False
+            for _indie_type in INDEPENDENT_DOC_TYPES:
+                if f.startswith(_indie_type + "_") or f.startswith(_indie_type + "("):
+                    if _indie_type not in independent_groups:
+                        independent_groups[_indie_type] = []
+                    independent_groups[_indie_type].append(f)
+                    _indie_matched = True
+                    break
+            if _indie_matched:
+                continue
+
             c, i, d, s = parse_renamed_filename(f)
+
             if i:
-                fk = next((k for k in groups if is_similar_id(k, i)), i)
+                # 카드 제외 대상 문서는 미분류로 처리
+                if d and d in _EXCLUDE_DOC_TYPES:
+                    uncl.append(f)
+                    continue
+                # 1차: 기존 유사도 매칭 (suffix 일치 필수)
+                fk = next((k for k in groups if is_similar_id(k, i)), None)
+                # 2차: prefix 포함 매칭 (정확 매칭 실패 시, 후보가 1개일 때만)
+                if fk is None:
+                    prefix_candidates = [k for k in groups if is_prefix_match_id(k, i)]
+                    fk = prefix_candidates[0] if len(prefix_candidates) == 1 else i
                 # 신고필증의 B/L이 가장 정확하므로 그룹 키를 교체
                 if fk != i and "신고필증" in (d or "") and fk in groups:
                     groups[i] = groups.pop(fk)
@@ -319,27 +378,34 @@ class AutoRenamer:
             cs = v.pop('company_set')
             v['company'] = ", ".join(sorted(list(cs))[:2]) if cs else "Unknown"
         if self.merge_request_callback:
-            self.merge_request_callback({'directory': dr, 'groups': groups, 'unclassified': uncl})
+            self.merge_request_callback({'directory': dr, 'groups': groups, 'unclassified': uncl,
+                                        'independent': independent_groups})
 
     def _determine_merge_order(self, dr, sf, dm, mo, an=None, ti=None, pdf_files_cache=None):
         # 디렉토리 PDF 목록 캐싱 (함수 내 재사용)
         _all_dir_pdfs = pdf_files_cache if pdf_files_cache is not None else [
             f for f in os.listdir(dr) if f.lower().endswith('.pdf')
         ]
-        m = []
-        m.append({'label': '[명세서] 자금정산서', 'filename': sf if sf else ''})
+        # 고정 슬롯 구성
+        from core.config import get_custom_naming
+        _naming = get_custom_naming()
+        _merge_order = _naming["merge_order"]
+
+        # 슬롯별 데이터 준비
+        _slot_data = {}
+        _slot_data["정산서"] = {'label': '[명세서] 자금정산서', 'filename': sf if sf else ''}
         if mo == "수입":
-            m.append({'label': '[신고필증] 수입신고필증', 'filename': dm.get(DOC_TYPE_IMPORT_DECLARATION, '')})
+            _slot_data["신고필증"] = {'label': '[신고필증] 수입신고필증', 'filename': dm.get(DOC_TYPE_IMPORT_DECLARATION, '')}
         elif mo == "수출":
-            # 반송신고필증 우선 확인
             from core.constants import DOC_TYPE_RETURN_DECLARATION
             return_decl = dm.get(DOC_TYPE_RETURN_DECLARATION, '')
             if return_decl:
-                m.append({'label': '[신고필증] 반송신고필증', 'filename': return_decl})
+                _slot_data["신고필증"] = {'label': '[신고필증] 반송신고필증', 'filename': return_decl}
             else:
-                m.append({'label': '[신고필증] 수출신고필증', 'filename': dm.get(DOC_TYPE_EXPORT_DECLARATION, '')})
+                _slot_data["신고필증"] = {'label': '[신고필증] 수출신고필증', 'filename': dm.get(DOC_TYPE_EXPORT_DECLARATION, '')}
         else:
-            m.append({'label': '[신고필증] 신고필증', 'filename': ''})
+            _slot_data["신고필증"] = {'label': '[신고필증] 신고필증', 'filename': ''}
+
         if mo == "수입":
             td = dm.get(DOC_TYPE_PAYMENT_NOTICE)
             if not td:
@@ -347,13 +413,22 @@ class AutoRenamer:
                     if "납부영수증" in n:
                         td = n
                         break
-            m.append({'label': '[세금] 납부고지서', 'filename': td if td else ''})
-            m.append({'label': '[세금] 수입세금계산서', 'filename': dm.get(DOC_TYPE_IMPORT_TAX_INVOICE, '')})
+            _slot_data["납부고지서"] = {'label': '[세금] 납부고지서', 'filename': td if td else ''}
+            _slot_data["세금계산서"] = {'label': '[세금] 수입세금계산서', 'filename': dm.get(DOC_TYPE_IMPORT_TAX_INVOICE, '')}
+
+        # config 순서대로 m 리스트 구성 (비용계산서 이전까지)
+        m = []
+        for slot_name in _merge_order:
+            if slot_name == "비용계산서":
+                break
+            if slot_name in _slot_data:
+                m.append(_slot_data[slot_name])
 
         af = [x['filename'] for x in m if x['filename']]
         allp = []
 
         if ti:
+            normalized_ti_main = normalize_id(ti)
             for f in _all_dir_pdfs:
                 if f in af:
                     continue
@@ -361,8 +436,14 @@ class AutoRenamer:
                 if "청구서" in f and "계산서" not in f:
                     continue
                 match = RE_ID_PAREN.search(f)
-                if match and normalize_id(match.group(1).strip()) == normalize_id(ti):
-                    allp.append(f)
+                if match:
+                    f_id_raw = match.group(1).strip()
+                    f_id = normalize_id(f_id_raw)
+                    # 정확 일치, prefix 포함 매칭(suffix 1글자), 또는 유사 매칭(선사코드 누락 등)
+                    if (f_id == normalized_ti_main
+                            or is_prefix_match_id(f_id, normalized_ti_main)
+                            or is_similar_id(f_id_raw, ti)):
+                        allp.append(f)
 
         syns = EXPENSE_SYNONYMS
 
@@ -390,9 +471,15 @@ class AutoRenamer:
                     return True
             return False
 
-        # ── 파일별 OCR 캐시 금액 조회 헬퍼 ──
+        # ── OCR 캐시 일괄 로드 (디스크 I/O 1회만) ──
+        _ocr_cache = {}  # {filename: cached_result}
+        for pdf in _all_dir_pdfs:
+            cached = gemini_ocr._get_cached_result(os.path.join(dr, pdf))
+            if cached:
+                _ocr_cache[pdf] = cached
+
         def _get_file_amount(filename):
-            cached = gemini_ocr._get_cached_result(os.path.join(dr, filename))
+            cached = _ocr_cache.get(filename)
             if cached:
                 try:
                     return int(str(cached.get('total_amount', 0)).replace(',', '').replace('원', ''))
@@ -425,12 +512,11 @@ class AutoRenamer:
                     candidates.append(pdf)
             return candidates
 
-        # ── billing_items 맵 + 공급자 맵 구축 ──
-        file_billing_map = {}  # {filename: [{"name": ..., "amount": ...}, ...]}
-        file_supplier_map = {}  # {filename: supplier_name}
+        # ── billing_items 맵 + 공급자 맵 구축 (메모리 캐시 활용) ──
+        file_billing_map = {}
+        file_supplier_map = {}
         for pdf in allp:
-            fp = os.path.join(dr, pdf)
-            cached = gemini_ocr._get_cached_result(fp)
+            cached = _ocr_cache.get(pdf)
             if cached:
                 bi = cached.get('billing_items', [])
                 if bi:
@@ -606,8 +692,11 @@ class AutoRenamer:
                     # 파일에 BL번호가 있으면서 현재 건과 다른 BL이면 제외
                     f_match = RE_ID_PAREN.search(f)
                     if f_match and normalized_ti:
-                        f_id = normalize_id(f_match.group(1).strip())
-                        if f_id != normalized_ti:
+                        f_id_raw = f_match.group(1).strip()
+                        f_id = normalize_id(f_id_raw)
+                        if (f_id != normalized_ti
+                                and not is_prefix_match_id(f_id, normalized_ti)
+                                and not is_similar_id(f_id_raw, ti)):
                             continue  # 다른 건의 파일 → 스킵
                     uncl_files.append(f)
 
@@ -677,10 +766,20 @@ class AutoRenamer:
 
         return m
 
-    def execute_merge_task(self, dr, of, fo, export_docs_root=None, marked_files=None):
-        """병합 수행 후 파일 정리"""
+    def execute_merge_task(self, dr, of, fo, export_docs_root=None, marked_files=None,
+                          merge_verify_callback=None):
+        """병합 수행 후 파일 정리
+
+        Args:
+            merge_verify_callback: 검증 실패 시 호출. (failed_files, total, success) → "retry"|"ignore"|"cancel"
+        Returns:
+            True: 병합 성공, False: 취소됨
+        실패 첨부 파일 목록은 self.last_failed_attached 속성에 저장됨 (호출자 조회).
+        """
+        # 첨부(마킹) 파일 이동 실패 추적 초기화
+        self.last_failed_attached = []
         if not fo:
-            return
+            return False
 
         target_id = ""
         declaration_company = ""
@@ -700,67 +799,110 @@ class AutoRenamer:
 
         try:
             if len(fo) >= 2:
-                # 2개 이상: PyMuPDF(fitz)로 병합 (PyPDF2는 폼/레이어 PDF에서 빈 페이지 버그)
-                import fitz  # PyMuPDF
-                final_of = f"{final_company}({target_id})정산서.pdf"
+                import fitz
+                from core.config import get_custom_naming
+                _naming = get_custom_naming()
+                try:
+                    final_of = _naming["merge_pattern"].format(company=final_company, bl=target_id)
+                except (KeyError, ValueError):
+                    final_of = f"{final_company}({target_id})정산서.pdf"
                 output_path = os.path.join(dr, final_of)
 
-                merged_doc = fitz.open()
-                total_pages = 0
-                for f in fo:
-                    if f:
-                        src_path = os.path.join(dr, f)
-                        try:
-                            src_doc = fitz.open(src_path)
-                            page_count = len(src_doc)
-                            if page_count == 0:
-                                self.log(f" -> [경고] 빈 PDF 건너뜀: {f}")
+                # 병합 실행 (재시도 지원)
+                while True:
+                    merged_doc = fitz.open()
+                    total_pages = 0
+                    failed_files = []
+
+                    for f in fo:
+                        if f:
+                            src_path = os.path.join(dr, f)
+                            try:
+                                src_doc = fitz.open(src_path)
+                                page_count = len(src_doc)
+                                if page_count == 0:
+                                    self.log(f" -> [경고] 빈 PDF 건너뜀: {f}")
+                                    failed_files.append((f, "빈 PDF"))
+                                    src_doc.close()
+                                    continue
+                                merged_doc.insert_pdf(src_doc)
+                                total_pages += page_count
                                 src_doc.close()
-                                continue
-                            merged_doc.insert_pdf(src_doc)
-                            total_pages += page_count
-                            src_doc.close()
-                        except Exception as e:
-                            self.log(f" -> [경고] PDF 읽기 실패 ({f}): {e}")
-                
-                if total_pages == 0:
-                    self.log(f" -> [오류] 병합할 페이지가 없습니다. 병합 중단.")
+                            except Exception as e:
+                                self.log(f" -> [경고] PDF 읽기 실패 ({f}): {e}")
+                                failed_files.append((f, str(e)))
+
+                    if total_pages == 0:
+                        self.log(f" -> [오류] 병합할 페이지가 없습니다. 병합 중단.")
+                        merged_doc.close()
+                        try: os.rmdir(archive_dir)
+                        except OSError: pass
+                        return False
+
+                    merged_doc.save(output_path)
                     merged_doc.close()
-                    return
-                
-                merged_doc.save(output_path)
-                merged_doc.close()
-                
-                # 병합 결과 검증
-                try:
-                    verify_doc = fitz.open(output_path)
-                    actual_pages = len(verify_doc)
-                    verify_doc.close()
-                    if actual_pages != total_pages:
-                        self.log(f" -> [경고] 페이지 수 불일치! 예상: {total_pages}, 실제: {actual_pages}")
-                    elif actual_pages == 0:
-                        self.log(f" -> [오류] 병합 결과가 빈 파일입니다. 이동하지 않습니다.")
-                        os.remove(output_path)
-                        return
-                    else:
+
+                    # 병합 결과 검증
+                    verify_ok = True
+                    try:
+                        verify_doc = fitz.open(output_path)
+                        actual_pages = len(verify_doc)
+                        verify_doc.close()
+                        if actual_pages == 0:
+                            self.log(f" -> [오류] 병합 결과가 빈 파일입니다.")
+                            verify_ok = False
+                        elif actual_pages != total_pages:
+                            self.log(f" -> [경고] 페이지 수 불일치! 예상: {total_pages}, 실제: {actual_pages}")
+                            verify_ok = False
+                    except Exception as e:
+                        self.log(f" -> [경고] 병합 결과 검증 실패: {e}")
+                        verify_ok = False
+
+                    # 실패 파일이 있거나 검증 실패 → 사용자 확인
+                    if (failed_files or not verify_ok) and merge_verify_callback:
+                        action = merge_verify_callback(
+                            failed_files, len(fo), total_pages
+                        )
+                        if action == "retry":
+                            # 병합 결과 삭제 후 재시도
+                            try: os.remove(output_path)
+                            except OSError: pass
+                            self.log(f" -> [재시도] 병합을 다시 시도합니다.")
+                            continue  # while 루프 재시작
+                        elif action == "cancel":
+                            # 병합 결과 삭제, 원본 유지
+                            try: os.remove(output_path)
+                            except OSError: pass
+                            self.log(f" -> [취소] 병합이 취소되었습니다. 원본 파일 유지.")
+                            # 빈 폴더 정리
+                            try: os.rmdir(archive_dir)
+                            except OSError: pass
+                            return False
+                        # "ignore" → 계속 진행
+                        self.log(f" -> [무시] 실패 파일을 보존하고 진행합니다.")
+                    elif not failed_files and verify_ok:
                         self.log(f" -> [병합] {len(fo)}개 파일 → {total_pages}페이지 정산서")
-                except Exception as e:
-                    self.log(f" -> [경고] 병합 결과 검증 실패: {e}")
+
+                    break  # while 루프 종료 (정상 또는 ignore)
 
                 shutil.move(output_path, os.path.join(archive_dir, final_of))
 
-                # 1. 병합에 사용된 원본 파일 직접 정리 (미분류 파일 등 확실하게 처리)
+                # 원본 파일 정리 (실패 파일은 보존)
+                failed_names = {f for f, _ in failed_files} if failed_files else set()
                 for f in fo:
                     if not f or f == final_of: continue
                     src_path = os.path.join(dr, f)
                     if not os.path.exists(src_path): continue
 
                     _, _, d, _ = parse_renamed_filename(f)
-                    # 파일명에 '신고필증'이 있으면 보존을 위해 이동, 그 외는 병합되었으므로 삭제
                     is_decl = ("신고필증" in d) if d else ("신고필증" in f)
-                    if is_decl:
+
+                    if f in failed_names or is_decl:
+                        # 실패 파일 또는 신고필증 → 폴더로 보존
                         try:
                             shutil.move(src_path, os.path.join(archive_dir, f))
+                            if f in failed_names:
+                                self.log(f" -> [보존] 병합 실패 파일: {f}")
                         except Exception:
                             pass
                     else:
@@ -768,8 +910,8 @@ class AutoRenamer:
                             os.remove(src_path)
                         except Exception:
                             pass
-                
-                # 2. 같은 ID의 남은 PDF 추가 정리 (기존 안전망)
+
+                # 같은 ID의 남은 PDF 추가 정리 (기존 안전망)
                 if target_id:
                     source_files_in_folder = [f for f in os.listdir(dr) if f.lower().endswith('.pdf')]
                     for f in source_files_in_folder:
@@ -848,30 +990,48 @@ class AutoRenamer:
                     if src_path and os.path.exists(src_path):
                         dst_path = os.path.join(archive_dir, os.path.basename(src_path))
                         if not os.path.exists(dst_path):
-                            # 재시도 로직 (PermissionError 대비)
+                            # copy + remove 분리 (부분 실패 시 롤백 가능)
+                            # shutil.move는 copy 성공 + unlink 실패 시 양쪽에 파일 남는 문제가 있음
                             move_success = False
                             for attempt in range(3):
                                 try:
-                                    shutil.move(src_path, dst_path)
-                                    self.log(f" -> [마킹 이동] {os.path.basename(src_path)}")
-                                    moved_marked.add(os.path.basename(src_path))
-                                    marked_count += 1
-                                    move_success = True
-                                    break
+                                    shutil.copy2(src_path, dst_path)  # 복사
+                                    try:
+                                        os.remove(src_path)  # 원본 삭제
+                                        self.log(f" -> [마킹 이동] {os.path.basename(src_path)}")
+                                        moved_marked.add(os.path.basename(src_path))
+                                        marked_count += 1
+                                        move_success = True
+                                        break
+                                    except PermissionError:
+                                        # 원본 삭제 실패 → 복사본 유지, 원본 수동 처리 안내
+                                        self.log(f" -> [첨부 복사] {os.path.basename(src_path)} (이동 실패 → 복사 완료, 원본 수동 처리 필요)")
+                                        moved_marked.add(os.path.basename(src_path))
+                                        marked_count += 1
+                                        move_success = True
+                                        self.last_failed_attached.append((file_name or os.path.basename(src_path), "이동 실패로 복사함. 원본 파일을 수동으로 처리해 주세요."))
+                                        break
                                 except PermissionError:
+                                    # copy 자체 실패 (읽기 권한 없음)
                                     if attempt < 2:
-                                        self.log(f" -> [마킹 재시도] {os.path.basename(src_path)} (파일 잠금, {attempt+1}/3)")
+                                        self.log(f" -> [마킹 재시도] {os.path.basename(src_path)} (복사 실패, {attempt+1}/3)")
                                         time.sleep(1.0)
                                     else:
-                                        self.log(f" -> [마킹 이동 실패] {os.path.basename(src_path)}: 파일이 사용 중 (3회 재시도 실패)")
+                                        self.log(f" -> [마킹 이동 실패] {os.path.basename(src_path)}: 파일 접근 권한 없음")
+                                        self.last_failed_attached.append((file_name or os.path.basename(src_path), "파일 접근 권한 없음"))
                                 except Exception as e:
+                                    # 기타 실패 시 dst 롤백
+                                    try: os.remove(dst_path)
+                                    except OSError: pass
                                     self.log(f" -> [마킹 이동 실패] {os.path.basename(src_path)}: {e}")
+                                    self.last_failed_attached.append((file_name or os.path.basename(src_path), str(e)))
                                     break
                         else:
                             self.log(f" -> [마킹 건너뜀] {os.path.basename(src_path)} (이미 존재)")
                             moved_marked.add(os.path.basename(src_path))
                     else:
                         self.log(f" -> [마킹 찾기 실패] {file_name} (경로: {src_path or '없음'}, 존재: {os.path.exists(src_path) if src_path else False})")
+                        self.last_failed_attached.append((file_name, "원본 파일을 찾을 수 없음"))
                 if marked_count:
                     self.log(f" -> [마킹 이동 완료] {marked_count}개 파일")
 
@@ -880,9 +1040,11 @@ class AutoRenamer:
             self._collect_related_items(dr, archive_dir, target_id, exclude_names=moved_marked)
 
             self.log(f" -> [완료] 폴더 정리 완료: {folder_name}")
+            return True
         except Exception as e:
             self.log(f"병합 실행 오류: {e}")
             print(f"병합 실행 오류: {e}")
+            return False
 
 
     def _collect_related_items(self, dr, archive_dir, target_id, exclude_names=None):

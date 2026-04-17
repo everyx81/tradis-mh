@@ -36,6 +36,8 @@ class FileManagerWidget(QWidget):
     stop_monitoring_clicked = pyqtSignal()  # 모니터링 중지 버튼 클릭
     item_deleted = pyqtSignal()  # 항목 삭제 시그널
     admin_unlocked = pyqtSignal()  # 관리자 잠금 해제 시그널
+    settings_changed = pyqtSignal()  # 설정 변경 즉시 저장 요청
+    startup_guide_requested = pyqtSignal()  # 시작 가이드 재표시 요청
     _mail_search_done = pyqtSignal(str, str, str, object, str)  # company, bl_id, file_path, threads, my_email
 
     def __init__(self, parent=None, path_callback=None, archiver=None, license_tier="standard"):
@@ -82,7 +84,7 @@ class FileManagerWidget(QWidget):
         
         # 1. MOVE TARGET (폴더 리스트)
         target_header = QHBoxLayout()
-        self.lbl_target_title = QLabel("1. MOVE TARGET")
+        self.lbl_target_title = QLabel("1. 이동 대상")
         target_header.addWidget(self.lbl_target_title)
         target_header.addStretch()
         
@@ -107,7 +109,7 @@ class FileManagerWidget(QWidget):
         
         # 2. FILES TO MOVE
         file_header = QHBoxLayout()
-        file_header.addWidget(QLabel("2. FILES TO MOVE (드래그해서 추가)"))
+        file_header.addWidget(QLabel("2. 이동할 파일 (드래그해서 추가)"))
         file_header.addStretch()
         left_layout.addLayout(file_header)
         
@@ -163,7 +165,7 @@ class FileManagerWidget(QWidget):
         self.lbl_search_icon = QLabel("🔍")
         self.lbl_search_icon.setStyleSheet("color: #00ffff; font-size: 12pt;")
         self.search_header_layout.addWidget(self.lbl_search_icon)
-        self.lbl_search_text = QLabel("TRADIS SEARCH")
+        self.lbl_search_text = QLabel("검색")
         self.lbl_search_text.setStyleSheet("color: #00ffff; font-weight: bold; font-size: 10pt;")
         self.search_header_layout.addWidget(self.lbl_search_text)
         self.search_header_layout.addStretch()
@@ -184,7 +186,7 @@ class FileManagerWidget(QWidget):
             QLineEdit:focus { border: 2px solid #00ffff; }
         """)
         search_input_module_layout.addWidget(self.search_input, stretch=1)
-        self.btn_search = NeonButton("SCAN", color="cyan")
+        self.btn_search = NeonButton("검색", color="cyan")
         self.btn_search.setFixedSize(55, 32)
         self.btn_search.clicked.connect(self._everything_search)
         search_input_module_layout.addWidget(self.btn_search)
@@ -211,19 +213,22 @@ class FileManagerWidget(QWidget):
         self.lbl_browser_icon = QLabel("📂")
         self.lbl_browser_icon.setStyleSheet("color: #00ffff; font-size: 11pt;")
         self.browser_header_layout.addWidget(self.lbl_browser_icon)
-        self.lbl_browser_text = QLabel("FOLDER TREE")
+        self.lbl_browser_text = QLabel("폴더 탐색")
         self.lbl_browser_text.setStyleSheet("color: #00ffff; font-weight: bold; font-size: 9pt;")
         self.browser_header_layout.addWidget(self.lbl_browser_text)
         self.btn_go_up = NeonButton("⬆", color="cyan")
-        self.btn_go_up.setFixedSize(30, 26)
+        self.btn_go_up.setFixedSize(36, 32)
+        self.btn_go_up.setStyleSheet(self.btn_go_up.styleSheet() + "font-size: 14pt;")
         self.btn_go_up.clicked.connect(self._browser_go_up)
         self.browser_header_layout.addWidget(self.btn_go_up)
         self.btn_go_home = NeonButton("🏠", color="cyan")
-        self.btn_go_home.setFixedSize(30, 26)
+        self.btn_go_home.setFixedSize(36, 32)
+        self.btn_go_home.setStyleSheet(self.btn_go_home.styleSheet() + "font-size: 14pt;")
         self.btn_go_home.clicked.connect(self._browser_go_home)
         self.browser_header_layout.addWidget(self.btn_go_home)
         self.btn_set_home = NeonButton("⚙", color="cyan")
-        self.btn_set_home.setFixedSize(30, 26)
+        self.btn_set_home.setFixedSize(36, 32)
+        self.btn_set_home.setStyleSheet(self.btn_set_home.styleSheet() + "font-size: 14pt;")
         self.btn_set_home.clicked.connect(self._set_browser_home)
         self.browser_header_layout.addWidget(self.btn_set_home)
         self.browser_header_layout.addStretch()
@@ -447,21 +452,21 @@ class FileManagerWidget(QWidget):
         t4_layout.setSpacing(15)
         t4_layout.addWidget(QLabel("폴더 정리 경로 설정"))
         
-        self.btn_set_imp = NeonButton("SET IMPORT ROOT")
+        self.btn_set_imp = NeonButton("수입 서버 경로 설정")
         self.btn_set_imp.clicked.connect(lambda: self.set_root('import'))
         self.lbl_imp_root = QLabel("Not Set")
         self.lbl_imp_root.setStyleSheet("color: #555; font-size: 8pt;")
         t4_layout.addWidget(self.btn_set_imp)
         t4_layout.addWidget(self.lbl_imp_root)
         
-        self.btn_set_exp = NeonButton("SET EXPORT ROOT")
+        self.btn_set_exp = NeonButton("수출 서버 경로 설정")
         self.btn_set_exp.clicked.connect(lambda: self.set_root('export'))
         self.lbl_exp_root = QLabel("Not Set")
         self.lbl_exp_root.setStyleSheet("color: #555; font-size: 8pt;")
         t4_layout.addWidget(self.btn_set_exp)
         t4_layout.addWidget(self.lbl_exp_root)
         
-        self.btn_set_exp_docs = NeonButton("SET EXPORT DOCS SOURCE")
+        self.btn_set_exp_docs = NeonButton("선적서류 경로 설정")
         self.btn_set_exp_docs.clicked.connect(lambda: self.set_root('export_docs'))
         self.lbl_exp_docs_root = QLabel("Not Set")
         self.lbl_exp_docs_root.setStyleSheet("color: #555; font-size: 8pt;")
@@ -470,14 +475,27 @@ class FileManagerWidget(QWidget):
         
         # === 매뉴얼 섹션 ===
         t4_layout.addSpacing(10)
-        self.btn_show_manual = NeonButton("📘 사용자 매뉴얼 보기", color="cyan")
+        manual_row = QHBoxLayout()
+        self.btn_show_manual = NeonButton("📘 사용자 매뉴얼", color="cyan")
         self.btn_show_manual.setFixedHeight(40)
         self.btn_show_manual.clicked.connect(self._show_manual_dialog)
-        t4_layout.addWidget(self.btn_show_manual)
+        manual_row.addWidget(self.btn_show_manual)
+        self.btn_show_guide = NeonButton("📖 시작 가이드", color="cyan")
+        self.btn_show_guide.setFixedHeight(40)
+        self.btn_show_guide.clicked.connect(self._request_startup_guide)
+        manual_row.addWidget(self.btn_show_guide)
+        t4_layout.addLayout(manual_row)
+
+        # === 커스텀 네이밍 설정 (다이얼로그 방식) ===
+        t4_layout.addSpacing(10)
+        btn_naming_settings = NeonButton("파일 이름 설정", color="cyan")
+        btn_naming_settings.setFixedHeight(40)
+        btn_naming_settings.clicked.connect(self._show_naming_dialog)
+        t4_layout.addWidget(btn_naming_settings)
 
         # === 한비로 메일 설정 섹션 ===
         t4_layout.addSpacing(20)
-        lbl_mail_header = QLabel("HANBIRO MAIL SETTING")
+        lbl_mail_header = QLabel("한비로 메일 설정")
         lbl_mail_header.setStyleSheet("color: #00ffff; font-weight: bold;")
         t4_layout.addWidget(lbl_mail_header)
         
@@ -521,11 +539,11 @@ class FileManagerWidget(QWidget):
         
         # 저장 및 테스트 버튼
         mail_btn_row = QHBoxLayout()
-        self.btn_save_mail = NeonButton("SAVE", color="cyan")
+        self.btn_save_mail = NeonButton("저장", color="cyan")
         self.btn_save_mail.clicked.connect(self._save_hanbiro_settings)
         mail_btn_row.addWidget(self.btn_save_mail)
         
-        self.btn_test_mail = NeonButton("TEST CONNECTION", color="cyan")
+        self.btn_test_mail = NeonButton("연결 테스트", color="cyan")
         self.btn_test_mail.clicked.connect(self._test_hanbiro_connection)
         mail_btn_row.addWidget(self.btn_test_mail)
         t4_layout.addLayout(mail_btn_row)
@@ -537,7 +555,7 @@ class FileManagerWidget(QWidget):
         
         # === 관리자 잠금 해제 섹션 ===
         t4_layout.addSpacing(20)
-        lbl_admin_header = QLabel("ADMIN UNLOCK")
+        lbl_admin_header = QLabel("관리자 잠금 해제")
         lbl_admin_header.setStyleSheet("color: #ff88ff; font-weight: bold;")
         t4_layout.addWidget(lbl_admin_header)
 
@@ -556,7 +574,7 @@ class FileManagerWidget(QWidget):
         """)
         admin_row.addWidget(self.input_admin_pw)
 
-        self.btn_admin_unlock = NeonButton("UNLOCK", color="magenta")
+        self.btn_admin_unlock = NeonButton("해제", color="magenta")
         self.btn_admin_unlock.clicked.connect(self._on_admin_unlock)
         admin_row.addWidget(self.btn_admin_unlock)
         t4_layout.addLayout(admin_row)
@@ -621,9 +639,9 @@ class FileManagerWidget(QWidget):
 
     def _animate_search_panel(self, show):
         anim_targets = [
-            (self.lbl_search_text, 200, 'typing', "TRADIS SEARCH"),
+            (self.lbl_search_text, 200, 'typing', "검색"),
             (self.lbl_search_icon, 700, 'fade', None),
-            (self.lbl_browser_text, 1000, 'typing', "FOLDER TREE"),
+            (self.lbl_browser_text, 1000, 'typing', "폴더 탐색"),
             (self.lbl_browser_icon, 1500, 'fade', None),
             (self.btn_go_up, 1650, 'fade', None),
             (self.search_input_module, 1800, 'fade', None),
@@ -787,10 +805,10 @@ class FileManagerWidget(QWidget):
                 self.emit_log(f"[상태] 폴더 '{current}'가 삭제되어 파일 목록 초기화")
                     
             if self.target_subfolders:
-                self.lbl_target_title.setText(f"1. MOVE TARGET ({len(self.target_subfolders)} Found)")
+                self.lbl_target_title.setText(f"1. 이동 대상 ({len(self.target_subfolders)}건)")
             else:
                 self.list_target.addItem(QListWidgetItem("(No Folders)"))
-                self.lbl_target_title.setText("1. MOVE TARGET (0)")
+                self.lbl_target_title.setText("1. 이동 대상 (0)")
                 # 폴더가 없으면 FILES TO MOVE도 초기화
                 self.list_widget.clear()
                 self.current_target_folder = None
@@ -799,9 +817,9 @@ class FileManagerWidget(QWidget):
         except Exception as e:
             print(f"Error in refresh_targets: {e}")
             if hasattr(self, 'target_subfolders'):
-                self.lbl_target_title.setText(f"1. MOVE TARGET ({len(self.target_subfolders)} Found)")
+                self.lbl_target_title.setText(f"1. 이동 대상 ({len(self.target_subfolders)}건)")
             else:
-                self.lbl_target_title.setText("1. MOVE TARGET (0)")
+                self.lbl_target_title.setText("1. 이동 대상 (0)")
 
     def _on_target_folder_clicked(self, item):
         folder_name = item.data(Qt.ItemDataRole.UserRole)
@@ -1013,7 +1031,7 @@ class FileManagerWidget(QWidget):
         current_path = getattr(self.file_browser, 'current_path', None)
         if current_path and os.path.isdir(current_path):
             self.browser_home_path = current_path
-            # 설정은 JarvisGUI.save_settings()에서 통합 저장됨
+            self.settings_changed.emit()
             self.emit_log(f"[탐색기] 홈 폴더 설정: {current_path}")
             JarvisMessageBox.information(self, "홈 폴더 설정", f"홈 폴더가 설정되었습니다:\n{current_path}")
         else:
@@ -1137,17 +1155,34 @@ class FileManagerWidget(QWidget):
             needed_companies.add(folder_name.split('_')[0].replace("★", "").strip().upper())
         dir_cache = self._get_dir_cache(root, needed_companies)
 
-        # 중복 사전 검사
+        # 유사 매칭을 위한 전체 폴더명 캐시 (1depth만, 빠름)
+        full_cache = None
+        def _get_full_cache():
+            nonlocal full_cache
+            if full_cache is None:
+                full_cache = self._build_full_cache(root)
+            return full_cache
+
+        # 중복/유사 사전 검사
         new_folders = []
-        dup_folders = []  # (src_path, folder_name, existing_full_path)
+        dup_folders = []        # (src_path, folder_name, existing_full_path)
+        similar_folders = []    # (src_path, folder_name, similar_company_path, similar_company_name)
         for src_path, folder_name in valid_folders:
             parts = folder_name.split('_')
             comp = parts[0]
             fid = "_".join(parts[1:])
-            existing_rel = self._find_id_in_company_dir(root, comp, fid, _cache=dir_cache)
+            existing_rel, is_similar = self._find_id_in_company_dir(root, comp, fid, _cache=dir_cache)
+            if existing_rel is None:
+                # 정확/유사 매칭 모두 실패 → 전체 캐시에서 유사 검색
+                existing_rel, is_similar = self._find_id_in_company_dir(root, comp, fid, _cache=_get_full_cache())
             if existing_rel:
                 existing_full = os.path.join(root, existing_rel)
-                dup_folders.append((src_path, folder_name, existing_full))
+                if is_similar:
+                    # 유사 회사 폴더에 같은 BL 존재 → 사용자 확인 필요
+                    similar_company_name = os.path.basename(os.path.dirname(existing_full))
+                    similar_folders.append((src_path, folder_name, existing_full, similar_company_name))
+                else:
+                    dup_folders.append((src_path, folder_name, existing_full))
             else:
                 new_folders.append((src_path, folder_name))
 
@@ -1159,6 +1194,58 @@ class FileManagerWidget(QWidget):
             # result: "merge" = 병합, "new" = 새 폴더, None = 취소
             if dup_action is None:
                 return
+
+        # 유사 회사 폴더가 감지되면 사용자에게 확인 (같은 BL이 유사 폴더에 존재)
+        similar_approved = []   # 승인된 유사 매칭 (기존 폴더로 병합)
+        similar_new = []        # 거부된 유사 매칭 (새 폴더 생성)
+        if similar_folders:
+            already_decided = {}  # 같은 회사명 조합 중복 팝업 방지
+            for src_path, folder_name, existing_full, similar_name in similar_folders:
+                comp = folder_name.split('_')[0]
+                decision_key = f"{comp}|{similar_name}"
+                if decision_key in already_decided:
+                    result = already_decided[decision_key]
+                else:
+                    result = self._show_similar_company_dialog(comp, similar_name)
+                    already_decided[decision_key] = result
+                if result == "existing":
+                    similar_approved.append((src_path, folder_name, existing_full))
+                elif result == "new":
+                    similar_new.append((src_path, folder_name))
+                # result == None (취소) → 이동하지 않음
+
+        # new_folders의 회사 폴더 매칭 미리 결정 (메인 스레드에서 팝업 처리)
+        new_folder_dst = {}  # folder_name → dst_parent
+        new_folder_decided = {}  # 같은 회사명 중복 팝업 방지
+        remaining_new = []
+        for src_path, folder_name in new_folders:
+            comp = folder_name.split('_')[0]
+            fid = "_".join(folder_name.split('_')[1:])
+
+            existing_company_folder, is_sim = self._find_company_folder(root, comp, _cache=dir_cache)
+            if existing_company_folder is None:
+                existing_company_folder, is_sim = self._find_company_folder(root, comp, _cache=_get_full_cache())
+
+            if existing_company_folder and not is_sim:
+                new_folder_dst[folder_name] = existing_company_folder
+                remaining_new.append((src_path, folder_name))
+            elif existing_company_folder and is_sim:
+                similar_name = os.path.basename(existing_company_folder)
+                decision_key = f"{comp}|{similar_name}"
+                if decision_key in new_folder_decided:
+                    result = new_folder_decided[decision_key]
+                else:
+                    result = self._show_similar_company_dialog(comp, similar_name)
+                    new_folder_decided[decision_key] = result
+                if result == "existing":
+                    new_folder_dst[folder_name] = existing_company_folder
+                    remaining_new.append((src_path, folder_name))
+                elif result == "new":
+                    remaining_new.append((src_path, folder_name))
+                # result == None → 이동하지 않음
+            else:
+                remaining_new.append((src_path, folder_name))
+        new_folders = remaining_new
 
         def run_move():
             count = 0
@@ -1172,9 +1259,9 @@ class FileManagerWidget(QWidget):
                 comp = parts[0]
                 fid = "_".join(parts[1:])
 
-                existing_company_folder = self._find_company_folder(root, comp, _cache=dir_cache)
-                if existing_company_folder: dst_parent = existing_company_folder
-                else:
+                # dst_parent는 이동 전 단계에서 미리 결정됨 (new_folders_with_dst)
+                dst_parent = new_folder_dst.get(folder_name)
+                if not dst_parent:
                     dst_parent = os.path.join(root, comp)
                     os.makedirs(dst_parent, exist_ok=True)
 
@@ -1184,7 +1271,49 @@ class FileManagerWidget(QWidget):
                     count += 1
                     moved_dst_paths.append(dst)
                     self._update_index_after_move(root, comp.replace("★", "").strip().upper(), fid, dst_parent)
-                    self.emit_log(f" -> [이동 성공] {folder_name} -> {comp}/{fid}")
+                    self.emit_log(f" -> [이동 성공] {folder_name} -> {os.path.basename(dst_parent)}/{fid}")
+                except Exception as e: self.emit_log(f" -> [이동 실패] {folder_name}: {e}")
+
+            # 유사 회사 승인 폴더 이동 (기존 폴더에 병합)
+            for src_path, folder_name, existing_full in similar_approved:
+                parts = folder_name.split('_')
+                comp = parts[0]
+                fid = "_".join(parts[1:])
+                try:
+                    merged = 0
+                    for item in os.listdir(src_path):
+                        src_item = os.path.join(src_path, item)
+                        dst_item = os.path.join(existing_full, item)
+                        if os.path.isfile(src_item):
+                            shutil.copy2(src_item, dst_item)
+                            merged += 1
+                        elif os.path.isdir(src_item):
+                            if os.path.exists(dst_item):
+                                shutil.copytree(src_item, dst_item, dirs_exist_ok=True)
+                            else:
+                                shutil.copytree(src_item, dst_item)
+                            merged += 1
+                    shutil.rmtree(src_path)
+                    count += 1
+                    moved_dst_paths.append(existing_full)
+                    self.emit_log(f" -> [유사 병합] {folder_name} -> {os.path.basename(os.path.dirname(existing_full))}/{fid} ({merged}개 파일)")
+                except Exception as e:
+                    self.emit_log(f" -> [유사 병합 실패] {folder_name}: {e}")
+
+            # 유사 회사 거부 폴더 이동 (새 폴더 생성)
+            for src_path, folder_name in similar_new:
+                parts = folder_name.split('_')
+                comp = parts[0]
+                fid = "_".join(parts[1:])
+                dst_parent = os.path.join(root, comp)
+                os.makedirs(dst_parent, exist_ok=True)
+                dst = os.path.join(dst_parent, fid)
+                try:
+                    shutil.move(src_path, dst)
+                    count += 1
+                    moved_dst_paths.append(dst)
+                    self._update_index_after_move(root, comp.replace("★", "").strip().upper(), fid, dst_parent)
+                    self.emit_log(f" -> [새 폴더] {folder_name} -> {comp}/{fid}")
                 except Exception as e: self.emit_log(f" -> [이동 실패] {folder_name}: {e}")
 
             # 중복 폴더 처리
@@ -1263,6 +1392,29 @@ class FileManagerWidget(QWidget):
 
         if dlg.result_value == "merge":
             return "merge"
+        elif dlg.result_value == "new":
+            return "new"
+        else:
+            return None
+
+    def _show_similar_company_dialog(self, current_name, similar_name):
+        """유사 회사 폴더 감지 시 사용자 확인 다이얼로그
+
+        Returns:
+            "existing": 기존 폴더에 이동, "new": 새 폴더 생성, None: 취소
+        """
+        msg = (f"'{current_name}'과 유사한 폴더가 있습니다.\n\n"
+               f"  기존 폴더: {similar_name}\n\n"
+               f"기존 폴더에 이동할까요?")
+
+        dlg = JarvisMessageBox(self, "유사 폴더 감지", msg, JarvisMessageBox.Question)
+        dlg.add_button("취소", "reject", "gray")
+        dlg.add_button("새 폴더", "new", "gray")
+        dlg.add_button("기존 폴더", "existing", "cyan")
+        dlg.exec()
+
+        if dlg.result_value == "existing":
+            return "existing"
         elif dlg.result_value == "new":
             return "new"
         else:
@@ -1380,9 +1532,10 @@ class FileManagerWidget(QWidget):
         return self._build_full_cache(root)
 
     def _build_targeted_cache(self, root, needed_companies):
-        """필요한 회사만 타겟 스캔 (인덱스 미준비 시 폴백)"""
+        """필요한 회사만 타겟 스캔 (인덱스 미준비 시 폴백). needed_companies=None이면 전체 스캔."""
         company_map = {}
-        remaining = set(needed_companies)
+        scan_all = needed_companies is None
+        remaining = set() if scan_all else set(needed_companies)
         try:
             root_items = []
             with os.scandir(root) as entries:
@@ -1390,23 +1543,23 @@ class FileManagerWidget(QWidget):
                     if not entry.is_dir(follow_symlinks=False): continue
                     clean = entry.name.replace("★", "").strip().upper()
                     root_items.append((clean, entry.path))
-                    if clean in remaining:
+                    if scan_all or clean in remaining:
                         try:
                             children = {e.name for e in os.scandir(entry.path)}
                         except (PermissionError, OSError):
                             children = set()
                         company_map[clean] = (entry.path, children)
                         remaining.discard(clean)
-            if remaining:
+            if scan_all or remaining:
                 for _, folder_path in root_items:
-                    if not remaining: break
+                    if not scan_all and not remaining: break
                     try:
                         with os.scandir(folder_path) as sub_entries:
                             for sub_entry in sub_entries:
-                                if not remaining: break
+                                if not scan_all and not remaining: break
                                 if not sub_entry.is_dir(follow_symlinks=False): continue
                                 clean_sub = sub_entry.name.replace("★", "").strip().upper()
-                                if clean_sub in remaining:
+                                if scan_all or clean_sub in remaining:
                                     try:
                                         sub_children = {e.name for e in os.scandir(sub_entry.path)}
                                     except (PermissionError, OSError):
@@ -1420,8 +1573,29 @@ class FileManagerWidget(QWidget):
         return company_map
 
     def _build_full_cache(self, root):
-        """전체 스캔 (폴백용)"""
-        return self._build_targeted_cache(root, None)
+        """전체 스캔 (폴백용) — 경량: 폴더명만 수집, children은 필요 시 지연 로드"""
+        company_map = {}
+        try:
+            # 1depth: 회사 폴더
+            with os.scandir(root) as entries:
+                for entry in entries:
+                    if not entry.is_dir(follow_symlinks=False): continue
+                    clean = entry.name.replace("★", "").strip().upper()
+                    company_map[clean] = (entry.path, None)  # children은 None (지연 로드)
+            # 2depth: 하위 회사 폴더
+            for clean_key, (folder_path, _) in list(company_map.items()):
+                try:
+                    with os.scandir(folder_path) as sub_entries:
+                        for sub_entry in sub_entries:
+                            if not sub_entry.is_dir(follow_symlinks=False): continue
+                            clean_sub = sub_entry.name.replace("★", "").strip().upper()
+                            if clean_sub not in company_map:
+                                company_map[clean_sub] = (sub_entry.path, None)
+                except (PermissionError, OSError):
+                    continue
+        except (OSError, AttributeError):
+            pass
+        return company_map
 
     def _update_index_after_move(self, root, company_clean, fid, dst_parent):
         """이동 후 인덱스 부분 업데이트 (전체 재스캔 불필요)"""
@@ -1435,23 +1609,344 @@ class FileManagerWidget(QWidget):
             else:
                 idx[company_clean] = (dst_parent, {fid})
 
-    def _find_id_in_company_dir(self, root, company, target_id, _cache=None):
-        cache = _cache or self._get_dir_cache(root)
-        clean_company = company.replace("★", "").strip().upper()
-        entry = cache.get(clean_company)
-        if entry:
-            folder_path, children = entry
-            if target_id in children:
-                return os.path.relpath(os.path.join(folder_path, target_id), root)
+    # ─── 선적서류 자동 검색 ───
+
+    @staticmethod
+    def _bl_match_in_text(bl_upper, text):
+        """텍스트에서 BL번호 매칭 (정확 매칭 + 괄호 내 유사 매칭)"""
+        import re
+        from core.utils import is_similar_id
+        text_upper = text.upper()
+        # 1차: 정확 포함 매칭
+        if bl_upper in text_upper:
+            return True
+        # 2차: 괄호 안의 ID를 추출하여 유사 매칭
+        paren_ids = re.findall(r'\(([A-Za-z0-9]+)\)', text)
+        for pid in paren_ids:
+            if is_similar_id(bl_upper, pid.upper()):
+                return True
+        return False
+
+    def scan_shipping_docs_for_bl(self, bl_number):
+        """선적서류폴더에서 BL번호가 포함된 폴더/파일 검색 (실시간 스캔)
+
+        Returns: [(이동대상폴더경로, 매칭유형'folder'|'file')] 또는 빈 리스트
+        """
+        shipping_root = getattr(self.archiver, 'export_docs_root', '')
+        if not shipping_root or not os.path.exists(shipping_root):
+            return []
+
+        # 정규화된 shipping_root (자기 자신 매칭 방지용)
+        shipping_root_norm = os.path.normpath(shipping_root)
+
+        # 감시폴더(target directory)를 스캔에서 제외
+        exclude_path = self.path_callback() if self.path_callback else ""
+        if exclude_path:
+            exclude_path = os.path.normpath(exclude_path)
+
+        bl_upper = bl_number.upper()
+        results = []
+        seen_folders = set()
+        max_depth = 4  # depth 3까지 포함 (0-indexed)
+
+        for root_dir, dirs, files in os.walk(shipping_root):
+            root_norm = os.path.normpath(root_dir)
+
+            # 감시폴더 및 하위 폴더 제외
+            if exclude_path and root_norm.lower().startswith(exclude_path.lower()):
+                dirs.clear()
+                continue
+
+            depth = root_dir.replace(shipping_root, '').count(os.sep)
+            if depth >= max_depth:
+                dirs.clear()
+                continue
+
+            # [안전장치] shipping_root 자체는 절대 이동 대상이 될 수 없음
+            # (root에 있는 파일이 BL과 매칭되어도 root 자체를 이동하면 안 됨)
+            if root_norm.lower() == shipping_root_norm.lower():
+                continue
+
+            # 폴더명에 BL 포함 (정확 매칭 + 유사 매칭)
+            folder_name = os.path.basename(root_dir)
+            if root_dir not in seen_folders and self._bl_match_in_text(bl_upper, folder_name):
+                results.append((root_dir, 'folder'))
+                seen_folders.add(root_dir)
+                continue
+
+            # 파일명에 BL 포함 → 부모 폴더를 이동 대상으로
+            for f in files:
+                if root_dir not in seen_folders and self._bl_match_in_text(bl_upper, f):
+                    results.append((root_dir, 'file'))
+                    seen_folders.add(root_dir)
+                    break
+
+        results = [(p, t) for p, t in results if os.path.exists(p)]
+        return results
+
+    def _show_shipping_docs_dialog(self, bl_number, matches, target_folder):
+        """선적서류 발견 팝업 (JarvisMessageBox Frosted Glass 스타일)
+
+        Returns:
+            (action, selected_matches) — action: "folder"|"extract"|None, selected: 선택된 매칭 리스트
+        """
+        from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QCheckBox,
+                                     QLabel, QWidget, QGraphicsDropShadowEffect)
+        from PyQt6.QtGui import QFont
+
+        dlg = QDialog(self)
+        dlg.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        dlg.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        dlg.setMinimumWidth(480)
+
+        # Frosted Glass 컨테이너
+        container = QWidget(dlg)
+        container.setObjectName("shipping_dlg")
+        container.setStyleSheet("""
+            #shipping_dlg {
+                background-color: rgba(45, 50, 60, 230);
+                border: 1px solid rgba(100, 110, 120, 0.5);
+                border-radius: 20px;
+            }
+        """)
+
+        shadow = QGraphicsDropShadowEffect(dlg)
+        shadow.setBlurRadius(30)
+        shadow.setXOffset(0)
+        shadow.setYOffset(5)
+        shadow.setColor(Qt.GlobalColor.black)
+        container.setGraphicsEffect(shadow)
+
+        outer = QVBoxLayout(dlg)
+        outer.setContentsMargins(10, 10, 10, 10)
+        outer.addWidget(container)
+
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(24, 28, 24, 20)
+        layout.setSpacing(12)
+
+        # 타이틀
+        title = QLabel("선적서류 발견")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setFont(QFont("Segoe UI", 14, QFont.Weight.Bold))
+        title.setStyleSheet("color: #ffffff; background: transparent;")
+        layout.addWidget(title)
+
+        subtitle = QLabel(f"{bl_number} 관련 ({len(matches)}건)")
+        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        subtitle.setFont(QFont("Segoe UI", 10))
+        subtitle.setStyleSheet("color: rgba(255, 255, 255, 0.7); background: transparent;")
+        layout.addWidget(subtitle)
+
+        layout.addSpacing(6)
+
+        # 체크박스 목록
+        checkboxes = []
+        for path, match_type in matches:
+            folder_name = os.path.basename(path)
+            cb = QCheckBox(f"  {folder_name}")
+            cb.setChecked(True)
+            cb.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+            cb.setStyleSheet("QCheckBox { color: #ffffff; background: transparent; spacing: 8px; }"
+                             "QCheckBox::indicator { width: 16px; height: 16px; }")
+            layout.addWidget(cb)
+
+            path_label = QLabel(f"     {path}")
+            path_label.setFont(QFont("Segoe UI", 8))
+            path_label.setStyleSheet("color: rgba(255, 255, 255, 0.4); background: transparent;")
+            path_label.setWordWrap(True)
+            layout.addWidget(path_label)
+
+            checkboxes.append((cb, path, match_type))
+
+        layout.addSpacing(10)
+
+        # 버튼
+        result = {"action": None}
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(10)
+
+        def make_btn(text, value, is_primary=False):
+            from PyQt6.QtWidgets import QPushButton
+            btn = QPushButton(text)
+            btn.setFixedHeight(42)
+            btn.setMinimumWidth(100)
+            btn.setFont(QFont("Segoe UI", 10, QFont.Weight.Medium))
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            if is_primary:
+                btn.setStyleSheet("""
+                    QPushButton {
+                        background-color: rgba(30, 35, 45, 200);
+                        border: 2px solid #00d4ff; border-radius: 12px;
+                        color: #00d4ff; padding: 8px 20px;
+                    }
+                    QPushButton:hover { background-color: rgba(0, 212, 255, 40); border-color: #00ffff; color: #00ffff; }
+                    QPushButton:pressed { background-color: rgba(0, 212, 255, 80); }
+                """)
+            else:
+                btn.setStyleSheet("""
+                    QPushButton {
+                        background-color: rgba(100, 105, 115, 180);
+                        border: 1px solid rgba(150, 155, 165, 0.5); border-radius: 12px;
+                        color: #ffffff; padding: 8px 20px;
+                    }
+                    QPushButton:hover { background-color: rgba(120, 125, 135, 200); }
+                    QPushButton:pressed { background-color: rgba(80, 85, 95, 200); }
+                """)
+            btn.clicked.connect(lambda: (result.update({"action": value}), dlg.accept()) if value else dlg.reject())
+            return btn
+
+        btn_row.addWidget(make_btn("취소", None))
+        btn_row.addWidget(make_btn("파일만 꺼내기", "extract"))
+        btn_row.addWidget(make_btn("폴더째로", "folder", is_primary=True))
+        layout.addLayout(btn_row)
+
+        dlg.exec()
+
+        action = result["action"]
+        if action:
+            selected = [(p, t) for cb, p, t in checkboxes if cb.isChecked()]
+            return action, selected
+        return None, []
+
+    def move_shipping_docs(self, matches, target_folder, mode="folder"):
+        """선적서류를 감시폴더의 BL 폴더로 이동
+
+        Returns: 실패한 항목 리스트 [(이름, 사유)]
+        """
+        # [안전장치] 선적서류 루트 자체는 이동 금지 (중요 루트 보호)
+        shipping_root = getattr(self.archiver, 'export_docs_root', '')
+        shipping_root_norm = os.path.normpath(shipping_root).lower() if shipping_root else ""
+        target_norm = os.path.normpath(target_folder).lower()
+
+        failed = []  # [(name, reason)]
+        safe_matches = []
+        for src_path, match_type in matches:
+            src_norm = os.path.normpath(src_path).lower()
+            if shipping_root_norm and src_norm == shipping_root_norm:
+                self.emit_log(f" -> [선적서류 이동 차단] 루트 폴더 이동 시도 감지: {src_path}")
+                failed.append((os.path.basename(src_path), "루트 폴더 이동 차단"))
+                continue
+            if src_norm == target_norm:
+                self.emit_log(f" -> [선적서류 이동 차단] 대상 폴더와 동일: {src_path}")
+                failed.append((os.path.basename(src_path), "대상 폴더와 동일"))
+                continue
+            # 대상 폴더의 상위로 이동 시도 방지
+            if target_norm.startswith(src_norm + os.sep):
+                self.emit_log(f" -> [선적서류 이동 차단] 대상의 상위 폴더 이동 시도: {src_path}")
+                failed.append((os.path.basename(src_path), "대상 상위 폴더 이동 차단"))
+                continue
+            safe_matches.append((src_path, match_type))
+
+        for src_path, match_type in safe_matches:
+            try:
+                if mode == "extract":
+                    # 파일만 꺼내기 (기존 extract_files 로직 재사용)
+                    for item in os.listdir(src_path):
+                        item_path = os.path.join(src_path, item)
+                        dest = os.path.join(target_folder, item)
+                        if os.path.exists(dest):
+                            dest = get_unique_filename(dest)
+                        shutil.move(item_path, dest)
+                    # 빈 폴더 삭제
+                    try:
+                        os.rmdir(src_path)
+                        self.emit_log(f" -> [선적서류] 파일 꺼내기 완료 + 빈 폴더 삭제: {os.path.basename(src_path)}")
+                    except OSError:
+                        # 폴더가 비어있지 않으면 삭제하지 않음
+                        self.emit_log(f" -> [선적서류] 파일 꺼내기 완료: {os.path.basename(src_path)} (하위 폴더 남음)")
+                else:
+                    # 폴더째로 이동
+                    folder_name = os.path.basename(src_path)
+                    dest = os.path.join(target_folder, folder_name)
+                    if os.path.exists(dest):
+                        dest = get_unique_filename(dest)
+                    shutil.move(src_path, dest)
+                    self.emit_log(f" -> [선적서류] 폴더 이동 완료: {folder_name}")
+            except Exception as e:
+                # 이동 실패 → 복사로 전환
+                try:
+                    if mode == "extract":
+                        for item in os.listdir(src_path):
+                            item_path = os.path.join(src_path, item)
+                            dest = os.path.join(target_folder, item)
+                            if os.path.exists(dest):
+                                dest = get_unique_filename(dest)
+                            shutil.copy2(item_path, dest)
+                    else:
+                        folder_name = os.path.basename(src_path)
+                        dest = os.path.join(target_folder, folder_name)
+                        if os.path.exists(dest):
+                            dest = get_unique_filename(dest)
+                        shutil.copytree(src_path, dest)
+                    self.emit_log(f" -> [선적서류] 이동 실패 → 복사 완료: {os.path.basename(src_path)} (원본 수동 처리 필요)")
+                    failed.append((os.path.basename(src_path), "이동 실패로 복사함. 원본 파일을 수동으로 처리해 주세요."))
+                except Exception as copy_err:
+                    self.emit_log(f" -> [선적서류 이동/복사 실패] {os.path.basename(src_path)}: {copy_err}")
+                    failed.append((os.path.basename(src_path), f"이동/복사 모두 실패: {copy_err}"))
+
+        return failed
+
+    def _find_similar_company_key(self, cache, clean_company, threshold=0.80):
+        """캐시에서 유사 회사명 검색 (자모 분해 기반, OCR 오인식 대응)"""
+        from core.utils import company_name_similarity
+        best_key, best_ratio = None, 0.0
+        for key in cache:
+            ratio = company_name_similarity(clean_company, key)
+            if ratio > best_ratio:
+                best_ratio = ratio
+                best_key = key
+        if best_ratio >= threshold:
+            return best_key
         return None
 
-    def _find_company_folder(self, root, company, _cache=None):
+    def _lazy_load_children(self, cache, key):
+        """캐시 항목의 children이 None이면 지연 로드"""
+        entry = cache.get(key)
+        if entry:
+            folder_path, children = entry
+            if children is None:
+                try:
+                    children = {e.name for e in os.scandir(folder_path)}
+                except (PermissionError, OSError):
+                    children = set()
+                cache[key] = (folder_path, children)
+            return folder_path, children
+        return None, set()
+
+    def _find_id_in_company_dir(self, root, company, target_id, _cache=None):
+        """BL 중복 검사. 반환: (rel_path, is_similar) 또는 (None, False)"""
         cache = _cache or self._get_dir_cache(root)
         clean_company = company.replace("★", "").strip().upper()
+        # 1차: 정확 매칭
         entry = cache.get(clean_company)
         if entry:
-            return entry[0]
-        return None
+            folder_path, children = self._lazy_load_children(cache, clean_company)
+            if target_id in children:
+                return os.path.relpath(os.path.join(folder_path, target_id), root), False
+        # 2차: 유사 회사명에서 같은 BL 검색
+        similar_key = self._find_similar_company_key(cache, clean_company)
+        if similar_key and similar_key != clean_company:
+            folder_path, children = self._lazy_load_children(cache, similar_key)
+            if target_id in children:
+                return os.path.relpath(os.path.join(folder_path, target_id), root), True
+        return None, False
+
+    def _find_company_folder(self, root, company, _cache=None):
+        """회사 폴더 검색. 반환: (folder_path, is_similar) 또는 (None, False)"""
+        cache = _cache or self._get_dir_cache(root)
+        clean_company = company.replace("★", "").strip().upper()
+        # 1차: 정확 매칭
+        entry = cache.get(clean_company)
+        if entry:
+            return entry[0], False
+        # 2차: 유사 회사명 매칭
+        similar_key = self._find_similar_company_key(cache, clean_company)
+        if similar_key:
+            entry = cache.get(similar_key)
+            if entry:
+                return entry[0], True
+        return None, False
 
     def _on_move_complete(self, count, duplicates, selected_folders, base_path):
         self.emit_log(f"[상태] 이동 완료 (성공: {count}). UI를 갱신합니다.")
@@ -1483,6 +1978,7 @@ class FileManagerWidget(QWidget):
                 self.archiver.export_docs_root = d
                 self.lbl_exp_docs_root.setText(d)
                 self.lbl_exp_docs_root.setStyleSheet("color: #00aaaa; font-size: 8pt;")
+            self.settings_changed.emit()
 
     def emit_log(self, msg):
         if self.archiver and hasattr(self.archiver, 'log_callback') and self.archiver.log_callback:
@@ -1955,6 +2451,303 @@ class FileManagerWidget(QWidget):
             self.emit_log(f"[오류] 폴더 삭제 실패: {e}")
             JarvisMessageBox.critical(self, "삭제 실패", f"폴더 삭제 중 오류 발생:\n{str(e)}")
 
+    def _request_startup_guide(self):
+        """시작 가이드 재표시 요청"""
+        self.startup_guide_requested.emit()
+
+    def _show_naming_dialog(self):
+        """파일 네이밍 설정 다이얼로그 (Frosted Glass 스타일)"""
+        from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLineEdit,
+                                     QLabel, QWidget, QGraphicsDropShadowEffect, QListWidget)
+        from PyQt6.QtGui import QFont
+        from core.config import get_custom_naming, DEFAULT_FILE_PATTERN, DEFAULT_MERGE_PATTERN
+
+        naming = get_custom_naming()
+
+        dlg = QDialog(self)
+        dlg.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        dlg.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        dlg.setMinimumWidth(520)
+
+        container = QWidget(dlg)
+        container.setObjectName("naming_dlg")
+        container.setStyleSheet("""
+            #naming_dlg {
+                background-color: rgba(45, 50, 60, 230);
+                border: 1px solid rgba(100, 110, 120, 0.5);
+                border-radius: 20px;
+            }
+        """)
+        shadow = QGraphicsDropShadowEffect(dlg)
+        shadow.setBlurRadius(30)
+        shadow.setXOffset(0)
+        shadow.setYOffset(5)
+        shadow.setColor(Qt.GlobalColor.black)
+        container.setGraphicsEffect(shadow)
+
+        outer = QVBoxLayout(dlg)
+        outer.setContentsMargins(10, 10, 10, 10)
+        outer.addWidget(container)
+
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(24, 28, 24, 20)
+        layout.setSpacing(10)
+
+        _input_style = "background: rgba(20,25,35,200); color: #fff; border: 1px solid #555; padding: 6px; border-radius: 6px; font-size: 10pt;"
+        _label_style = "color: rgba(255,255,255,0.6); background: transparent; font-size: 8pt;"
+
+        # 타이틀
+        title = QLabel("파일 이름 설정")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setFont(QFont("Segoe UI", 14, QFont.Weight.Bold))
+        title.setStyleSheet("color: #ffffff; background: transparent;")
+        layout.addWidget(title)
+
+        # 파일 이름 패턴
+        lbl1 = QLabel("파일 이름 패턴")
+        lbl1.setStyleSheet("color: #00cccc; background: transparent; font-weight: bold;")
+        layout.addWidget(lbl1)
+        row1 = QHBoxLayout()
+        input_file = QLineEdit(naming["file_pattern"])
+        input_file.setStyleSheet(_input_style)
+        row1.addWidget(input_file)
+        btn_r1 = NeonButton("초기화", color="gray")
+        btn_r1.setFixedSize(50, 30)
+        btn_r1.clicked.connect(lambda: input_file.setText(DEFAULT_FILE_PATTERN))
+        row1.addWidget(btn_r1)
+        layout.addLayout(row1)
+
+        # 병합 결과 이름
+        lbl2 = QLabel("병합 결과 이름")
+        lbl2.setStyleSheet("color: #00cccc; background: transparent; font-weight: bold;")
+        layout.addWidget(lbl2)
+        row2 = QHBoxLayout()
+        input_merge = QLineEdit(naming["merge_pattern"])
+        input_merge.setStyleSheet(_input_style)
+        row2.addWidget(input_merge)
+        btn_r2 = NeonButton("초기화", color="gray")
+        btn_r2.setFixedSize(50, 30)
+        btn_r2.clicked.connect(lambda: input_merge.setText(DEFAULT_MERGE_PATTERN))
+        row2.addWidget(btn_r2)
+        layout.addLayout(row2)
+
+        # 미리보기
+        lbl_preview = QLabel("")
+        lbl_preview.setStyleSheet(_label_style)
+        lbl_preview.setWordWrap(True)
+        def update_preview():
+            pat = input_file.text() or DEFAULT_FILE_PATTERN
+            try:
+                preview = pat.format(company="케이즈트레이드", bl="STZFE2603048", doctype="운송료계산서", amount="242000")
+                lbl_preview.setText(f"미리보기: {preview}")
+                lbl_preview.setStyleSheet(_label_style)
+            except (KeyError, ValueError):
+                lbl_preview.setText("미리보기: (잘못된 패턴)")
+                lbl_preview.setStyleSheet("color: #ff6666; background: transparent; font-size: 8pt;")
+        input_file.textChanged.connect(update_preview)
+        update_preview()
+        layout.addWidget(lbl_preview)
+
+        lbl_vars = QLabel("사용 가능 변수: {company}  {bl}  {doctype}  {amount}")
+        lbl_vars.setStyleSheet("color: rgba(255,255,255,0.35); background: transparent; font-size: 7pt;")
+        layout.addWidget(lbl_vars)
+
+        layout.addSpacing(5)
+
+        # 병합 순서
+        lbl3 = QLabel("병합 순서")
+        lbl3.setStyleSheet("color: #00cccc; background: transparent; font-weight: bold;")
+        layout.addWidget(lbl3)
+
+        order_row = QHBoxLayout()
+        list_order = QListWidget()
+        list_order.setFixedHeight(130)
+        list_order.setStyleSheet("background: rgba(20,25,35,200); color: #fff; border: 1px solid #555; border-radius: 6px; font-size: 10pt;")
+        for name in naming["merge_order"]:
+            list_order.addItem(name)
+        order_row.addWidget(list_order)
+
+        btn_col = QVBoxLayout()
+        btn_col.setSpacing(4)
+        btn_up = NeonButton("▲", color="cyan")
+        btn_up.setFixedSize(34, 30)
+        def move_up():
+            r = list_order.currentRow()
+            if r > 0:
+                item = list_order.takeItem(r)
+                list_order.insertItem(r-1, item)
+                list_order.setCurrentRow(r-1)
+        btn_up.clicked.connect(move_up)
+        btn_col.addWidget(btn_up)
+
+        btn_down = NeonButton("▼", color="cyan")
+        btn_down.setFixedSize(34, 30)
+        def move_down():
+            r = list_order.currentRow()
+            if r < list_order.count()-1:
+                item = list_order.takeItem(r)
+                list_order.insertItem(r+1, item)
+                list_order.setCurrentRow(r+1)
+        btn_down.clicked.connect(move_down)
+        btn_col.addWidget(btn_down)
+
+        btn_reset = NeonButton("↺", color="gray")
+        btn_reset.setFixedSize(34, 30)
+        btn_reset.setToolTip("기본 순서로 초기화")
+        def reset_order():
+            list_order.clear()
+            for n in ["정산서", "신고필증", "납부고지서", "세금계산서", "비용계산서"]:
+                list_order.addItem(n)
+        btn_reset.clicked.connect(reset_order)
+        btn_col.addWidget(btn_reset)
+        btn_col.addStretch()
+        order_row.addLayout(btn_col)
+        layout.addLayout(order_row)
+
+        layout.addSpacing(10)
+
+        # 버튼
+        from PyQt6.QtWidgets import QPushButton
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(10)
+
+        btn_cancel = QPushButton("취소")
+        btn_cancel.setFixedHeight(42)
+        btn_cancel.setMinimumWidth(100)
+        btn_cancel.setFont(QFont("Segoe UI", 10, QFont.Weight.Medium))
+        btn_cancel.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_cancel.setStyleSheet("""
+            QPushButton { background-color: rgba(100,105,115,180); border: 1px solid rgba(150,155,165,0.5);
+                border-radius: 12px; color: #fff; padding: 8px 20px; }
+            QPushButton:hover { background-color: rgba(120,125,135,200); }
+        """)
+        btn_cancel.clicked.connect(dlg.reject)
+        btn_row.addWidget(btn_cancel)
+
+        btn_save = QPushButton("저장")
+        btn_save.setFixedHeight(42)
+        btn_save.setMinimumWidth(100)
+        btn_save.setFont(QFont("Segoe UI", 10, QFont.Weight.Medium))
+        btn_save.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_save.setStyleSheet("""
+            QPushButton { background-color: rgba(30,35,45,200); border: 2px solid #00d4ff;
+                border-radius: 12px; color: #00d4ff; padding: 8px 20px; }
+            QPushButton:hover { background-color: rgba(0,212,255,40); border-color: #00ffff; color: #00ffff; }
+        """)
+
+        def on_save():
+            file_pat = input_file.text().strip() or DEFAULT_FILE_PATTERN
+            merge_pat = input_merge.text().strip() or DEFAULT_MERGE_PATTERN
+            order = [list_order.item(i).text() for i in range(list_order.count())]
+            try:
+                file_pat.format(company="t", bl="t", doctype="t", amount="0")
+                merge_pat.format(company="t", bl="t")
+            except (KeyError, ValueError) as e:
+                JarvisMessageBox.warning(self, "패턴 오류", f"잘못된 패턴: {e}")
+                return
+
+            cfg_path = get_config_path()
+            try:
+                if os.path.exists(cfg_path):
+                    with open(cfg_path, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                else:
+                    data = {}
+                data["custom_naming"] = {"file_pattern": file_pat, "merge_pattern": merge_pat, "merge_order": order}
+                tmp = cfg_path + ".tmp"
+                with open(tmp, 'w', encoding='utf-8') as f:
+                    json.dump(data, f, ensure_ascii=False, indent=4)
+                os.replace(tmp, cfg_path)
+                dlg.accept()
+                JarvisMessageBox.information(self, "저장 완료", "네이밍 설정이 저장되었습니다.")
+                self.settings_changed.emit()
+            except Exception as e:
+                JarvisMessageBox.warning(self, "저장 실패", f"{e}")
+
+        btn_save.clicked.connect(on_save)
+        btn_row.addWidget(btn_save)
+        layout.addLayout(btn_row)
+
+        dlg.exec()
+
+    def _update_naming_preview(self):
+        """파일 이름 패턴 미리보기 갱신"""
+        pattern = self.input_file_pattern.text() or "{company}({bl}){doctype}.pdf"
+        try:
+            preview = pattern.format(company="케이즈트레이드", bl="STZFE2603048", doctype="운송료계산서", amount="242000")
+            self.lbl_naming_preview.setText(f"미리보기: {preview}")
+            self.lbl_naming_preview.setStyleSheet("color: rgba(255,255,255,0.5); font-size: 8pt;")
+        except (KeyError, ValueError):
+            self.lbl_naming_preview.setText("미리보기: (잘못된 패턴 — {company}, {bl}, {doctype} 사용)")
+            self.lbl_naming_preview.setStyleSheet("color: #ff6666; font-size: 8pt;")
+
+    def _move_merge_order_up(self):
+        row = self.list_merge_order.currentRow()
+        if row > 0:
+            item = self.list_merge_order.takeItem(row)
+            self.list_merge_order.insertItem(row - 1, item)
+            self.list_merge_order.setCurrentRow(row - 1)
+
+    def _move_merge_order_down(self):
+        row = self.list_merge_order.currentRow()
+        if row < self.list_merge_order.count() - 1:
+            item = self.list_merge_order.takeItem(row)
+            self.list_merge_order.insertItem(row + 1, item)
+            self.list_merge_order.setCurrentRow(row + 1)
+
+    def _reset_merge_order(self):
+        self.list_merge_order.clear()
+        for name in ["정산서", "신고필증", "납부고지서", "세금계산서", "비용계산서"]:
+            self.list_merge_order.addItem(name)
+
+    def _save_naming_settings(self):
+        """커스텀 네이밍 설정 저장"""
+        from core.config import get_config_path, DEFAULT_FILE_PATTERN, DEFAULT_MERGE_PATTERN, DEFAULT_MERGE_ORDER
+        import json
+
+        file_pat = self.input_file_pattern.text().strip() or DEFAULT_FILE_PATTERN
+        merge_pat = self.input_merge_pattern.text().strip() or DEFAULT_MERGE_PATTERN
+        order = [self.list_merge_order.item(i).text() for i in range(self.list_merge_order.count())]
+
+        # 패턴 유효성 검증
+        try:
+            file_pat.format(company="test", bl="test", doctype="test", amount="0")
+            merge_pat.format(company="test", bl="test")
+        except (KeyError, ValueError) as e:
+            JarvisMessageBox.warning(self, "패턴 오류", f"잘못된 패턴입니다: {e}\n사용 가능: {{company}}, {{bl}}, {{doctype}}, {{amount}}")
+            return
+
+        cfg_path = get_config_path()
+        try:
+            if os.path.exists(cfg_path):
+                with open(cfg_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+            else:
+                data = {}
+            data["custom_naming"] = {
+                "file_pattern": file_pat,
+                "merge_pattern": merge_pat,
+                "merge_order": order,
+            }
+            tmp = cfg_path + ".tmp"
+            with open(tmp, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=4)
+            os.replace(tmp, cfg_path)
+            JarvisMessageBox.information(self, "저장 완료", "네이밍 설정이 저장되었습니다.")
+            self.settings_changed.emit()
+        except Exception as e:
+            JarvisMessageBox.warning(self, "저장 실패", f"설정 저장 오류: {e}")
+
+    def _load_naming_settings(self):
+        """커스텀 네이밍 설정 로드"""
+        from core.config import get_custom_naming
+        naming = get_custom_naming()
+        self.input_file_pattern.setText(naming["file_pattern"])
+        self.input_merge_pattern.setText(naming["merge_pattern"])
+        self.list_merge_order.clear()
+        for name in naming["merge_order"]:
+            self.list_merge_order.addItem(name)
+
     def _show_manual_dialog(self):
         """사용자 매뉴얼 표시 다이얼로그"""
         from PyQt6.QtWidgets import QDialog, QVBoxLayout, QTextBrowser, QPushButton
@@ -1993,270 +2786,140 @@ class FileManagerWidget(QWidget):
 
 ---
 
-## 개요
+## 초기 설정
 
-TRADIS MH는 관세사무소 업무 자동화 도구입니다.
-수입 통관 서류의 자동 분류/병합부터 수출 자동 입력, 일정 관리, 보고서 생성까지
-반복 업무를 최소화합니다.
+| 항목 | 설정 방법 |
+|------|----------|
+| **Gemini API 키** | 좌측 사이드바 API 톱니바퀴 → 키 입력 → 저장 |
+| **감시 폴더** | 좌측 사이드바 TARGET DIRECTORY → 폴더 선택 |
+| **수입 서버 경로** | 설정 탭 → SET IMPORT ROOT |
+| **수출 서버 경로** | 설정 탭 → SET EXPORT ROOT |
+| **선적서류폴더** | 설정 탭 → SET SHIPPING DOCS |
+| **한비로 메일** | 설정 탭 → HANBIRO MAIL SETTING → ID/PW 입력 → SAVE |
+| **관리자 잠금 해제** | 설정 탭 → ADMIN UNLOCK → 비밀번호 → UNLOCK |
 
-| 탭 | 기능 | 권한 |
-|-----|------|------|
-| **정산** | PDF 자동 분석 → 이름변경 → 매칭/병합 → 서버 이동 | 기본 |
-| **일정** | 캘린더 일정 관리 + 알림 | 관리자 |
-| **통관** | 수출 메일 감지 → ReadyKorea 자동 입력 → 필증 발송 | 관리자 |
-| **보고** | 일일 업무 보고서 PDF 생성 및 메일 발송 | 관리자 |
-| **설정** | 경로 / 메일 / 관리자 설정 | 기본 |
-
-> 일정, 통관, 보고 탭은 **설정 → ADMIN UNLOCK**에서 비밀번호 입력 후 활성화됩니다.
+> 일정, 통관, 보고 탭은 관리자 잠금 해제 후 사용할 수 있습니다.
 
 ---
 
-## 1. 초기 설정
-
-### 1-1. Gemini API 키 (필수)
-- 좌측 사이드바 **API** 영역의 톱니바퀴 아이콘 클릭
-- API 키 입력 후 저장
-- 발급: https://aistudio.google.com
-- 설정 완료 시 **API: Ready** (초록색) 표시
-
-### 1-2. 감시 폴더 (필수)
-- 좌측 사이드바 **TARGET DIRECTORY** 클릭 → 폴더 선택
-- PDF 파일을 넣을 작업 폴더 (예: 다운로드 폴더)
-
-### 1-3. 서버 경로 (설정 탭)
-- **SET IMPORT ROOT** : 수입 서류 서버 폴더
-- **SET EXPORT ROOT** : 수출 서류 서버 폴더
-- **SET EXPORT DOCS SOURCE** : 수출 원본 서류 폴더
-
-### 1-4. 한비로 메일 (통관/보고 사용 시)
-- 설정 탭 → HANBIRO MAIL SETTING
-- ID 입력 (@raeon.co.kr 자동 추가) + 비밀번호 → **SAVE**
-- **TEST CONNECTION**으로 연결 확인
-
-### 1-5. 관리자 잠금 해제
-- 설정 탭 → ADMIN UNLOCK → 비밀번호 입력 → **UNLOCK**
-- 해제 후 일정/통관/보고 탭 활성화 (유지됨)
-
-### 1-6. 기타 선택 설정
-- **Google Sheets 연동** (보고 탭): data/credentials.json 필요
-- **Everything 검색** (파일 매니저): Everything 설치 필요 (voidtools.com)
-
----
-
-## 2. 정산 탭 — PDF 자동 분석 & 병합
+## 정산 탭
 
 수입 통관 서류를 AI로 자동 분석하고, 정산서 기준으로 매칭/병합합니다.
 
-### 2-1. 기본 워크플로우
+### 워크플로우
+1. 좌측 사이드바 **시작** 클릭 → 모니터링 시작
+2. 감시 폴더에 PDF 투입 → AI가 서류 유형/회사명/B/L/금액 추출 → 자동 이름변경
+3. B/L별 **그룹 카드** 생성 → 서류 체크리스트 확인
+4. **합치기 실행** (또는 **폴더 정리**) → 정산서 순서대로 PDF 병합
+5. 합치기 완료 후 → **선적서류 자동 검색 팝업** 표시
+6. 우측 파일 매니저에서 **수입/수출** 서버로 이동
 
-**① 모니터링 시작**
-- 감시 폴더와 API 키 설정 후, 좌측 사이드바 **START** 클릭
-- 상태 표시등이 활성화되고 시스템 로그에 시작 메시지 표시
+### 자동 매칭 규칙
+- 자금정산서 → 수입신고필증 → 납부고지서 → 세금계산서 순서 고정
+- 비용 항목명 ↔ 파일명 키워드 매칭
+- 통합 계산서는 내부 청구 항목(billing_items) 분석
+- 키워드 매칭 실패 시 금액 기반 보정 매칭
+- 식물검역/식품검역/CITES 등 요건 서류 자동 매칭
 
-**② PDF 파일 투입**
-- 감시 폴더에 수입 통관 관련 PDF 파일들을 넣으면 자동 처리 시작
-- Gemini AI가 각 파일을 분석하여 서류 유형, 회사명, B/L번호, 금액 추출
-- 분석 결과에 따라 자동 이름변경: **회사명(B/L번호)서류유형.pdf**
+### 카드 조작
+| 버튼 | 기능 |
+|------|------|
+| AI 분석 | 해당 그룹 재분석 |
+| 폴더 정리 | 병합 없이 폴더만 생성하여 이동 |
+| ▲ ▼ | 병합 순서 변경 |
+| + 행 추가 | 수동으로 파일 추가 |
+| 📂 파일 추가 | 첨부 파일 추가 (선적서류 등 수동 첨부) |
 
-**③ 그룹 카드 확인**
-- 분석 완료 후 B/L별로 그룹 카드가 중앙 패널에 생성
-- 각 카드에 표시되는 정보:
-  - B/L ID 및 회사명
-  - 서류 체크리스트 (✅ 매칭됨 / ❌ 미매칭)
-  - 매칭된 파일 목록 및 병합 순서
-
-**④ 병합 실행**
-- 체크리스트 확인 후 **MERGE EXECUTE** 클릭
-- 정산서 순서대로 PDF가 하나의 파일로 병합
-- 출력: **10.회사명_B/L번호.pdf**
-
-**⑤ 서버 이동**
-- 우측 파일 매니저에서 **→ 수입** 또는 **→ 수출** 클릭
-- 설정된 서버 폴더로 자동 이동
-
-### 2-2. 자동 매칭 동작
-
-시스템이 정산서(자금정산서)의 비용 항목을 기준으로 파일을 매칭합니다:
-
-- **고정 슬롯**: 자금정산서 → 수입신고필증 → 납부고지서 → 세금계산서 순서 고정
-- **키워드 매칭**: 비용 항목명과 파일명의 키워드를 비교하여 1:1 매칭
-- **콘텐츠 매칭**: 통합 계산서(1파일에 여러 항목)는 내부 청구 항목(billing_items)을 분석하여 매칭
-- **공급자 그룹핑**: 같은 공급자의 계산서끼리 우선 묶음
-- **금액 보정**: 키워드 매칭 실패 시 금액 기반으로 후보 매칭
-- **요건 증빙**: 식물검역, 식품검역, CITES 등 요건 서류 자동 매칭
-
-### 2-3. 카드 조작
-
-- **AI ANALYZE**: 해당 그룹 재분석
-- **폴더 정리**: 병합 없이 폴더만 생성하여 파일 이동
-- **▲ ▼**: 병합 순서 변경
-- **🔍**: 선택된 PDF 미리보기
-- **+ ADD ROW**: 수동으로 파일 추가
-- **📂 파일 추가** (하단): 병합에 포함하지 않되, 폴더에 함께 이동할 파일 첨부
+### 선적서류 자동 검색
+- 합치기/폴더 정리 완료 후 자동으로 선적서류폴더 검색
+- BL/Invoice 번호로 매칭되는 폴더/파일을 팝업으로 표시
+- 사용자가 선택 → BL 폴더 안으로 자동 이동
+- 매칭이 안 되면 카드의 [📂 파일 추가] 버튼으로 수동 첨부
 
 ---
 
-## 3. 파일 매니저 (우측 패널)
+## 파일 매니저 (우측)
 
-항상 화면 우측에 표시되는 파일 관리 도구입니다.
-
-### 3-1. 폴더 이동
-- **MOVE TARGET**: 감시 폴더 내 생성된 폴더 목록
-- **→ 수입**: 선택된 폴더를 수입 서버(IMPORT ROOT)로 이동
-- **→ 수출**: 선택된 폴더를 수출 서버(EXPORT ROOT)로 이동
-- 동일 이름 폴더 존재 시 병합/건너뛰기 선택 가능
-
-### 3-2. 검색 (TRADIS SEARCH)
-- **🔍 검색** 클릭 시 검색 패널이 우측에서 슬라이드 오픈
-- Everything 엔진 기반 전체 드라이브 즉시 검색
-- 검색 결과를 드래그하여 파일 이동 가능
-- 하단 폴더 트리로 직접 탐색도 가능
+| 기능 | 설명 |
+|------|------|
+| **MOVE TARGET** | 감시 폴더 내 폴더 목록 표시 |
+| **→ 수입 / → 수출** | 선택 폴더를 서버 경로로 이동 |
+| **TRADIS SEARCH** | Everything 기반 전체 드라이브 검색 |
+| **파일 탐색기** | 하단 폴더 트리로 직접 탐색/드래그 이동 |
+| **홈 폴더** | 탐색기에서 홈 폴더 설정/이동 |
 
 ---
 
-## 4. 일정 탭 (관리자)
+## 일정 탭 (관리자)
 
-캘린더 기반 일정 관리 도구입니다.
-
-### 4-1. 캘린더
-- 좌측에 월간 캘린더 표시
-- 일정이 있는 날짜에 컬러 도트 표시
-- 토요일(파랑), 일요일/공휴일(빨강) 색상 구분
-- 날짜 클릭 → 해당 일정만 필터링
-- 날짜 드래그 → 기간 일정 생성
-
-### 4-2. 일정 관리
-- **+** 버튼: 새 일정 추가
-- 일정 카드 **(i)** 버튼: 일정 수정
-- 체크박스: 완료 처리 (취소선 표시)
-- **모두 보기**: 전체 일정 목록 표시
-
-### 4-3. 일정 설정 항목
-- 제목, 시작/종료 시간
-- 반복: 없음 / 30분 / 매시간 / 3시간 / 매일 / 매주 / 매월
-- 알림: 정시 / 15분 전 / 1시간 전 / 1일 전 / 2일 전
-- 메모: 추가 내용 기록
-
-### 4-4. 알림
-- 설정된 시간에 Windows 알림(토스트)으로 팝업 표시
-- 30초 간격으로 예약 알림 체크
+- 월간 캘린더 + 일정 카드 관리
+- 날짜 클릭으로 필터링, 드래그로 기간 일정 생성
+- 반복 설정: 30분 / 매시간 / 3시간 / 매일 / 매주 / 매월
+- 알림: 정시 / 15분 전 / 1시간 전 / 1일 전 / 2일 전 (Windows 토스트)
 
 ---
 
-## 5. 통관 탭 (관리자)
+## 통관 탭 (관리자)
 
 수출 통관 자동화 — 메일 감지부터 ReadyKorea 입력까지.
 
-### 5-1. 워크플로우
-1. **START** → 한비로 메일 모니터링 시작
-2. 수출 요청 메일 수신 시 자동 감지 → 목록에 표시
-3. 메일 선택 → Excel 파싱 → 품명/수량/단가/중량 자동 추출
-4. **자동 입력 실행** → ReadyKorea 프로그램에 데이터 자동 입력
-5. 처리 완료 후 **메일 발송** → 수출신고필증 PDF를 회신
+1. **START** → 한비로 메일 모니터링
+2. 수출 요청 메일 감지 → 목록 표시
+3. 메일 선택 → Excel 파싱 (품명/수량/단가/중량)
+4. **자동 입력** → ReadyKorea에 데이터 입력
+5. **메일 발송** → 수출신고필증 회신
 
-### 5-2. 필요 조건
-- 한비로 메일 설정 완료
-- ReadyKorea 프로그램 실행 중
-- 수출 Excel이 지정된 양식일 것
+> 필요: 한비로 메일 설정 완료, ReadyKorea 실행 중
 
 ---
 
-## 6. 보고 탭 (관리자)
+## 보고 탭 (관리자)
 
-일일 업무 보고서를 생성하고 발송합니다.
+일일 업무 보고서 PDF 생성 및 발송.
 
-### 6-1. 입력 항목
-- **보고 일자**: 기본 오늘 날짜
-- **통관 현황**: 일간/월간 건수 및 수수료
-- **미수금 테이블**: 업체명, 금액, 예정일 (행 추가/삭제 가능)
-- **대납금 테이블**: 업체명, B/L No, 금액, 예정일 (행 추가/삭제 가능)
-- **특이사항**: 자유 텍스트
-- **Google Sheets 가져오기**: 대납장 데이터 자동 불러오기
-
-### 6-2. 출력
-- **PDF 저장**: 일일보고/ 폴더에 PDF 생성
-- **메일 발송**: 한비로 메일로 보고서 발송
-- **초기화**: 전체 입력값 초기화
-- 우측에 실시간 미리보기 표시
+- 보고 일자, 통관 현황(건수/수수료), 미수금/대납금 테이블, 특이사항 입력
+- Google Sheets 대납장 데이터 자동 불러오기
+- PDF 저장 / 한비로 메일 발송 / 실시간 미리보기
 
 ---
 
-## 7. 단축키
+## 퀵 메모 & 단축키
 
-| 단축키 | 기능 |
-|--------|------|
-| **Ctrl + Shift + M** | 퀵 메모 팝업 |
-| **Ctrl + 1~9** | 등록된 텍스트 스니펫 자동 입력 |
+| 기능 | 단축키 |
+|------|--------|
+| 퀵 메모 팝업 | Ctrl + Shift + M (변경 가능) |
+| 텍스트 스니펫 | Ctrl + 1~9 (최대 9개 등록) |
 
-- 스니펫 설정: 퀵 메모 팝업의 설정 버튼에서 등록
-
----
-
-## 8. 자동 업데이트
-
-- 실행 시 자동으로 GitHub에서 최신 버전 확인
-- 새 버전 감지 시 업데이트 안내 다이얼로그 표시
-- **Update** 클릭 → 자동 다운로드 → EXE 교체 → 재시작
-- data/ 폴더의 설정 및 데이터는 유지됩니다
+- 메모: 다중 탭, 자동 저장
+- 스니펫 설정: 퀵 메모 팝업 → 설정 버튼
+- 미니 윈도우: 최소화 시 작은 플로팅 창으로 전환 (드래그 이동 가능)
 
 ---
 
-## 9. 데이터 저장 구조
+## 자동 업데이트
+
+- 실행 시 GitHub에서 최신 버전 자동 확인
+- 업데이트 클릭 → 다운로드 → EXE 교체 → 재시작 안내
+- 설정 및 데이터(data/ 폴더)는 유지됩니다
+
+---
+
+## 데이터 저장
 
 | 파일 | 내용 |
 |------|------|
-| data/config.json | 경로, 메일ID, 라이선스, 스니펫 설정 |
-| data/.analysis_cache.json | PDF 분석 캐시 (재분석 방지) |
+| data/config.json | 경로, 메일, 스니펫 등 설정 |
 | data/schedules.json | 일정 데이터 |
 | data/report_data.json | 보고서 입력값 |
-| data/credentials.json | Google Sheets API 인증 (수동 배치) |
+| data/.analysis_cache.json | PDF 분석 캐시 |
+| data/credentials.json | Google Sheets 인증 (수동 배치) |
 
-- API 키, 메일 비밀번호 등 민감 정보는 **Windows 자격 증명 관리자**에 저장됩니다.
-- data/ 폴더를 백업하면 설정을 보존할 수 있습니다.
-
----
-
-## 📋 버전 정보
-
-**현재 버전**: v1.0.16
-
-#### v1.0.12 (2026-03-15)
-- 시작 속도 개선: google.genai, pypdfium2 지연 로딩 (UI 먼저 표시)
-- Start 버튼 클릭 시 OCR 모듈 백그라운드 프리로딩
-
-#### v1.0.11 (2026-03-15)
-- 업데이트 완료 후 수동 재실행 안내 적용 확인용 릴리즈
-
-#### v1.0.10 (2026-03-15)
-- 업데이트 후 자동 재시작 제거 → 수동 재실행 안내로 변경 (_MEI 오류 방지)
-- 서버 폴더 이동 속도 대폭 개선 (디렉토리 캐시 도입)
-
-#### v1.0.9 (2026-03-12)
-- OCR 분류 개선: 포워더/선사 Handling Charge → 선박운임계산서로 정확 분류
-- 매칭 UI 개선: 계산서 미매칭 항목 붉은색 강조 표시
-- 금액 검증 로직 개선: FEE_INVOICE_ITEMS에서 정밀검사실험비용 제거
-
-#### v1.0.3 (2026-03-09)
-- 정산 불필요 수입건 지원 (수입신고필증만 있는 건 → 폴더 정리 모드)
-- 창고료/보험료 분리 매칭 (금액 검증 오류 수정)
-- 병합/폴더 정리 후 미분류 파일 목록 자동 갱신
-
-#### v1.0.1 (2026-03-08)
-- 사용자 매뉴얼 전면 리뉴얼
-- 자동 업데이트 UX 개선 (인스톨러 스타일 업데이트 창)
-- PowerShell 미지원 환경 폴백 지원
-
-#### v1.0.0 (2026-03-08)
-- TRADIS MH 정식 릴리즈
-- 정산서 자동 매칭/병합 시스템
-- 통합 계산서 콘텐츠 매칭 (billing_items)
-- 공급자 기준 파일 그룹핑
-- 수출 통관 자동화 (ReadyKorea 연동)
-- 관리자 잠금 / 일정 관리 / 일일 보고서 / 자동 업데이트
+- API 키/메일 비밀번호는 **Windows 자격 증명 관리자**에 저장
+- data/ 폴더 백업으로 설정 보존 가능
 
 ---
 
-**TRADIS MH** by M.H. Choi
+**TRADIS MH** v1.0.36 by M.H. Choi
 """
         
         browser.setMarkdown(manual_content)

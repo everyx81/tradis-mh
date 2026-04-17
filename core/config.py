@@ -11,6 +11,21 @@ import base64
 
 SERVICE_NAME = "TRADIS_MH"
 
+# 커스텀 네이밍 기본값
+DEFAULT_FILE_PATTERN = "{company}({bl}){doctype}.pdf"
+DEFAULT_MERGE_PATTERN = "{company}({bl})정산서.pdf"
+DEFAULT_MERGE_ORDER = ["정산서", "신고필증", "납부고지서", "세금계산서", "비용계산서"]
+
+
+def get_custom_naming():
+    """커스텀 네이밍 설정 반환 (미설정 시 기본값)"""
+    cfg = CONFIG.get("custom_naming", {})
+    return {
+        "file_pattern": cfg.get("file_pattern", DEFAULT_FILE_PATTERN),
+        "merge_pattern": cfg.get("merge_pattern", DEFAULT_MERGE_PATTERN),
+        "merge_order": cfg.get("merge_order", DEFAULT_MERGE_ORDER),
+    }
+
 def get_config_path():
     """설정 파일 경로 반환 (data/config.json)"""
     if getattr(sys, 'frozen', False):
@@ -53,12 +68,16 @@ def load_config():
     return {}
 
 def _save_config(config):
-    """설정 파일 저장"""
+    """설정 파일 저장 (atomic write)"""
     try:
-        with open(get_config_path(), 'w', encoding='utf-8') as f:
+        cfg = get_config_path()
+        tmp = cfg + ".tmp"
+        with open(tmp, 'w', encoding='utf-8') as f:
             json.dump(config, f, ensure_ascii=False, indent=4)
+        os.replace(tmp, cfg)
     except OSError:
-        pass
+        try: os.unlink(get_config_path() + ".tmp")
+        except OSError: pass
 
 # 전역 설정 로드
 CONFIG = load_config()

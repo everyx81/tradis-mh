@@ -10,12 +10,12 @@ import sys
 import random
 import threading
 
-from PyQt6.QtWidgets import (QWidget, QLabel, QVBoxLayout, QHBoxLayout, QApplication,
+from PyQt6.QtWidgets import (QWidget, QLabel, QVBoxLayout, QHBoxLayout, QApplication, QAbstractItemView,
                               QPushButton, QComboBox, QDialog, QMessageBox, QLineEdit, QTextEdit,
                               QListWidget, QListWidgetItem, QTableWidget, QTableWidgetItem,
                               QFormLayout, QHeaderView)
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QPropertyAnimation, QEasingCurve, QPoint, QParallelAnimationGroup
-from PyQt6.QtGui import QPixmap, QImage, QCursor, QColor
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QPropertyAnimation, QEasingCurve, QPoint, QParallelAnimationGroup, QMimeData, QUrl
+from PyQt6.QtGui import QPixmap, QImage, QCursor, QColor, QDrag
 
 from .widgets import GlassFrame, NeonButton
 from .utils import resource_path, generate_pdf_thumbnail
@@ -166,6 +166,259 @@ class IntroWindow(QWidget):
         self.close()
 
 
+class DraggableFileList(QListWidget):
+    """파일 드래그를 지원하는 QListWidget (카카오톡 등 외부 앱 호환)"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setDragEnabled(True)
+        self.setDragDropMode(QAbstractItemView.DragDropMode.DragOnly)
+
+    def startDrag(self, supportedActions):
+        """선택된 항목들을 드래그 (검색 결과 리스트와 동일한 방식)"""
+        items = self.selectedItems()
+        if not items:
+            return
+
+        paths = []
+        for item in items:
+            path = item.data(Qt.ItemDataRole.UserRole)
+            if path and os.path.exists(path):
+                paths.append(path)
+
+        if not paths:
+            return
+
+        # PyQt 드래그 (Qt 내부적으로 OLE DoDragDrop 처리)
+        mime_data = QMimeData()
+        urls = [QUrl.fromLocalFile(p) for p in paths]
+        mime_data.setUrls(urls)
+
+        drag = QDrag(self)
+        drag.setMimeData(mime_data)
+        drag.exec(Qt.DropAction.CopyAction | Qt.DropAction.MoveAction, Qt.DropAction.CopyAction)
+
+
+class IndependentCard(GlassFrame):
+    """BL 독립 문서 카드 (이체증 등) — 드래그앤드롭 지원"""
+
+    def __init__(self, parent_widget, directory, doc_type, file_list):
+        super().__init__()
+        self.parent_widget = parent_widget
+        self.directory = directory
+        self.doc_type = doc_type
+        self.file_list = file_list
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(6)
+
+        # 헤더
+        header = QHBoxLayout()
+        lbl_title = QLabel(f"📋 {doc_type} ({len(file_list)}건)")
+        lbl_title.setStyleSheet("color: #00cccc; font-weight: bold; font-size: 11pt;")
+        header.addWidget(lbl_title)
+        header.addStretch()
+        layout.addLayout(header)
+
+        # 파일 목록 (드래그 가능)
+        from PyQt6.QtWidgets import QAbstractItemView
+        self.list_widget = DraggableFileList()
+        self.list_widget.setStyleSheet(
+            "QListWidget { background: rgba(20,25,35,150); border: 1px solid #444; "
+            "border-radius: 4px; color: #fff; font-size: 9pt; }"
+            "QListWidget::item { padding: 4px; }"
+            "QListWidget::item:hover { background: rgba(0,200,255,30); }"
+        )
+        self.list_widget.setFixedHeight(min(len(file_list) * 28 + 10, 150))
+        self.list_widget.setDragEnabled(True)
+        self.list_widget.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+
+        for f in file_list:
+            item = QListWidgetItem(f)
+            item.setData(Qt.ItemDataRole.UserRole, os.path.join(directory, f))
+            self.list_widget.addItem(item)
+
+        layout.addWidget(self.list_widget)
+
+        # 안내 텍스트
+        lbl_hint = QLabel("↑ 드래그하여 사용 | 우클릭으로 관리")
+        lbl_hint.setStyleSheet("color: rgba(255,255,255,0.4); font-size: 8pt;")
+        lbl_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(lbl_hint)
+
+        # 우클릭 메뉴
+        self.list_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.list_widget.customContextMenuRequested.connect(self._show_context_menu)
+
+        # 키보드 단축키
+        from PyQt6.QtGui import QKeySequence, QShortcut
+        shortcut_del = QShortcut(QKeySequence(Qt.Key.Key_Delete), self.list_widget)
+        shortcut_del.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        shortcut_del.activated.connect(self._delete_selected)
+        shortcut_f2 = QShortcut(QKeySequence(Qt.Key.Key_F2), self.list_widget)
+        shortcut_f2.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        shortcut_f2.activated.connect(self._rename_selected)
+
+    def _show_context_menu(self, pos):
+        """우클릭 메뉴"""
+        item = self.list_widget.itemAt(pos)
+        if not item:
+            return
+        from PyQt6.QtWidgets import QMenu, QInputDialog
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: rgba(35, 40, 50, 240);
+                border: 1px solid rgba(0, 200, 255, 0.3);
+                border-radius: 8px;
+                padding: 6px 0px;
+                color: #ffffff;
+                font-size: 10pt;
+            }
+            QMenu::item {
+                padding: 8px 24px;
+                border-radius: 4px;
+                margin: 2px 6px;
+            }
+            QMenu::item:selected {
+                background-color: rgba(0, 200, 255, 50);
+                color: #00ffff;
+            }
+        """)
+        action_rename = menu.addAction("이름 변경")
+        action_delete = menu.addAction("삭제")
+
+        action = menu.exec(self.list_widget.mapToGlobal(pos))
+        if action == action_rename:
+            self._rename_file(item)
+        elif action == action_delete:
+            self._delete_file(item)
+
+    def _show_rename_dialog(self, old_name):
+        """Frosted Glass 스타일 이름 변경 다이얼로그"""
+        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QWidget, QGraphicsDropShadowEffect
+        from PyQt6.QtGui import QFont
+
+        dlg = QDialog(self)
+        dlg.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        dlg.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        dlg.setMinimumWidth(450)
+
+        container = QWidget(dlg)
+        container.setObjectName("rename_dlg2")
+        container.setStyleSheet("""
+            #rename_dlg2 {
+                background-color: rgba(45, 50, 60, 235);
+                border: 1px solid rgba(100, 110, 120, 0.5);
+                border-radius: 16px;
+            }
+        """)
+        shadow = QGraphicsDropShadowEffect(dlg)
+        shadow.setBlurRadius(25)
+        shadow.setXOffset(0)
+        shadow.setYOffset(4)
+        shadow.setColor(Qt.GlobalColor.black)
+        container.setGraphicsEffect(shadow)
+
+        outer = QVBoxLayout(dlg)
+        outer.setContentsMargins(8, 8, 8, 8)
+        outer.addWidget(container)
+
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(24, 24, 24, 20)
+        layout.setSpacing(12)
+
+        lbl = QLabel("파일 이름 변경")
+        lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl.setFont(QFont("Segoe UI", 13, QFont.Weight.Bold))
+        lbl.setStyleSheet("color: #ffffff; background: transparent;")
+        layout.addWidget(lbl)
+
+        input_name = QLineEdit(old_name)
+        input_name.setFont(QFont("Segoe UI", 10))
+        input_name.setStyleSheet(
+            "background: rgba(20,25,35,200); color: #fff; border: 1px solid #555; "
+            "padding: 8px; border-radius: 8px; font-size: 10pt;"
+        )
+        input_name.selectAll()
+        layout.addWidget(input_name)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(10)
+        result = {"ok": False}
+
+        btn_cancel = QPushButton("취소")
+        btn_cancel.setFixedHeight(38)
+        btn_cancel.setFont(QFont("Segoe UI", 10))
+        btn_cancel.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_cancel.setStyleSheet("""
+            QPushButton { background-color: rgba(100,105,115,180); border: 1px solid rgba(150,155,165,0.5);
+                border-radius: 10px; color: #fff; padding: 6px 20px; }
+            QPushButton:hover { background-color: rgba(120,125,135,200); }
+        """)
+        btn_cancel.clicked.connect(dlg.reject)
+        btn_row.addWidget(btn_cancel)
+
+        btn_ok = QPushButton("변경")
+        btn_ok.setFixedHeight(38)
+        btn_ok.setFont(QFont("Segoe UI", 10, QFont.Weight.Medium))
+        btn_ok.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_ok.setStyleSheet("""
+            QPushButton { background-color: rgba(30,35,45,200); border: 2px solid #00d4ff;
+                border-radius: 10px; color: #00d4ff; padding: 6px 20px; }
+            QPushButton:hover { background-color: rgba(0,212,255,40); border-color: #00ffff; color: #00ffff; }
+        """)
+        btn_ok.clicked.connect(lambda: (result.update({"ok": True}), dlg.accept()))
+        btn_row.addWidget(btn_ok)
+        input_name.returnPressed.connect(lambda: (result.update({"ok": True}), dlg.accept()))
+
+        layout.addLayout(btn_row)
+        dlg.exec()
+        return input_name.text().strip(), result["ok"]
+
+    def _rename_file(self, item):
+        """파일 이름 변경"""
+        old_path = item.data(Qt.ItemDataRole.UserRole)
+        old_name = os.path.basename(old_path)
+        new_name, ok = self._show_rename_dialog(old_name)
+        if ok and new_name and new_name != old_name:
+            new_path = os.path.join(os.path.dirname(old_path), new_name)
+            try:
+                os.rename(old_path, new_path)
+                item.setText(new_name)
+                item.setData(Qt.ItemDataRole.UserRole, new_path)
+                self.parent_widget.emit_log(f"[독립문서] 이름 변경: {old_name} → {new_name}")
+            except Exception as e:
+                from .dialogs import JarvisMessageBox
+                JarvisMessageBox.warning(self, "이름 변경 실패", str(e))
+
+    def _rename_selected(self):
+        """F2 키로 선택된 파일 이름 변경"""
+        item = self.list_widget.currentItem()
+        if item:
+            self._rename_file(item)
+
+    def _delete_selected(self):
+        """Delete 키로 선택된 파일 삭제"""
+        item = self.list_widget.currentItem()
+        if item:
+            self._delete_file(item)
+
+    def _delete_file(self, item):
+        """파일 삭제"""
+        path = item.data(Qt.ItemDataRole.UserRole)
+        name = os.path.basename(path)
+        from .dialogs import JarvisMessageBox
+        if JarvisMessageBox.question(self, "삭제 확인", f"'{name}' 파일을 삭제할까요?"):
+            try:
+                os.remove(path)
+                row = self.list_widget.row(item)
+                self.list_widget.takeItem(row)
+                self.parent_widget.emit_log(f"[독립문서] 삭제: {name}")
+            except Exception as e:
+                JarvisMessageBox.warning(self, "삭제 실패", str(e))
+
 class GroupCard(GlassFrame):
     def __init__(self, parent_widget, renamer, directory, text_id, data, unclassified, parent=None):
         super().__init__(parent)
@@ -219,18 +472,44 @@ class GroupCard(GlassFrame):
         
         self.layout.addLayout(header)
         
-        # 필요 서류 체크리스트 표시
+        # 필요 서류 체크리스트 (드래그/삭제/수정 지원)
+        from PyQt6.QtWidgets import QAbstractItemView
+        from PyQt6.QtGui import QShortcut, QKeySequence
         self.lbl_checklist = QLabel()
         self.lbl_checklist.setStyleSheet("color: #ccc; font-size: 9pt; background: transparent;")
         self.lbl_checklist.setWordWrap(True)
         self.layout.addWidget(self.lbl_checklist)
+
+        self.file_list = DraggableFileList()
+        self.file_list.setStyleSheet(
+            "QListWidget { background: transparent; border: none; color: #ccc; font-size: 9pt; }"
+            "QListWidget::item { padding: 1px 0px; }"
+            "QListWidget::item:selected { background: rgba(0,200,255,60); color: #ffffff; }"
+            "QListWidget::item:hover { background: rgba(255,255,255,15); }"
+        )
+        self.file_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.file_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.file_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.file_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.file_list.customContextMenuRequested.connect(self._fl_context_menu)
+
+        # 키보드 단축키
+        sc_del = QShortcut(QKeySequence(Qt.Key.Key_Delete), self.file_list)
+        sc_del.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        sc_del.activated.connect(self._fl_delete_selected)
+        sc_f2 = QShortcut(QKeySequence(Qt.Key.Key_F2), self.file_list)
+        sc_f2.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        sc_f2.activated.connect(self._fl_rename_selected)
+
+        # 파일 목록 채우기
+        self._refresh_file_list()
+        self.layout.addWidget(self.file_list)
         
         if is_export_only:
             export_label = "반송신고필증" if any('반송신고필증' in v for v in docs.values()) else "수출신고필증"
-            self.lbl_checklist.setText(f"✅ {export_label} (정산서 없음 → 바로 폴더 정리)")
+            self.lbl_checklist.setText(f"{export_label} (정산서 없음 → 바로 폴더 정리)")
         elif is_import_no_settlement:
-            doc_list = "\n".join(f"  ✅ {v}" for v in docs.values())
-            self.lbl_checklist.setText(f"수입신고필증 (정산서 없음 → 바로 폴더 정리)\n{doc_list}")
+            self.lbl_checklist.setText(f"수입신고필증 (정산서 없음 → 바로 폴더 정리)")
         elif has_statement:
             self._auto_analyze_from_cache()
         else:
@@ -252,6 +531,10 @@ class GroupCard(GlassFrame):
         self.layout.addWidget(self.marking_widget)
         self._refresh_marking_display()
         
+        # 체크리스트 영역도 우클릭 가능
+        self.lbl_checklist.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.lbl_checklist.customContextMenuRequested.connect(self._fl_context_menu_from_checklist)
+
         self.mapping_widget = QWidget()
         self.mapping_layout = QVBoxLayout(self.mapping_widget)
         self.mapping_widget.setVisible(False)
@@ -309,17 +592,14 @@ class GroupCard(GlassFrame):
                 return
 
             path = os.path.join(self.directory, statement_file)
-            cached = gemini_ocr._get_cached_result(path)
-            if not cached:
-                self.lbl_checklist.setText("⏳ OCR 캐시 대기 중...")
-                return
 
             # 분석 중 중복 실행 방지: 버튼 비활성화
             self.btn_toggle.setText("분석 중...")
             self.btn_toggle.setEnabled(False)
             self._analyzing = True
 
-            # 캐시 기반 매핑 실행 (백그라운드 스레드)
+            # 캐시 유무와 관계없이 백그라운드에서 분석 실행
+            # (캐시가 있으면 analyze_statement_for_merge 내부에서 캐시 활용)
             def run():
                 try:
                     mode = "수입"
@@ -717,11 +997,11 @@ class GroupCard(GlassFrame):
         
         btn_row = QHBoxLayout()
         btn_row.setSpacing(8)
-        btn_add_row = NeonButton("+ ADD ROW", color="cyan")
+        btn_add_row = NeonButton("+ 행 추가", color="cyan")
         btn_add_row.clicked.connect(self.add_unclassified_row)
         btn_row.addWidget(btn_add_row)
             
-        btn_exec = NeonButton("MERGE EXECUTE", color="cyan", is_primary=True)
+        btn_exec = NeonButton("합치기 실행", color="cyan", is_primary=True)
         btn_exec.clicked.connect(self.execute_merge)
         btn_row.addWidget(btn_exec)
         self.mapping_layout.addLayout(btn_row)
@@ -779,6 +1059,230 @@ class GroupCard(GlassFrame):
         self.mapping_widget.setVisible(not is_visible)
         self.btn_toggle.setText("펼치기" if is_visible else "접기")
     
+    def _refresh_file_list(self):
+        """파일 목록 위젯 갱신"""
+        self.file_list.clear()
+        docs = self.data.get('docs', {})
+        all_files = sorted(set(docs.values()))
+        for f in all_files:
+            item = QListWidgetItem(f"  ✅ {f}")
+            item.setData(Qt.ItemDataRole.UserRole, os.path.join(self.directory, f))
+            self.file_list.addItem(item)
+        # 높이 자동 조정 (컴팩트)
+        h = max(self.file_list.count() * 22, 22)
+        self.file_list.setFixedHeight(min(h, 150))
+
+    def _fl_context_menu(self, pos):
+        """파일 목록 우클릭 메뉴"""
+        item = self.file_list.itemAt(pos)
+        if not item:
+            return
+        from PyQt6.QtWidgets import QMenu
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: rgba(35, 40, 50, 240);
+                border: 1px solid rgba(0, 200, 255, 0.3);
+                border-radius: 8px;
+                padding: 6px 0px;
+                color: #ffffff;
+                font-size: 10pt;
+            }
+            QMenu::item {
+                padding: 8px 24px;
+                border-radius: 4px;
+                margin: 2px 6px;
+            }
+            QMenu::item:selected {
+                background-color: rgba(0, 200, 255, 50);
+                color: #00ffff;
+            }
+        """)
+        action_copy = menu.addAction("📋 경로 복사")
+        action_rename = menu.addAction("✏️ 이름 변경 (F2)")
+        action_delete = menu.addAction("🗑️ 삭제 (Delete)")
+        action = menu.exec(self.file_list.mapToGlobal(pos))
+        path = item.data(Qt.ItemDataRole.UserRole)
+        name = os.path.basename(path) if path else ""
+        if action == action_copy:
+            self._fl_copy_path(path)
+        elif action == action_rename:
+            self._fl_rename_by_path(path, name)
+        elif action == action_delete:
+            self._fl_delete_by_path(path, name)
+
+    def _fl_rename_selected(self):
+        item = self.file_list.currentItem()
+        if item:
+            path = item.data(Qt.ItemDataRole.UserRole)
+            self._fl_rename_by_path(path, os.path.basename(path))
+
+    def _fl_delete_selected(self):
+        item = self.file_list.currentItem()
+        if item:
+            path = item.data(Qt.ItemDataRole.UserRole)
+            self._fl_delete_by_path(path, os.path.basename(path))
+
+    def _fl_context_menu_from_checklist(self, pos):
+        """체크리스트 우클릭 → 파일 관리 메뉴"""
+        from PyQt6.QtWidgets import QMenu
+        docs = self.data.get('docs', {})
+        all_files = sorted(set(docs.values()))
+        if not all_files:
+            return
+
+        menu = QMenu(self)
+        _menu_style = """
+            QMenu {
+                background-color: rgba(35, 40, 50, 240);
+                border: 1px solid rgba(0, 200, 255, 0.3);
+                border-radius: 8px;
+                padding: 6px 0px;
+                color: #ffffff;
+                font-size: 10pt;
+            }
+            QMenu::item {
+                padding: 8px 24px;
+                border-radius: 4px;
+                margin: 2px 6px;
+            }
+            QMenu::item:selected {
+                background-color: rgba(0, 200, 255, 50);
+                color: #00ffff;
+            }
+        """
+        menu.setStyleSheet(_menu_style)
+
+        for f in all_files:
+            file_menu = menu.addMenu(f[:50] + "..." if len(f) > 50 else f)
+            file_menu.setStyleSheet(menu.styleSheet())
+            action_drag = file_menu.addAction("📋 경로 복사")
+            action_rename = file_menu.addAction("✏️ 이름 변경")
+            action_delete = file_menu.addAction("🗑️ 삭제")
+
+            fp = os.path.join(self.directory, f)
+            action_drag.triggered.connect(lambda checked, p=fp: self._fl_copy_path(p))
+            action_rename.triggered.connect(lambda checked, p=fp, n=f: self._fl_rename_by_path(p, n))
+            action_delete.triggered.connect(lambda checked, p=fp, n=f: self._fl_delete_by_path(p, n))
+
+        menu.exec(self.lbl_checklist.mapToGlobal(pos))
+
+    def _fl_copy_path(self, path):
+        """파일 경로를 클립보드에 복사"""
+        from PyQt6.QtWidgets import QApplication
+        QApplication.clipboard().setText(path)
+        self.parent_widget.emit_log(f"[클립보드 복사] {os.path.basename(path)}")
+
+    def _show_rename_dialog(self, old_name):
+        """Frosted Glass 스타일 이름 변경 다이얼로그"""
+        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QWidget, QGraphicsDropShadowEffect
+        from PyQt6.QtGui import QFont
+
+        dlg = QDialog(self)
+        dlg.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        dlg.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        dlg.setMinimumWidth(450)
+
+        container = QWidget(dlg)
+        container.setObjectName("rename_dlg")
+        container.setStyleSheet("""
+            #rename_dlg {
+                background-color: rgba(45, 50, 60, 235);
+                border: 1px solid rgba(100, 110, 120, 0.5);
+                border-radius: 16px;
+            }
+        """)
+        shadow = QGraphicsDropShadowEffect(dlg)
+        shadow.setBlurRadius(25)
+        shadow.setXOffset(0)
+        shadow.setYOffset(4)
+        shadow.setColor(Qt.GlobalColor.black)
+        container.setGraphicsEffect(shadow)
+
+        outer = QVBoxLayout(dlg)
+        outer.setContentsMargins(8, 8, 8, 8)
+        outer.addWidget(container)
+
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(24, 24, 24, 20)
+        layout.setSpacing(12)
+
+        lbl = QLabel("파일 이름 변경")
+        lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl.setFont(QFont("Segoe UI", 13, QFont.Weight.Bold))
+        lbl.setStyleSheet("color: #ffffff; background: transparent;")
+        layout.addWidget(lbl)
+
+        input_name = QLineEdit(old_name)
+        input_name.setFont(QFont("Segoe UI", 10))
+        input_name.setStyleSheet(
+            "background: rgba(20,25,35,200); color: #fff; border: 1px solid #555; "
+            "padding: 8px; border-radius: 8px; font-size: 10pt;"
+        )
+        input_name.selectAll()
+        layout.addWidget(input_name)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(10)
+
+        result = {"ok": False}
+
+        btn_cancel = QPushButton("취소")
+        btn_cancel.setFixedHeight(38)
+        btn_cancel.setFont(QFont("Segoe UI", 10))
+        btn_cancel.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_cancel.setStyleSheet("""
+            QPushButton { background-color: rgba(100,105,115,180); border: 1px solid rgba(150,155,165,0.5);
+                border-radius: 10px; color: #fff; padding: 6px 20px; }
+            QPushButton:hover { background-color: rgba(120,125,135,200); }
+        """)
+        btn_cancel.clicked.connect(dlg.reject)
+        btn_row.addWidget(btn_cancel)
+
+        btn_ok = QPushButton("변경")
+        btn_ok.setFixedHeight(38)
+        btn_ok.setFont(QFont("Segoe UI", 10, QFont.Weight.Medium))
+        btn_ok.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_ok.setStyleSheet("""
+            QPushButton { background-color: rgba(30,35,45,200); border: 2px solid #00d4ff;
+                border-radius: 10px; color: #00d4ff; padding: 6px 20px; }
+            QPushButton:hover { background-color: rgba(0,212,255,40); border-color: #00ffff; color: #00ffff; }
+        """)
+        btn_ok.clicked.connect(lambda: (result.update({"ok": True}), dlg.accept()))
+        btn_row.addWidget(btn_ok)
+
+        # Enter 키로도 확인
+        input_name.returnPressed.connect(lambda: (result.update({"ok": True}), dlg.accept()))
+
+        layout.addLayout(btn_row)
+        dlg.exec()
+
+        return input_name.text().strip(), result["ok"]
+
+    def _fl_rename_by_path(self, old_path, old_name):
+        """파일 이름 변경 + 카드 재스캔"""
+        new_name, ok = self._show_rename_dialog(old_name)
+        if ok and new_name and new_name != old_name:
+            new_path = os.path.join(os.path.dirname(old_path), new_name)
+            try:
+                os.rename(old_path, new_path)
+                from auto_rename import gemini_ocr
+                gemini_ocr._update_cache_key(old_path, new_path)
+                self.parent_widget.emit_log(f"[파일 변경] {old_name} → {new_name}")
+                self.parent_widget.rename_trigger_signal.emit()
+            except Exception as e:
+                JarvisMessageBox.warning(self, "이름 변경 실패", str(e))
+
+    def _fl_delete_by_path(self, path, name):
+        """파일 삭제 + 카드 재스캔"""
+        if JarvisMessageBox.question(self, "삭제 확인", f"'{name}' 파일을 삭제할까요?"):
+            try:
+                os.remove(path)
+                self.parent_widget.emit_log(f"[파일 삭제] {name}")
+                self.parent_widget.rename_trigger_signal.emit()
+            except Exception as e:
+                JarvisMessageBox.warning(self, "삭제 실패", str(e))
+
     def _refresh_marking_display(self):
         """마킹된 파일 목록을 카드에 표시/갱신"""
         # 기존 위젯 정리
@@ -809,7 +1313,7 @@ class GroupCard(GlassFrame):
             self.btn_toggle.setText(f"폴더 정리 ({len(self.marked_files)})")
         
         # 헤더
-        lbl = QLabel(f"📎 관련 파일 ({len(self.marked_files)}):")
+        lbl = QLabel(f"📎 추가 파일 ({len(self.marked_files)}):")
         lbl.setStyleSheet("color: #ffaa44; font-size: 9pt; font-weight: bold; background: transparent;")
         self.marking_layout.addWidget(lbl)
         
@@ -829,7 +1333,7 @@ class GroupCard(GlassFrame):
                 QPushButton { background: transparent; border: none; font-size: 10px; }
                 QPushButton:hover { background: rgba(255, 50, 50, 80); border-radius: 4px; }
             """)
-            btn_remove.setToolTip("마킹 제거")
+            btn_remove.setToolTip("제거")
             btn_remove.clicked.connect(lambda _, i=idx: self._remove_marking_file(i))
             row.addWidget(btn_remove)
             
@@ -856,7 +1360,7 @@ class GroupCard(GlassFrame):
         start_dir = export_docs_root if export_docs_root and os.path.exists(export_docs_root) else ""
         
         files, _ = QFileDialog.getOpenFileNames(
-            self, "관련 파일 선택", start_dir,
+            self, "추가할 파일 선택", start_dir,
             "All Files (*.*);;PDF (*.pdf);;Excel (*.xlsx *.xls);;Images (*.jpg *.png *.bmp)"
         )
         
@@ -970,11 +1474,35 @@ class GroupCard(GlassFrame):
                 if not resolved:
                     return  # 사용자가 취소
 
+        _bl_id = self.text_id
+        _target_dir = self.directory
+
+        def _merge_verify_cb(failed_files, total, success_pages):
+            import threading as _threading
+            event = _threading.Event()
+            result = {'action': 'cancel'}
+            parent.merge_verify_signal.emit({
+                'failed_files': failed_files, 'total': total,
+                'success_pages': success_pages, 'event': event, 'result': result,
+            })
+            event.wait()
+            return result['action']
+
         def run_archive():
             export_docs_root = getattr(parent.archiver, 'export_docs_root', '') if hasattr(parent, 'archiver') else ''
-            self.renamer.execute_merge_task(self.directory, output_name, archive_files,
-                                           export_docs_root=export_docs_root, marked_files=marked)
+            success = self.renamer.execute_merge_task(_target_dir, output_name, archive_files,
+                                           export_docs_root=export_docs_root, marked_files=marked,
+                                           merge_verify_callback=_merge_verify_cb)
             parent.merge_complete_signal.emit()
+            # 첨부 파일 이동 실패 알림
+            failed_attached = getattr(self.renamer, 'last_failed_attached', [])
+            if failed_attached and hasattr(parent, 'move_failed_signal'):
+                parent.move_failed_signal.emit(failed_attached)
+            if success:
+                bl_folders = [d for d in os.listdir(_target_dir) if os.path.isdir(os.path.join(_target_dir, d)) and _bl_id in d]
+                if bl_folders and hasattr(parent, 'shipping_search_signal'):
+                    target_folder = os.path.join(_target_dir, bl_folders[0])
+                    parent.shipping_search_signal.emit(_bl_id, target_folder)
 
         threading.Thread(target=run_archive, daemon=True).start()
         parent.emit_log(f"[{log_prefix}] {self.text_id} 폴더 정리 + 관련 파일 수집 중... (마킹 {len(marked)}개)")
@@ -1198,11 +1726,40 @@ class GroupCard(GlassFrame):
                 if not resolved:
                     return
 
+        _bl_id = self.text_id
+        _target_dir = self.directory
+
+        def _merge_verify_callback(failed_files, total, success_pages):
+            """백그라운드에서 호출 → 시그널로 메인 스레드 팝업 → Event로 결과 대기"""
+            import threading as _threading
+            event = _threading.Event()
+            result = {'action': 'cancel'}
+            parent.merge_verify_signal.emit({
+                'failed_files': failed_files,
+                'total': total,
+                'success_pages': success_pages,
+                'event': event,
+                'result': result,
+            })
+            event.wait()  # 메인 스레드 팝업 결과 대기
+            return result['action']
+
         def run_merge():
             export_docs_root = getattr(parent.archiver, 'export_docs_root', '') if hasattr(parent, 'archiver') else ''
-            self.renamer.execute_merge_task(self.directory, output_name, final_files,
-                                           export_docs_root=export_docs_root, marked_files=marked)
+            success = self.renamer.execute_merge_task(_target_dir, output_name, final_files,
+                                           export_docs_root=export_docs_root, marked_files=marked,
+                                           merge_verify_callback=_merge_verify_callback)
             parent.merge_complete_signal.emit()
+            # 첨부 파일 이동 실패 알림
+            failed_attached = getattr(self.renamer, 'last_failed_attached', [])
+            if failed_attached and hasattr(parent, 'move_failed_signal'):
+                parent.move_failed_signal.emit(failed_attached)
+            # 병합 성공 시에만 선적서류 검색
+            if success:
+                bl_folders = [d for d in os.listdir(_target_dir) if os.path.isdir(os.path.join(_target_dir, d)) and _bl_id in d]
+                if bl_folders and hasattr(parent, 'shipping_search_signal'):
+                    target_folder = os.path.join(_target_dir, bl_folders[0])
+                    parent.shipping_search_signal.emit(_bl_id, target_folder)
 
         threading.Thread(target=run_merge, daemon=True).start()
 
@@ -2202,510 +2759,3 @@ class MailThreadSelectDialog(QDialog):
         else:
             super().keyPressEvent(event)
 
-
-class MarkingPopup(QDialog):
-    """수출신고필증 이름변경 시 관련 파일 마킹 팝업"""
-    
-    def __init__(self, parent=None, company="", invoice_id="", filepath="", export_docs_root=""):
-        super().__init__(parent)
-        self.company = company
-        self.invoice_id = invoice_id
-        self.filepath = filepath
-        self.export_docs_root = export_docs_root
-        self.marked_files = []  # 결과: [{'name': str, 'path': str, 'icon': str}, ...]
-        self._skipped = False
-        
-        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog | Qt.WindowType.WindowStaysOnTopHint)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setFixedWidth(450)
-        self.setMinimumHeight(200)
-        
-        self.init_ui()
-    
-    def init_ui(self):
-        from PyQt6.QtWidgets import QGraphicsDropShadowEffect, QScrollArea, QCheckBox, QFileDialog
-        from PyQt6.QtGui import QFont
-        
-        # 메인 컨테이너
-        self.container = QWidget(self)
-        self.container.setObjectName("marking_container")
-        self.container.setStyleSheet("""
-            #marking_container {
-                background-color: rgba(5, 15, 30, 240);
-                border: 2px solid #00ffff;
-                border-radius: 12px;
-            }
-        """)
-        
-        shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(30)
-        shadow.setXOffset(0)
-        shadow.setYOffset(5)
-        shadow.setColor(Qt.GlobalColor.black)
-        self.container.setGraphicsEffect(shadow)
-        
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.addWidget(self.container)
-        
-        inner = QVBoxLayout(self.container)
-        inner.setContentsMargins(16, 16, 16, 12)
-        inner.setSpacing(10)
-        
-        # 헤더
-        lbl_title = QLabel(f"📎 파일 마킹")
-        lbl_title.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
-        lbl_title.setStyleSheet("color: #00ffff; background: transparent;")
-        inner.addWidget(lbl_title)
-        
-        lbl_info = QLabel(f"{self.company}({self.invoice_id}) 수출신고필증")
-        lbl_info.setStyleSheet("color: #aaa; font-size: 9pt; background: transparent;")
-        lbl_info.setWordWrap(True)
-        inner.addWidget(lbl_info)
-        
-        # 구분선
-        line = QWidget()
-        line.setFixedHeight(1)
-        line.setStyleSheet("background-color: #00aaaa;")
-        inner.addWidget(line)
-        
-        # 열린 파일 목록 + 자동 매칭 파일
-        lbl_open = QLabel("현재 열린 파일:")
-        lbl_open.setStyleSheet("color: #ccc; font-size: 9pt; background: transparent;")
-        inner.addWidget(lbl_open)
-        
-        # 스크롤 영역 (체크박스 리스트)
-        self.scroll = QScrollArea()
-        self.scroll.setWidgetResizable(True)
-        self.scroll.setMaximumHeight(250)
-        self.scroll.setStyleSheet("""
-            QScrollArea { background: transparent; border: none; }
-            QScrollArea > QWidget > QWidget { background: transparent; }
-        """)
-
-        self.check_container = QWidget()
-        self.check_layout = QVBoxLayout(self.check_container)
-        self.check_layout.setContentsMargins(4, 4, 4, 4)
-        self.check_layout.setSpacing(4)
-        self.scroll.setWidget(self.check_container)
-        inner.addWidget(self.scroll)
-        
-        self.checkboxes = []  # (QCheckBox, file_info_dict)
-        
-        # 열린 파일 감지
-        try:
-            from core.open_file_detector import get_open_files
-            open_files = get_open_files()
-        except Exception:
-            open_files = []
-        
-        # 경로가 비어있는 파일의 실제 경로 찾기
-        search_dirs = []
-        if self.export_docs_root and os.path.exists(self.export_docs_root):
-            search_dirs.append(self.export_docs_root)
-        rename_dir = os.path.dirname(self.filepath) if self.filepath else ''
-        if rename_dir and os.path.exists(rename_dir):
-            search_dirs.append(rename_dir)
-        
-        for finfo in open_files:
-            if not finfo.get('path') and search_dirs:
-                finfo['path'] = self._find_file_in_dirs(finfo['name'], search_dirs)
-        
-        if open_files:
-            for finfo in open_files:
-                icon = finfo['icon']
-                name = finfo['name']
-                cb = QCheckBox(f"☐ {icon} {name}")
-                cb.setStyleSheet("""
-                    QCheckBox { 
-                        color: #ddd; font-size: 10pt; background: transparent;
-                        padding: 4px 8px;
-                    }
-                    QCheckBox:hover { color: #00ffff; }
-                    QCheckBox::indicator {
-                        width: 0px; height: 0px;
-                        border: none;
-                    }
-                """)
-                cb.toggled.connect(lambda checked, c=cb, ic=icon, n=name:
-                    c.setText(f"✅ {ic} {n}" if checked else f"☐ {ic} {n}"))
-                self.check_layout.addWidget(cb)
-                self.checkboxes.append((cb, finfo))
-        else:
-            lbl_none = QLabel("  (열린 파일을 감지하지 못했습니다)")
-            lbl_none.setStyleSheet("color: #666; font-size: 9pt; background: transparent;")
-            self.check_layout.addWidget(lbl_none)
-        
-        # 자동 매칭 기능이 제거되었습니다.
-        
-        self.check_layout.addStretch()
-        
-        # 버튼 영역
-        btn_layout = QHBoxLayout()
-        btn_layout.setSpacing(8)
-        
-        # 파일 직접 추가
-        btn_add = NeonButton("📂 파일 추가", color="orange")
-        btn_add.setFixedHeight(34)
-        btn_add.clicked.connect(self._add_files_dialog)
-        btn_layout.addWidget(btn_add)
-        
-        btn_layout.addStretch()
-        
-        # 건너뛰기
-        btn_skip = NeonButton("건너뛰기", color="orange")
-        btn_skip.setFixedHeight(34)
-        btn_skip.clicked.connect(self._skip)
-        btn_layout.addWidget(btn_skip)
-        
-        # 마킹 완료
-        btn_done = NeonButton("✅ 마킹 완료", color="cyan")
-        btn_done.setFixedHeight(34)
-        btn_done.clicked.connect(self._complete)
-        btn_layout.addWidget(btn_done)
-        
-        inner.addLayout(btn_layout)
-        
-        # 화면 중앙 상단에 배치 (작업에 방해가 덜 되도록)
-        self.adjustSize()
-        screen = QApplication.primaryScreen().availableGeometry()
-        self.move(screen.right() - self.width() - 20, screen.top() + 50)
-    
-    def _add_files_dialog(self):
-        """파일 직접 추가 (export_docs_root 기본 경로)"""
-        from PyQt6.QtWidgets import QFileDialog, QCheckBox
-        
-        start_dir = self.export_docs_root if self.export_docs_root and os.path.exists(self.export_docs_root) else ""
-        
-        files, _ = QFileDialog.getOpenFileNames(
-            self, "관련 파일 선택", start_dir,
-            "All Files (*.*);;PDF (*.pdf);;Excel (*.xlsx *.xls);;Images (*.jpg *.png *.bmp);;Word (*.docx *.doc)"
-        )
-        
-        if files:
-            from core.open_file_detector import get_file_type_icon
-            for f in files:
-                name = os.path.basename(f)
-                # 중복 확인
-                existing = [info['name'] for _, info in self.checkboxes]
-                if name in existing:
-                    continue
-                
-                finfo = {'name': name, 'path': f, 'icon': get_file_type_icon(name)}
-                icon = finfo['icon']
-                cb = QCheckBox(f"✅ {icon} {name}")
-                cb.setChecked(True)  # 직접 추가한 파일은 자동 체크
-                cb.setStyleSheet("""
-                    QCheckBox { 
-                        color: #ffaa44; font-size: 10pt; background: transparent;
-                        padding: 4px 8px;
-                    }
-                    QCheckBox:hover { color: #ffcc66; }
-                    QCheckBox::indicator {
-                        width: 0px; height: 0px;
-                        border: none;
-                    }
-                """)
-                cb.toggled.connect(lambda checked, c=cb, ic=icon, n=name:
-                    c.setText(f"✅ {ic} {n}" if checked else f"☐ {ic} {n}"))
-                # stretch 앞에 삽입
-                idx = self.check_layout.count() - 1  # stretch 위치
-                self.check_layout.insertWidget(idx, cb)
-                self.checkboxes.append((cb, finfo))
-
-            # 추가된 파일이 보이도록 스크롤을 맨 아래로
-            from PyQt6.QtCore import QTimer
-            QTimer.singleShot(50, lambda: self.scroll.verticalScrollBar().setValue(
-                self.scroll.verticalScrollBar().maximum()))
-    
-    def _find_file_in_dirs(self, filename, search_dirs):
-        """파일명으로 여러 디렉토리에서 실제 경로 찾기"""
-        base_name = os.path.splitext(filename)[0]
-        
-        for search_dir in search_dirs:
-            if not search_dir or not os.path.exists(search_dir):
-                continue
-            try:
-                for item in os.listdir(search_dir):
-                    item_path = os.path.join(search_dir, item)
-                    if os.path.isfile(item_path):
-                        # 정확 매칭
-                        if item == filename:
-                            return item_path
-                        # base name 매칭 (확장자가 다를 수 있음)
-                        if os.path.splitext(item)[0] == base_name:
-                            return item_path
-                    elif os.path.isdir(item_path):
-                        # 하위 1단계도 검색
-                        for sub_item in os.listdir(item_path):
-                            sub_path = os.path.join(item_path, sub_item)
-                            if os.path.isfile(sub_path):
-                                if sub_item == filename:
-                                    return sub_path
-                                if os.path.splitext(sub_item)[0] == base_name:
-                                    return sub_path
-            except Exception:
-                continue
-        return ''
-    
-
-    
-    def _skip(self):
-
-        """건너뛰기 (마킹 없이 닫기)"""
-        self._skipped = True
-        self.marked_files = []
-        self.reject()
-    
-    def _complete(self):
-        """마킹 완료 - 체크된 파일을 결과로 저장하고 해당 파일 창 닫기"""
-        self.marked_files = []
-        for cb, finfo in self.checkboxes:
-            if cb.isChecked():
-                self.marked_files.append(finfo)
-        
-        # 체크된 파일의 창 닫기
-        if self.marked_files:
-            self._close_marked_file_windows()
-        
-        self.accept()
-    
-    def _close_marked_file_windows(self):
-        """마킹된 개별 파일만 정확하고 빠르게 종료 (Acrobat 탭 순회 포함)"""
-        import win32gui
-        import win32con
-        import win32api
-        import time
-        import os
-        
-        # 1. 종료 대상 목록 정리
-        marked_pdfs = []
-        marked_others = []
-        for f in self.marked_files:
-            name = f['name'].lower()
-            base = os.path.splitext(name)[0]
-            if name.endswith('.pdf'):
-                marked_pdfs.append(base)
-            else:
-                marked_others.append(base)
-        
-        # 2. 일반 파일 종료 - 엑셀(COM)과 기타(Win32) 분리
-        if marked_others:
-            # 엑셀과 나머지(이미지/워드 등) 분리
-            excel_exts = {'.xls', '.xlsx', '.xlsm', '.csv'}
-            excel_targets = []
-            generic_targets = []
-            
-            # 마킹된 파일 리스트를 다시 뒤져서 확장자 확인
-            for m_base in marked_others:
-                is_excel = False
-                for f in self.marked_files:
-                    f_name = f['name'].lower()
-                    if m_base in f_name and any(ext in f_name for ext in excel_exts):
-                        is_excel = True
-                        break
-                if is_excel:
-                    excel_targets.append(m_base)
-                else:
-                    generic_targets.append(m_base)
-            
-            # (A) 엑셀: COM API를 이용한 '진짜' 개별 워크북 종료 (근본 해결)
-            if excel_targets:
-                self._smart_close_excel_via_com(excel_targets)
-                
-            # (B) 기타(이미지, 워드 등) : 창 제목 매칭 + WM_CLOSE (독립적 창이므로 안전함)
-            if generic_targets:
-                def enum_generic(hwnd, _):
-                    if not win32gui.IsWindowVisible(hwnd): return
-                    title = win32gui.GetWindowText(hwnd).lower()
-                    if not title: return
-                    for m in generic_targets:
-                        if m in title:
-                            win32gui.PostMessage(hwnd, win32con.WM_CLOSE, 0, 0)
-                            break
-                try:
-                    win32gui.EnumWindows(enum_generic, None)
-                except OSError: pass
-            
-        # 3. PDF (Acrobat) - 탭 순회 종료 (마킹된 페이지만 닫기)
-        if marked_pdfs:
-            self._smart_close_acrobat_tabs(marked_pdfs)
-
-    def _smart_close_excel_via_com(self, targets):
-        """시스템 전체의 ROT를 스캔하고 IDispatch 바인딩을 통해 마킹된 엑셀 파일만 100% 정밀 종료"""
-        import pythoncom
-        import win32com.client
-        import os
-        import win32gui
-        import win32con
-        
-        if not targets: return
-        targets = set(targets)
-        
-        # COM 초기화 (스레드 안전성 확보)
-        pythoncom.CoInitialize()
-        try:
-            context = pythoncom.CreateBindCtx(0)
-            rot = pythoncom.GetRunningObjectTable()
-            
-            for mon in rot.EnumRunning():
-                try:
-                    name = mon.GetDisplayName(context, mon)
-                    low_name = name.lower()
-                    # 엑셀 관련 모니커 확인
-                    if any(ext in low_name for ext in ['.xls', '.xlsx', '.xlsm', '.csv']):
-                        base_name = os.path.splitext(os.path.basename(low_name))[0]
-                        
-                        matched = None
-                        for t in targets:
-                            if t == base_name or t in low_name:
-                                matched = t
-                                break
-                        
-                        if matched:
-                            # [핵심] PyIUnknown 개체를 IDispatch로 쿼리하여 바인딩 (성공 검증된 방식)
-                            unk = rot.GetObject(mon)
-                            try:
-                                # IDispatch 인터페이스 확보 후 Dispatch 래핑
-                                disp = unk.QueryInterface(pythoncom.IID_IDispatch)
-                                wb = win32com.client.Dispatch(disp)
-                                # 저장 없이 닫기
-                                wb.Close(False)
-                                if matched in targets:
-                                    targets.remove(matched)
-                            except Exception:
-                                # 폴백: 직접 Close 호출 시도
-                                try:
-                                    getattr(unk, "Close")(False)
-                                    if matched in targets:
-                                        targets.remove(matched)
-                                except Exception: pass
-                except Exception: continue
-                if not targets: break
-        except Exception:
-            pass
-        finally:
-            pythoncom.CoUninitialize()
-            
-        # Fallback: COM으로 닫히지 않고 남은 타겟들 강제 닫기
-        if targets:
-            def force_close_excel(hwnd, _):
-                if not win32gui.IsWindowVisible(hwnd): return
-                title = win32gui.GetWindowText(hwnd).lower()
-                if "excel" in title:
-                    for t in list(targets):
-                        if t in title:
-                            # 윈도우 단에서 강제 닫기 신호
-                            win32gui.PostMessage(hwnd, win32con.WM_CLOSE, 0, 0)
-                            try: targets.remove(t)
-                            except ValueError: pass
-                            break
-            try:
-                win32gui.EnumWindows(force_close_excel, None)
-            except Exception:
-                pass
-
-    def _smart_close_acrobat_tabs(self, targets):
-        """Acrobat 창의 탭을 돌려가며 마킹된 파일만 종료"""
-        import win32gui
-        import win32con
-        import win32api
-        import time
-        
-        # 대상이 없으면 즉시 종료
-        if not targets: return
-        
-        targets = set(targets)
-        acro_hwnds = []
-        def find_acro(h, _):
-            if "AcrobatSDIWindow" in win32gui.GetClassName(h) and win32gui.IsWindowVisible(h):
-                acro_hwnds.append(h)
-        try:
-            win32gui.EnumWindows(find_acro, None)
-        except OSError: pass
-        
-        for hwnd in acro_hwnds:
-            # 한 창에서 최대 15번 탭 전환 시도 (무한 루프 방지)
-            visited_titles = set()
-            for _ in range(15):
-                if not targets: break
-                
-                title = win32gui.GetWindowText(hwnd).lower()
-                # 이미 확인한 제목이고 마킹 대상이 아니면 순회 종료
-                if title in visited_titles: break
-                visited_titles.add(title)
-                
-                matched = None
-                for t in targets:
-                    if t in title:
-                        matched = t
-                        break
-                
-                if matched:
-                    # 마킹된 파일이면 해당 탭 닫기 (Ctrl+W)
-                    targets.remove(matched)
-                    try:
-                        win32gui.SetForegroundWindow(hwnd)
-                        win32api.keybd_event(win32con.VK_CONTROL, 0, 0, 0)
-                        win32api.keybd_event(ord('W'), 0, 0, 0)
-                        win32api.keybd_event(ord('W'), 0, win32con.KEYEVENTF_KEYUP, 0)
-                        win32api.keybd_event(win32con.VK_CONTROL, 0, win32con.KEYEVENTF_KEYUP, 0)
-                        time.sleep(0.3) # 탭이 닫히고 다음 탭이 로드될 때까지 대기
-                    except OSError: break
-                else:
-                    # 마킹 안 된 파일이면 다음 탭으로 이동 (Ctrl+Tab)
-                    try:
-                        win32gui.SetForegroundWindow(hwnd)
-                        win32api.keybd_event(win32con.VK_CONTROL, 0, 0, 0)
-                        win32api.keybd_event(win32con.VK_TAB, 0, 0, 0)
-                        win32api.keybd_event(win32con.VK_TAB, 0, win32con.KEYEVENTF_KEYUP, 0)
-                        win32api.keybd_event(win32con.VK_CONTROL, 0, win32con.KEYEVENTF_KEYUP, 0)
-                        time.sleep(0.1)
-                    except OSError: break
-
-    def _smart_close_excel_windows(self, targets):
-        """엑셀 창들을 하나씩 확인하며 마킹된 파일만 종료 (Ctrl+W 활용)"""
-        import win32gui
-        import win32con
-        import win32api
-        import time
-        
-        if not targets: return
-        targets = set(targets)
-        
-        excel_hwnds = []
-        def find_excel(h, _):
-            # 엑셀의 메인 창 클래스 로드
-            if "XLMAIN" in win32gui.GetClassName(h) and win32gui.IsWindowVisible(h):
-                excel_hwnds.append(h)
-        try:
-            win32gui.EnumWindows(find_excel, None)
-        except OSError: pass
-        
-        for hwnd in excel_hwnds:
-            if not targets: break
-            
-            title = win32gui.GetWindowText(hwnd).lower()
-            matched = None
-            for t in targets:
-                if t in title:
-                    matched = t
-                    break
-            
-            if matched:
-                targets.remove(matched)
-                try:
-                    win32gui.SetForegroundWindow(hwnd)
-                    time.sleep(0.1)
-                    # Ctrl+W 전송 (엑셀의 현재 통합 문서만 닫기)
-                    win32api.keybd_event(win32con.VK_CONTROL, 0, 0, 0)
-                    win32api.keybd_event(ord('W'), 0, 0, 0)
-                    win32api.keybd_event(ord('W'), 0, win32con.KEYEVENTF_KEYUP, 0)
-                    win32api.keybd_event(win32con.VK_CONTROL, 0, win32con.KEYEVENTF_KEYUP, 0)
-                    time.sleep(0.3)
-                except OSError:
-                    continue
-
-    @property
-    def was_skipped(self):
-        return self._skipped

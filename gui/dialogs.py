@@ -1096,7 +1096,7 @@ class GroupCard(GlassFrame):
         body_layout.setContentsMargins(0, 8, 0, 0)
         body_layout.setSpacing(10)
 
-        # 필요 서류 체크리스트 (Claude Design doc-checklist container)
+        # 필요 서류 체크리스트 (Claude Design doc-checklist — chip 위젯 그리드)
         from PyQt6.QtWidgets import QAbstractItemView
         from PyQt6.QtGui import QShortcut, QKeySequence
         self._checklist_container = QFrame()
@@ -1111,17 +1111,18 @@ class GroupCard(GlassFrame):
         _checklist_lay.setContentsMargins(12, 10, 12, 10)
         _checklist_lay.setSpacing(0)
 
+        # 체크리스트 chip들이 들어갈 컨테이너 — wrap되는 flow 레이아웃은 없으므로
+        # 동적으로 QVBoxLayout → 내부에 QHBoxLayout 행들을 생성해 wrap 구현
+        self._checklist_chips_wrap = QWidget()
+        self._checklist_chips_wrap.setStyleSheet("background: transparent;")
+        self._checklist_chips_layout = QVBoxLayout(self._checklist_chips_wrap)
+        self._checklist_chips_layout.setContentsMargins(0, 0, 0, 0)
+        self._checklist_chips_layout.setSpacing(6)
+        _checklist_lay.addWidget(self._checklist_chips_wrap)
+
+        # 레거시 호환용 숨김 QLabel (일부 경로에서 setText 호출)
         self.lbl_checklist = QLabel()
-        self.lbl_checklist.setStyleSheet(f"""
-            color: {_CT['fg_1']};
-            font-size: 9.5pt;
-            background: transparent;
-            border: none;
-            letter-spacing: 0.1px;
-        """)
-        self.lbl_checklist.setWordWrap(True)
-        self.lbl_checklist.setTextFormat(Qt.TextFormat.RichText)
-        _checklist_lay.addWidget(self.lbl_checklist)
+        self.lbl_checklist.setVisible(False)
         body_layout.addWidget(self._checklist_container)
 
         self.file_list = DraggableFileList()
@@ -1169,14 +1170,16 @@ class GroupCard(GlassFrame):
 
         if is_export_only:
             export_label = "반송신고필증" if any('반송신고필증' in v for v in docs.values()) else "수출신고필증"
-            self.lbl_checklist.setText(f"{export_label} (정산서 없음 → 바로 폴더 정리)")
+            self._rebuild_checklist([(export_label, True, "(정산서 없음 → 바로 폴더 정리)")])
         elif is_import_no_settlement:
-            self.lbl_checklist.setText(f"수입신고필증 (정산서 없음 → 바로 폴더 정리)")
+            self._rebuild_checklist([("수입신고필증", True, "(정산서 없음 → 바로 폴더 정리)")])
         elif has_statement:
             self._auto_analyze_from_cache()
         else:
-            summary_text = ", ".join(docs.values())
-            self.lbl_checklist.setText(summary_text[:80] + "..." if len(summary_text) > 80 else summary_text)
+            # 분석 전 상태: 문서 이름들을 체크 안 된 상태로 표시
+            names = sorted(set(docs.values()))
+            items = [(n, True, None) for n in names[:9]]  # 캐시 없이 무작정 표시하면 혼란 → True로
+            self._rebuild_checklist(items)
 
         # [NEW] 금액 100% 매칭 검증 상태 — Claude Design group-warning 배너
         self._warning_frame = QFrame()
@@ -1704,90 +1707,187 @@ class GroupCard(GlassFrame):
             except Exception as e:
                 print(f"캐시 조회 오류: {e}")
         
-        parts = []
-        for req in required:
-            is_found = req['found']
-            parts.append(self._make_doc_chip_html(req['name'], is_found, req.get('matched_by_amount', False)))
-
+        items = [(req['name'], req['found'], None) for req in required]
         total = len(required)
         checked = sum(1 for req in required if req['found'])
         missing = total - checked
-        if missing == 0:
-            summary = self._make_summary_html(total, 0, ok=True)
-        else:
-            summary = self._make_summary_html(total, missing, ok=False)
-        # 항목 간은 일반 공백 (줄바꿈 허용), 항목 내부 mark-name은 nbsp로 연결
-        self.lbl_checklist.setText("   ".join(parts) + "   " + summary)
-    
+        self._rebuild_checklist(items, summary=(total, missing, missing == 0))
+
     def _update_checklist_from_mapping(self):
         """AI 분석 후 mapping 기반으로 전체 체크리스트 갱신 (비용 항목 포함)"""
-        parts = []
+        items = []
         for item in self.mapping:
             label = item.get('label', '')
             filename = item.get('filename', '')
-            # 라벨에서 표시 이름 추출
             if ']' in label:
                 name = label.split(']')[-1].strip()
             elif ':' in label:
                 name = label.split(':')[-1].strip()
             else:
                 name = label
-
-            is_matched_by_amount = item.get('matched_by_amount', False)
             is_found = bool(filename) or (not filename and "포함" in label)
-            # "수수료계산서 포함" 서브텍스트
             sub = None
             if "포함" in label and not filename:
                 sub = "(수수료계산서 포함)"
-            parts.append(self._make_doc_chip_html(name, is_found, is_matched_by_amount, sub=sub))
+            items.append((name, is_found, sub))
 
-        total = len(parts)
+        total = len(items)
         checked = sum(1 for item in self.mapping if item.get('filename', '') or '포함' in item.get('label', ''))
         missing = total - checked
-        if missing == 0:
-            summary = self._make_summary_html(total, 0, ok=True)
-        else:
-            summary = self._make_summary_html(total, missing, ok=False)
-        # 항목 간은 일반 공백 (줄바꿈 허용), 항목 내부 mark-name은 nbsp로 연결
-        self.lbl_checklist.setText("   ".join(parts) + "   " + summary)
+        self._rebuild_checklist(items, summary=(total, missing, missing == 0))
 
     # ─────────────────────────────────────────────────
-    # doc-chip HTML 렌더 헬퍼 (Claude Design)
+    # doc-chip 위젯 렌더 (Claude Design - file list 체크박스 스타일과 동일)
     # ─────────────────────────────────────────────────
-    def _make_doc_chip_html(self, name, is_found, matched_by_amount=False, sub=None):
-        """체크리스트 항목 하나를 HTML로 렌더 (색 마크 + 이름 + optional sub)."""
+    def _make_doc_chip_widget(self, name, is_found, sub=None):
+        """체크리스트 한 항목의 위젯 (16x16 체크박스 + 이름 + 옵션 서브텍스트)."""
+        from .claude_theme import C as _CT
+        from .claude_icons import pixmap as _icpx
+        w = QWidget()
+        w.setStyleSheet("background: transparent;")
+        lay = QHBoxLayout(w)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(6)
+
+        # 16x16 체크박스 (파일 리스트와 동일한 스타일)
+        mark = QLabel()
+        mark.setFixedSize(16, 16)
+        mark.setAlignment(Qt.AlignmentFlag.AlignCenter)
         if is_found:
-            # 녹색 네모 + 체크 (HTML 흰 체크 위 녹색 배경)
-            mark_bg = '#59c886'
-            mark_symbol = '✓'
-            text_color = '#c1c4c9'
+            mark.setStyleSheet(f"""
+                background-color: {_CT['green']};
+                border: 1.5px solid {_CT['green']};
+                border-radius: 4px;
+            """)
+            mark.setPixmap(_icpx("Check", size=11, color="#0d0f15", stroke_width=3))
+            name_color = _CT['fg_1']
         else:
-            mark_bg = '#fa6863'
-            mark_symbol = '✕'
-            text_color = '#fa6863'
-        mark_html = (
-            f'<span style="background:{mark_bg};color:#0d0f15;'
-            f'padding:1px 4px 1px 4px;border-radius:3px;font-weight:bold;'
-            f'font-family: \'Pretendard\',sans-serif;font-size:9pt;">'
-            f'{mark_symbol}</span>'
-        )
-        sub_html = f'<span style="color:#5f636a;font-size:8.5pt;">&nbsp;{sub}</span>' if sub else ''
-        return f'{mark_html}&nbsp;<span style="color:{text_color};">{name}</span>{sub_html}'
+            mark.setStyleSheet(f"""
+                background-color: {_CT['red']};
+                border: 1.5px solid {_CT['red']};
+                border-radius: 4px;
+            """)
+            mark.setPixmap(_icpx("X", size=11, color="#0d0f15", stroke_width=3))
+            name_color = _CT['red']
+        lay.addWidget(mark)
 
-    def _make_summary_html(self, total, missing, ok=True):
-        """요약 텍스트 HTML."""
+        lbl = QLabel(name)
+        lbl.setStyleSheet(f"""
+            color: {name_color};
+            font-size: 9.5pt;
+            background: transparent;
+            border: none;
+        """)
+        lay.addWidget(lbl)
+
+        if sub:
+            lbl_sub = QLabel(sub)
+            lbl_sub.setStyleSheet(f"""
+                color: {_CT['fg_3']};
+                font-size: 8.5pt;
+                background: transparent;
+                border: none;
+            """)
+            lay.addWidget(lbl_sub)
+        return w
+
+    def _make_summary_widget(self, total, missing, ok=True):
+        """요약 위젯 (전체 N개 완료 / N개 미확인)."""
+        from .claude_theme import C as _CT
+        from .claude_icons import pixmap as _icpx
+        w = QWidget()
+        w.setStyleSheet("background: transparent;")
+        lay = QHBoxLayout(w)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(6)
+
+        mark = QLabel()
+        mark.setFixedSize(16, 16)
+        mark.setAlignment(Qt.AlignmentFlag.AlignCenter)
         if ok:
-            return (
-                f'<span style="background:#59c886;color:#0d0f15;padding:1px 5px;'
-                f'border-radius:3px;font-weight:bold;font-size:9pt;">✓</span>'
-                f'&nbsp;<span style="color:#59c886;font-weight:600;">전체 {total}개 항목 완료</span>'
-            )
+            mark.setStyleSheet(f"""
+                background-color: {_CT['green']};
+                border: 1.5px solid {_CT['green']};
+                border-radius: 4px;
+            """)
+            mark.setPixmap(_icpx("Check", size=11, color="#0d0f15", stroke_width=3))
+            text = f"전체 {total}개 항목 완료"
+            text_color = _CT['green']
         else:
-            return (
-                f'<span style="color:#e9ab2b;font-weight:bold;font-size:10pt;">⚠</span>'
-                f'&nbsp;<span style="color:#e9ab2b;font-weight:500;">'
-                f'{total}개 중 {missing}개 미확인</span>'
-            )
+            mark.setStyleSheet(f"""
+                background-color: {_CT['amber']};
+                border: 1.5px solid {_CT['amber']};
+                border-radius: 4px;
+            """)
+            # Claude Alert 아이콘이 없으므로 X 대신 경고표시 사용: 간단히 "!"
+            from PyQt6.QtGui import QPixmap as _QPixmap, QPainter as _QPainter, QColor as _QColor, QFont as _QFont
+            pm = _QPixmap(16, 16)
+            pm.fill(Qt.GlobalColor.transparent)
+            p = _QPainter(pm)
+            p.setRenderHint(_QPainter.RenderHint.Antialiasing)
+            p.setPen(_QColor("#0d0f15"))
+            f = _QFont("Pretendard", 9)
+            f.setBold(True)
+            p.setFont(f)
+            p.drawText(pm.rect(), Qt.AlignmentFlag.AlignCenter, "!")
+            p.end()
+            mark.setPixmap(pm)
+            text = f"{total}개 중 {missing}개 미확인"
+            text_color = _CT['amber']
+        lay.addWidget(mark)
+
+        lbl = QLabel(text)
+        lbl.setStyleSheet(f"""
+            color: {text_color};
+            font-size: 9.5pt;
+            font-weight: 600;
+            background: transparent;
+            border: none;
+        """)
+        lay.addWidget(lbl)
+        return w
+
+    def _rebuild_checklist(self, items, summary=None):
+        """체크리스트 컨테이너를 위젯 chip들로 재구성.
+        items: [(name, is_found, sub), ...]
+        summary: (total, missing, ok) 또는 None"""
+        # 기존 children 제거
+        while self._checklist_chips_layout.count():
+            child = self._checklist_chips_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+
+        # chip 위젯들을 가로로 배치 (wrap은 수동 — 폭 제한을 근거로 새 행 생성)
+        if not items and summary is None:
+            return
+
+        # 대략적인 wrap — 여기서는 단순히 한 행에 3~4개씩
+        PER_ROW = 3
+        current_row = None
+        for i, (name, is_found, sub) in enumerate(items):
+            if i % PER_ROW == 0:
+                current_row = QHBoxLayout()
+                current_row.setContentsMargins(0, 0, 0, 0)
+                current_row.setSpacing(16)
+                _row_wrap = QWidget()
+                _row_wrap.setStyleSheet("background: transparent;")
+                _row_wrap.setLayout(current_row)
+                self._checklist_chips_layout.addWidget(_row_wrap)
+            current_row.addWidget(self._make_doc_chip_widget(name, is_found, sub=sub))
+            if (i + 1) % PER_ROW == 0 or i == len(items) - 1:
+                current_row.addStretch(1)
+
+        if summary is not None:
+            total, missing, ok = summary
+            sum_row = QHBoxLayout()
+            sum_row.setContentsMargins(0, 2, 0, 0)
+            sum_row.setSpacing(16)
+            sum_wrap = QWidget()
+            sum_wrap.setStyleSheet("background: transparent;")
+            sum_wrap.setLayout(sum_row)
+            sum_row.addWidget(self._make_summary_widget(total, missing, ok))
+            sum_row.addStretch(1)
+            self._checklist_chips_layout.addWidget(sum_wrap)
 
     def refresh_mapping_ui(self):
         # 카드가 접혀있으면 먼저 펼침 (body_widget이 숨김이면 내부 mapping_widget도 안 보임)

@@ -1874,11 +1874,19 @@ class JarvisGUI(QMainWindow):
         title_row.addWidget(btn_rescan)
         layout.addLayout(title_row)
 
-        # ── 2) BREADCRUMBS (path) ──
+        # ── 2) BREADCRUMBS (folder icon + path) ──
         layout.addSpacing(10)
         crumbs_row = QHBoxLayout()
         crumbs_row.setSpacing(8)
         crumbs_row.setContentsMargins(0, 0, 0, 0)
+
+        from gui.claude_icons import pixmap as _icpx
+        _crumbs_folder = QLabel()
+        _crumbs_folder.setFixedSize(16, 16)
+        _crumbs_folder.setPixmap(_icpx("Folder", size=14, color=CT['fg_2']))
+        _crumbs_folder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        _crumbs_folder.setStyleSheet("background: transparent; border: none;")
+        crumbs_row.addWidget(_crumbs_folder)
 
         self.lbl_location = QLabel("폴더를 선택하세요")
         self.lbl_location.setStyleSheet(f"""
@@ -1911,9 +1919,9 @@ class JarvisGUI(QMainWindow):
         filter_layout.setContentsMargins(0, 0, 0, 0)
         filter_layout.setSpacing(6)
 
-        lbl_hint = QLabel("ID CLASSIFIED")
-        lbl_hint.setStyleSheet(f"color: {CT['fg_3']}; font-size: 8.5pt; font-weight: 600; letter-spacing: 1.5px; background: transparent;")
-        filter_layout.addWidget(lbl_hint)
+        self.lbl_section_hint = QLabel("ID CLASSIFIED · 0 GROUPS")
+        self.lbl_section_hint.setStyleSheet(f"color: {CT['fg_3']}; font-size: 8.5pt; font-weight: 600; letter-spacing: 1.5px; background: transparent;")
+        filter_layout.addWidget(self.lbl_section_hint)
         filter_layout.addSpacing(6)
 
         # chip factory — color dot + text (setIcon으로 dot pixmap)
@@ -2033,6 +2041,9 @@ class JarvisGUI(QMainWindow):
             'red':    f"  충돌 {counts['red']}",
             'gray':   f"  미분류 {counts['gray']}",
         }
+        # section hint: "ID CLASSIFIED · N GROUPS"
+        if hasattr(self, 'lbl_section_hint'):
+            self.lbl_section_hint.setText(f"ID CLASSIFIED · {counts['all']} GROUPS")
         for key, btn in self.filter_btns.items():
             btn.setText(labels[key])
         # 현재 필터 재적용 (상태 바뀐 카드 반영)
@@ -2137,7 +2148,7 @@ class JarvisGUI(QMainWindow):
                 try:
                     # 미분류도 IndependentCard로 표시 (이름변경/삭제 우클릭 메뉴 지원)
                     from gui.dialogs import IndependentCard
-                    unclass_card = IndependentCard(self, directory, "미분류 (Unclassified)", unclassified)
+                    unclass_card = IndependentCard(self, directory, "미분류", unclassified)
                     self.merge_layout.addWidget(unclass_card)
                     self.group_cards.append(unclass_card)
                     if hasattr(unclass_card, 'status_changed'):

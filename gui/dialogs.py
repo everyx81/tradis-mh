@@ -313,16 +313,39 @@ class IndependentCard(GlassFrame):
         self.lbl_arrow.setStyleSheet("background: transparent; border: none;")
         header.addWidget(self.lbl_arrow)
 
-        # ID pill 톤의 컨테이너
+        # ID pill 스타일 컨테이너 (GroupCard와 통일)
+        _pill = QFrame()
+        _pill.setObjectName("IdPill")
+        _pill.setStyleSheet(f"""
+            QFrame#IdPill {{
+                background: {_CT['bg_3']};
+                border: 1px solid {_CT['border_soft']};
+                border-radius: 8px;
+            }}
+        """)
+        _pill_lay = QHBoxLayout(_pill)
+        _pill_lay.setContentsMargins(11, 5, 13, 5)
+        _pill_lay.setSpacing(8)
+
         self.lbl_badge = QLabel()
-        self.lbl_badge.setFixedSize(10, 10)
-        self.lbl_badge.setStyleSheet(f"background-color: {_CT['fg_3']}; border-radius: 5px; border: none;")
-        header.addWidget(self.lbl_badge)
+        self.lbl_badge.setFixedSize(8, 8)
+        self.lbl_badge.setStyleSheet(f"background-color: {_CT['fg_3']}; border-radius: 4px; border: none;")
+        _pill_lay.addWidget(self.lbl_badge)
 
         self.lbl_title = QLabel(doc_type)
-        self.lbl_title.setStyleSheet(f"color: {_CT['fg_0']}; font-weight: 600; font-size: 10.5pt; background: transparent;")
+        self.lbl_title.setStyleSheet(f"""
+            color: {_CT['fg_0']};
+            background: transparent;
+            border: none;
+            font-family: 'JetBrains Mono','Consolas','Monaco',monospace;
+            font-size: 10pt;
+            font-weight: 600;
+            letter-spacing: 0.3px;
+        """)
         self.lbl_title.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
-        header.addWidget(self.lbl_title)
+        _pill_lay.addWidget(self.lbl_title)
+
+        header.addWidget(_pill)
 
         # count-pill
         self.lbl_count_pill = QLabel(f"{len(file_list)}건")
@@ -905,23 +928,34 @@ class GroupCard(GlassFrame):
         self.header_widget.mousePressEvent = self._on_header_click
         header = QHBoxLayout(self.header_widget)
         header.setContentsMargins(0, 0, 0, 0)
-        header.setSpacing(12)
+        header.setSpacing(10)
 
-        # ── ID Pill (상태 색 컨테이너 + 내부 dot + "ID :" + text_id) ──
+        # ── Chevron caret (접힘/펼침 표시) ──
+        from .claude_icons import pixmap as _icpx
+        from .claude_theme import C as _CT
+        self.lbl_caret = QLabel()
+        self.lbl_caret.setFixedSize(18, 18)
+        self.lbl_caret.setPixmap(_icpx("Chevron", size=14, color=_CT['fg_2']))
+        self.lbl_caret.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_caret.setStyleSheet("background: transparent; border: none;")
+        header.addWidget(self.lbl_caret)
+
+        # ── ID Pill (상태 색 컨테이너 + 내부 dot + text_id) ──
         self.id_pill = QFrame()
         self.id_pill.setObjectName("IdPill")
         pill_layout = QHBoxLayout(self.id_pill)
-        pill_layout.setContentsMargins(14, 7, 16, 7)
-        pill_layout.setSpacing(9)
+        pill_layout.setContentsMargins(11, 5, 13, 5)
+        pill_layout.setSpacing(8)
 
         self.pill_dot = QLabel()
         self.pill_dot.setObjectName("PillDot")
-        self.pill_dot.setFixedSize(11, 11)
+        self.pill_dot.setFixedSize(8, 8)
         pill_layout.addWidget(self.pill_dot)
 
-        self.pill_label = QLabel("ID :")
+        # "ID :" 라벨은 Claude Design 시안에 없음 — 호환성 위해 dummy 생성
+        self.pill_label = QLabel("")
         self.pill_label.setObjectName("PillLabel")
-        pill_layout.addWidget(self.pill_label)
+        self.pill_label.hide()
 
         self.pill_id = QLabel(self.text_id)
         self.pill_id.setObjectName("PillId")
@@ -1165,6 +1199,18 @@ class GroupCard(GlassFrame):
         self.is_collapsed = not self.is_collapsed
         self.body_widget.setVisible(not self.is_collapsed)
         self.lbl_arrow.setText("▶" if self.is_collapsed else "▼")
+        # Claude Design caret 회전 (collapsed→Chevron, open→rotated)
+        if hasattr(self, 'lbl_caret'):
+            try:
+                from .claude_icons import pixmap as _icpx
+                from .claude_theme import C as _CT
+                from PyQt6.QtGui import QTransform
+                pm = _icpx("Chevron", size=14, color=_CT['fg_2'])
+                if not self.is_collapsed:
+                    pm = pm.transformed(QTransform().rotate(90))
+                self.lbl_caret.setPixmap(pm)
+            except Exception:
+                pass
         QTimer.singleShot(120, self._resume_hover_fx)
 
     def _compute_status(self):
@@ -1205,36 +1251,37 @@ class GroupCard(GlassFrame):
         return 'gray'
 
     # 상태별 pill 스타일 — 프리뷰와 일치 (동일 색 계열 통일, 약간 뿌연 반투명 느낌)
+    # Claude Design 시안: 기본 pill = bg_3 + fg_0, 상태별 도트 색만 변경 (err만 빨간 틴트)
     PILL_STYLES = {
         'green': {
-            # 약한 반투명 녹색 배경 + 진한 녹색 dot + 옅은 녹색톤 흰색 텍스트
-            'bg': 'qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 rgba(52,199,89,64), stop:1 rgba(40,170,75,46))',
-            'border': 'rgba(52,199,89,115)',
-            'text': '#a8f0c0',
-            'dot': '#34c759',
+            'bg':     '#323640',       # CT bg_3
+            'border': 'rgba(60, 64, 76, 180)',
+            'text':   '#f1f2f5',       # CT fg_0
+            'dot':    '#5dc48a',       # CT green
         },
         'yellow': {
-            'bg': 'qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 rgba(255,214,10,51), stop:1 rgba(230,190,0,38))',
-            'border': 'rgba(255,214,10,115)',
-            'text': '#ffe680',
-            'dot': '#ffd60a',
+            'bg':     '#323640',
+            'border': 'rgba(60, 64, 76, 180)',
+            'text':   '#f1f2f5',
+            'dot':    '#d6a847',       # CT amber
         },
         'red': {
-            'bg': 'qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 rgba(255,69,58,64), stop:1 rgba(220,50,45,46))',
-            'border': 'rgba(255,69,58,128)',
-            'text': '#ffa8a0',
-            'dot': '#ff453a',
+            # 디자인: .id-pill.r 은 붉은 틴트 배경 + 붉은 보더 + 붉은 텍스트
+            'bg':     'rgba(228, 113, 95, 36)',
+            'border': 'rgba(228, 113, 95, 130)',
+            'text':   '#f4b8ad',
+            'dot':    '#e4715f',       # CT red
         },
         'gray': {
-            'bg': 'rgba(200,210,220,25)',
-            'border': 'rgba(200,210,220,65)',
-            'text': '#d8e0ea',
-            'dot': '#ffffff',
+            'bg':     '#323640',
+            'border': 'rgba(60, 64, 76, 180)',
+            'text':   '#f1f2f5',
+            'dot':    '#6b6e78',       # CT fg_3
         },
     }
 
     def _apply_pill_style(self, status):
-        """ID pill에 상태 색 적용"""
+        """ID pill에 상태 색 적용 (Claude Design)."""
         if not hasattr(self, 'id_pill'):
             return
         s = self.PILL_STYLES.get(status, self.PILL_STYLES['gray'])
@@ -1242,25 +1289,25 @@ class GroupCard(GlassFrame):
             QFrame#IdPill {{
                 background: {s['bg']};
                 border: 1px solid {s['border']};
-                border-radius: 14px;
+                border-radius: 8px;
             }}
             QLabel#PillDot {{
                 background: {s['dot']};
-                border-radius: 5px;
+                border-radius: 4px;
             }}
             QLabel#PillLabel {{
                 color: {s['text']};
-                font-size: 10.5pt;
+                font-size: 10pt;
                 font-weight: 500;
                 background: transparent;
                 border: none;
             }}
             QLabel#PillId {{
                 color: {s['text']};
-                font-family: 'Consolas', 'Monaco', monospace;
-                font-size: 11pt;
-                font-weight: 700;
-                letter-spacing: 0.5px;
+                font-family: 'JetBrains Mono','Consolas','Monaco',monospace;
+                font-size: 10pt;
+                font-weight: 600;
+                letter-spacing: 0.3px;
                 background: transparent;
                 border: none;
             }}

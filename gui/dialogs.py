@@ -1861,10 +1861,10 @@ class GroupCard(GlassFrame):
         if not items and summary is None:
             return
 
-        # 대략적인 wrap — 여기서는 단순히 한 행에 3~4개씩
-        PER_ROW = 3
+        # 한 행에 4개씩 wrap (서브 텍스트 제거되므로 폭 여유 있음)
+        PER_ROW = 4
         current_row = None
-        for i, (name, is_found, sub) in enumerate(items):
+        for i, (name, is_found, _sub_unused) in enumerate(items):
             if i % PER_ROW == 0:
                 current_row = QHBoxLayout()
                 current_row.setContentsMargins(0, 0, 0, 0)
@@ -1873,7 +1873,8 @@ class GroupCard(GlassFrame):
                 _row_wrap.setStyleSheet("background: transparent;")
                 _row_wrap.setLayout(current_row)
                 self._checklist_chips_layout.addWidget(_row_wrap)
-            current_row.addWidget(self._make_doc_chip_widget(name, is_found, sub=sub))
+            # sub 텍스트는 무시 (사용자 요청: "(수수료계산서 포함)" 표시 안 함)
+            current_row.addWidget(self._make_doc_chip_widget(name, is_found, sub=None))
             if (i + 1) % PER_ROW == 0 or i == len(items) - 1:
                 current_row.addStretch(1)
 
@@ -2168,11 +2169,14 @@ class GroupCard(GlassFrame):
         from .claude_theme import C as _CT
         from .claude_icons import pixmap as _icpx
         from PyQt6.QtCore import QSize as _QSize
+        from PyQt6.QtWidgets import QSizePolicy as _QSP
         import os as _os
 
         row = QWidget()
         row.setStyleSheet("background: transparent;")
         row.setMinimumHeight(32)
+        # 행이 부모보다 넓어지지 않도록 — Expanding 정책 + 부모 width 따라감
+        row.setSizePolicy(_QSP.Policy.Expanding, _QSP.Policy.Preferred)
         lay = QHBoxLayout(row)
         lay.setContentsMargins(10, 5, 10, 5)
         lay.setSpacing(10)
@@ -2201,8 +2205,8 @@ class GroupCard(GlassFrame):
         ico_wrap.setPixmap(_icpx("File", size=13, color=_CT['fg_2']))
         lay.addWidget(ico_wrap)
 
-        # ③ 파일 이름 (mono)
-        lbl_name = QLabel(filename)
+        # ③ 파일 이름 (mono, 긴 이름 ellipsize)
+        lbl_name = QLabel()
         lbl_name.setStyleSheet(f"""
             color: {_CT['fg_0']};
             font-family: 'JetBrains Mono','Consolas',monospace;
@@ -2211,6 +2215,24 @@ class GroupCard(GlassFrame):
             border: none;
         """)
         lbl_name.setToolTip(filename)
+        # 사이즈 정책: 수평 Expanding + minimum width 0 → 좁을 때 elide
+        lbl_name.setSizePolicy(_QSP.Policy.Expanding, _QSP.Policy.Preferred)
+        lbl_name.setMinimumWidth(0)
+        # 원래 이름 저장해서 resize 시 elide 계산
+        lbl_name.setProperty("_full_name", filename)
+
+        def _update_elide(lbl=lbl_name, fn=filename):
+            from PyQt6.QtGui import QFontMetrics
+            fm = QFontMetrics(lbl.font())
+            avail = max(20, lbl.width() - 8)
+            lbl.setText(fm.elidedText(fn, Qt.TextElideMode.ElideRight, avail))
+        # 초기 설정 + resize 후 업데이트
+        _update_elide()
+        orig_resize = lbl_name.resizeEvent
+        def _on_name_resize(ev, _orig=orig_resize, _f=_update_elide):
+            _orig(ev)
+            _f()
+        lbl_name.resizeEvent = _on_name_resize
         lay.addWidget(lbl_name, stretch=1)
 
         # ④ meta: size · date

@@ -17,6 +17,7 @@ from .widgets import (DropListWidget, JarvisPanel, DraggableSearchResultList,
                       DraggableTreeView, NeonButton, get_unique_filename, TargetListWidget)
 from .utils import resource_path, get_run_dir
 from .styles import TARGET_LIST_STYLESHEET
+from .claude_theme import C as CT
 from core.config import get_config_path
 from .dialogs import JarvisMessageBox
 from .report_panel import ReportPanel
@@ -69,53 +70,134 @@ class FileManagerWidget(QWidget):
         
         self.tabs = QTabWidget()
         
-        # TAB 1: Internal
+        # TAB 1: Internal (Claude Design warm dark section cards)
         tab1 = QWidget()
         tab1.setStyleSheet("background-color: transparent;")
         t1_layout = QHBoxLayout(tab1)
         t1_layout.setContentsMargins(0, 0, 0, 0)
         t1_layout.setSpacing(5)
-        
-        # === 왼쪽 영역: 파일 리스트 + 버튼 ===
+
+        # === 좌측 영역: 섹션 카드 2개 + 하단 버튼 ===
         left_widget = QWidget()
         left_layout = QVBoxLayout(left_widget)
-        left_layout.setContentsMargins(5, 5, 5, 5)
-        left_layout.setSpacing(5)
-        
-        # 1. MOVE TARGET (폴더 리스트)
-        target_header = QHBoxLayout()
-        self.lbl_target_title = QLabel("1. TARGET FOLDERS (0)")
-        self.lbl_target_title.setStyleSheet("color: #e0eaf5; font-size: 10pt; font-weight: 600; letter-spacing: 0.3px;")
-        target_header.addWidget(self.lbl_target_title)
-        target_header.addStretch()
-        
-        self.btn_refresh_target = NeonButton("↻", color="cyan")
-        self.btn_refresh_target.setFixedSize(30, 22)
+        left_layout.setContentsMargins(14, 14, 14, 14)
+        left_layout.setSpacing(14)
+
+        _CARD_CSS = f"""
+            QFrame#SectionCard {{
+                background-color: {CT['bg_2']};
+                border: 1px solid {CT['border_soft']};
+                border-radius: 12px;
+            }}
+        """
+        _NUM_CSS = f"""
+            QLabel#SectionNum {{
+                color: {CT['fg_1']};
+                background-color: {CT['bg_3']};
+                border-radius: 9px;
+                font-family: 'JetBrains Mono','Consolas',monospace;
+                font-size: 8.5pt;
+                font-weight: 600;
+            }}
+        """
+        _SECTION_TITLE_CSS = (
+            f"color: {CT['fg_2']}; font-size: 9pt; font-weight: 700; "
+            f"letter-spacing: 1.5px; background: transparent; border: none;"
+        )
+        _SECTION_COUNT_CSS = (
+            f"color: {CT['fg_3']}; font-family: 'JetBrains Mono','Consolas',monospace; "
+            f"font-size: 9pt; background: transparent; border: none;"
+        )
+
+        # ============================================================
+        # 1) TARGET FOLDERS 섹션 카드
+        # ============================================================
+        card1 = QFrame()
+        card1.setObjectName("SectionCard")
+        card1.setStyleSheet(_CARD_CSS + _NUM_CSS)
+        card1_layout = QVBoxLayout(card1)
+        card1_layout.setContentsMargins(14, 12, 14, 12)
+        card1_layout.setSpacing(10)
+
+        c1_header = QHBoxLayout()
+        c1_header.setSpacing(8)
+
+        _num1 = QLabel("1")
+        _num1.setObjectName("SectionNum")
+        _num1.setFixedSize(18, 18)
+        _num1.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        c1_header.addWidget(_num1)
+
+        self.lbl_target_title = QLabel("TARGET FOLDERS")
+        self.lbl_target_title.setStyleSheet(_SECTION_TITLE_CSS)
+        c1_header.addWidget(self.lbl_target_title)
+        c1_header.addStretch()
+
+        self.lbl_target_count = QLabel("0 개")
+        self.lbl_target_count.setStyleSheet(_SECTION_COUNT_CSS)
+        c1_header.addWidget(self.lbl_target_count)
+
+        self.btn_refresh_target = QPushButton("↻")
+        self.btn_refresh_target.setFixedSize(26, 22)
+        self.btn_refresh_target.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_refresh_target.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {CT['fg_2']};
+                border: 1px solid transparent;
+                border-radius: 6px;
+                font-size: 11pt;
+            }}
+            QPushButton:hover {{
+                background-color: {CT['bg_3']};
+                color: {CT['fg_0']};
+            }}
+        """)
         self.btn_refresh_target.clicked.connect(self.refresh_targets)
-        target_header.addWidget(self.btn_refresh_target)
-        
-        left_layout.addLayout(target_header)
-        
-        # 폴더 리스트 (TargetListWidget)
+        c1_header.addWidget(self.btn_refresh_target)
+        card1_layout.addLayout(c1_header)
+
         self.list_target = TargetListWidget()
         self.list_target.delete_requested.connect(self._delete_target_folder)
         self.list_target.rename_requested.connect(self._rename_target_folder)
         self.list_target.setMaximumHeight(150)
         self.list_target.setStyleSheet(TARGET_LIST_STYLESHEET)
         self.list_target.itemClicked.connect(self._on_target_folder_clicked)
-        # 폴더 우클릭 메뉴 (삭제 기능)
         self.list_target.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.list_target.customContextMenuRequested.connect(self._show_target_folder_context_menu)
-        left_layout.addWidget(self.list_target)
-        
-        # 2. FILES TO MOVE
-        file_header = QHBoxLayout()
-        _lbl_add = QLabel("2. ADD FOLDERS (DRAG & DROP)")
-        _lbl_add.setStyleSheet("color: #e0eaf5; font-size: 10pt; font-weight: 600; letter-spacing: 0.3px;")
-        file_header.addWidget(_lbl_add)
-        file_header.addStretch()
-        left_layout.addLayout(file_header)
-        
+        card1_layout.addWidget(self.list_target)
+
+        left_layout.addWidget(card1)
+
+        # ============================================================
+        # 2) ADD FOLDERS 섹션 카드 (드롭존)
+        # ============================================================
+        card2 = QFrame()
+        card2.setObjectName("SectionCard")
+        card2.setStyleSheet(_CARD_CSS + _NUM_CSS)
+        card2_layout = QVBoxLayout(card2)
+        card2_layout.setContentsMargins(14, 12, 14, 12)
+        card2_layout.setSpacing(10)
+
+        c2_header = QHBoxLayout()
+        c2_header.setSpacing(8)
+
+        _num2 = QLabel("2")
+        _num2.setObjectName("SectionNum")
+        _num2.setFixedSize(18, 18)
+        _num2.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        c2_header.addWidget(_num2)
+
+        _lbl_add = QLabel("ADD FOLDERS")
+        _lbl_add.setStyleSheet(_SECTION_TITLE_CSS)
+        c2_header.addWidget(_lbl_add)
+        c2_header.addStretch()
+
+        _lbl_dnd = QLabel("drag & drop")
+        _lbl_dnd.setStyleSheet(_SECTION_COUNT_CSS)
+        c2_header.addWidget(_lbl_dnd)
+        card2_layout.addLayout(c2_header)
+
         self.list_widget = DropListWidget()
         self.list_widget.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.list_widget._restore_style()
@@ -124,19 +206,17 @@ class FileManagerWidget(QWidget):
         self.list_widget.mail_send_requested.connect(self._on_mail_send_requested)
         self.list_widget.mail_preconnect_requested.connect(self._preconnect_imap)
 
-        # ── 드롭존 빈 상태 오버레이 (라인 아이콘 + "No Folders ⌘") ──
+        # 드롭존 빈 상태 오버레이 (warm dark)
         self.drop_overlay = QWidget(self.list_widget.viewport())
         self.drop_overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.drop_overlay.setStyleSheet("background: transparent;")
         ov_layout = QVBoxLayout(self.drop_overlay)
         ov_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        ov_layout.setSpacing(14)
+        ov_layout.setSpacing(10)
 
-        # 큰 라인 아트 폴더-다운 아이콘 (QPainter로 직접 드로우)
         from PyQt6.QtGui import QPixmap, QPainter, QPen, QColor
-        from PyQt6.QtCore import QRect
 
-        def _make_tray_down_icon(size=72, color_rgba=(150, 180, 210, 200), stroke=2):
+        def _make_tray_down_icon(size=40, color_rgba=(149, 152, 162, 220), stroke=2):
             pm = QPixmap(size, size)
             pm.fill(Qt.GlobalColor.transparent)
             p = QPainter(pm)
@@ -147,36 +227,35 @@ class FileManagerWidget(QWidget):
             pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
             p.setPen(pen)
 
-            # 트레이(rounded rect) 외곽
-            tray_x, tray_y, tray_w, tray_h = 8, 16, size - 16, size - 24
-            p.drawRoundedRect(tray_x, tray_y, tray_w, tray_h, 10, 10)
-
-            # 중앙 다운 화살표 (세로선 + 화살촉)
+            tray_x, tray_y, tray_w, tray_h = 6, 12, size - 12, size - 18
+            p.drawRoundedRect(tray_x, tray_y, tray_w, tray_h, 7, 7)
             cx = size // 2
-            arrow_top = tray_y + 10
-            arrow_bottom = tray_y + tray_h - 14
-            # 세로 막대
+            arrow_top = tray_y + 6
+            arrow_bottom = tray_y + tray_h - 8
             p.drawLine(cx, arrow_top, cx, arrow_bottom)
-            # 화살촉 (V 모양)
-            head = 7
+            head = 5
             p.drawLine(cx - head, arrow_bottom - head, cx, arrow_bottom)
             p.drawLine(cx + head, arrow_bottom - head, cx, arrow_bottom)
 
             p.end()
             return pm
 
-        _icon_box = QLabel()
-        _icon_box.setPixmap(_make_tray_down_icon(size=72, color_rgba=(150, 180, 210, 170), stroke=2))
-        _icon_box.setStyleSheet("background: transparent; border: none;")
-        _icon_box.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        ov_layout.addWidget(_icon_box)
+        _icon_wrap = QLabel()
+        _icon_wrap.setFixedSize(56, 56)
+        _icon_wrap.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        _icon_wrap.setStyleSheet(f"""
+            background-color: {CT['bg_3']};
+            border-radius: 12px;
+            border: none;
+        """)
+        _icon_wrap.setPixmap(_make_tray_down_icon(size=36, color_rgba=(149, 152, 162, 220), stroke=2))
+        ov_layout.addWidget(_icon_wrap)
 
-        _lbl_empty = QLabel("No Folders  ⌘")
-        _lbl_empty.setStyleSheet("color: rgba(150, 170, 190, 180); font-size: 10.5pt; font-weight: 500; letter-spacing: 0.3px; background: transparent; border: none;")
+        _lbl_empty = QLabel("폴더를 여기로 드래그하세요")
+        _lbl_empty.setStyleSheet(f"color: {CT['fg_3']}; font-size: 9.5pt; background: transparent; border: none;")
         _lbl_empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
         ov_layout.addWidget(_lbl_empty)
 
-        # 뷰포트 크기 변경 시 오버레이도 갱신
         orig_resize = self.list_widget.resizeEvent
         def _on_list_resize(ev):
             orig_resize(ev)
@@ -184,7 +263,6 @@ class FileManagerWidget(QWidget):
             self.drop_overlay.setGeometry(0, 0, vp.width(), vp.height())
         self.list_widget.resizeEvent = _on_list_resize
 
-        # 아이템 수에 따라 오버레이 표시/숨김
         def _update_overlay_visibility():
             self.drop_overlay.setVisible(self.list_widget.count() == 0)
         self.list_widget.model().rowsInserted.connect(lambda *_: _update_overlay_visibility())
@@ -192,28 +270,73 @@ class FileManagerWidget(QWidget):
         self.list_widget.model().modelReset.connect(_update_overlay_visibility)
         QTimer.singleShot(0, _update_overlay_visibility)
 
-        left_layout.addWidget(self.list_widget)
-        
-        # 하단 버튼
-        btn_layout = QHBoxLayout()
-        btn_layout.setSpacing(5)
-        
-        self.btn_to_import = NeonButton("→ 수입", color="cyan")
-        self.btn_to_import.setFont(QFont("Malgun Gothic", 9, QFont.Weight.Bold))
+        card2_layout.addWidget(self.list_widget, stretch=1)
+        left_layout.addWidget(card2, stretch=1)
+
+        # ============================================================
+        # 3) 하단 버튼 바 (수입 / 수출 / 검색) — min-btn 스타일
+        # ============================================================
+        btn_wrap = QFrame()
+        btn_wrap.setStyleSheet(f"""
+            QFrame {{
+                background-color: transparent;
+                border: none;
+                border-top: 1px solid {CT['border_soft']};
+            }}
+        """)
+        btn_layout = QHBoxLayout(btn_wrap)
+        btn_layout.setContentsMargins(0, 8, 0, 0)
+        btn_layout.setSpacing(2)
+
+        _min_btn_css = f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {CT['fg_1']};
+                border: none;
+                border-radius: 7px;
+                padding: 7px 12px;
+                font-size: 10pt;
+                font-weight: 500;
+                text-align: center;
+            }}
+            QPushButton:hover {{
+                background-color: {CT['bg_2']};
+                color: {CT['accent_hi']};
+            }}
+            QPushButton:pressed {{
+                background-color: {CT['bg_3']};
+            }}
+        """
+
+        self.btn_to_import = QPushButton("↓  수입")
+        self.btn_to_import.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_to_import.setStyleSheet(_min_btn_css)
         self.btn_to_import.clicked.connect(lambda: self._quick_export_to('import'))
         btn_layout.addWidget(self.btn_to_import, stretch=1)
-        
-        self.btn_to_export = NeonButton("→ 수출", color="cyan")
-        self.btn_to_export.setFont(QFont("Malgun Gothic", 9, QFont.Weight.Bold))
+
+        _sep1 = QFrame()
+        _sep1.setFixedWidth(1)
+        _sep1.setStyleSheet(f"background-color: {CT['border']}; border: none;")
+        btn_layout.addWidget(_sep1)
+
+        self.btn_to_export = QPushButton("↑  수출")
+        self.btn_to_export.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_to_export.setStyleSheet(_min_btn_css)
         self.btn_to_export.clicked.connect(lambda: self._quick_export_to('export'))
         btn_layout.addWidget(self.btn_to_export, stretch=1)
-        
-        self.btn_toggle_search = NeonButton("🔍 검색", color="cyan")
-        self.btn_toggle_search.setFont(QFont("Malgun Gothic", 9, QFont.Weight.Bold))
+
+        _sep2 = QFrame()
+        _sep2.setFixedWidth(1)
+        _sep2.setStyleSheet(f"background-color: {CT['border']}; border: none;")
+        btn_layout.addWidget(_sep2)
+
+        self.btn_toggle_search = QPushButton("⌕  검색")
+        self.btn_toggle_search.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_toggle_search.setStyleSheet(_min_btn_css)
         self.btn_toggle_search.clicked.connect(self._toggle_search_panel)
         btn_layout.addWidget(self.btn_toggle_search, stretch=1)
-        
-        left_layout.addLayout(btn_layout)
+
+        left_layout.addWidget(btn_wrap)
         
 
         
@@ -877,21 +1000,23 @@ class FileManagerWidget(QWidget):
                 self.emit_log(f"[상태] 폴더 '{current}'가 삭제되어 파일 목록 초기화")
                     
             if self.target_subfolders:
-                self.lbl_target_title.setText(f"1. TARGET FOLDERS ({len(self.target_subfolders)})")
+                if hasattr(self, 'lbl_target_count'):
+                    self.lbl_target_count.setText(f"{len(self.target_subfolders)} 개")
             else:
-                self.list_target.addItem(QListWidgetItem("No Folders  ⌘"))
-                self.lbl_target_title.setText("1. TARGET FOLDERS (0)")
+                self.list_target.addItem(QListWidgetItem("No Folders"))
+                if hasattr(self, 'lbl_target_count'):
+                    self.lbl_target_count.setText("0 개")
                 # 폴더가 없으면 FILES TO MOVE도 초기화
                 self.list_widget.clear()
                 self.current_target_folder = None
-                
+
         except RuntimeError: return
         except Exception as e:
             print(f"Error in refresh_targets: {e}")
-            if hasattr(self, 'target_subfolders'):
-                self.lbl_target_title.setText(f"1. TARGET FOLDERS ({len(self.target_subfolders)})")
-            else:
-                self.lbl_target_title.setText("1. TARGET FOLDERS (0)")
+            if hasattr(self, 'target_subfolders') and hasattr(self, 'lbl_target_count'):
+                self.lbl_target_count.setText(f"{len(self.target_subfolders)} 개")
+            elif hasattr(self, 'lbl_target_count'):
+                self.lbl_target_count.setText("0 개")
 
     def _on_target_folder_clicked(self, item):
         folder_name = item.data(Qt.ItemDataRole.UserRole)

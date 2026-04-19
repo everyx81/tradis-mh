@@ -392,30 +392,31 @@ TREE_VIEW_STYLESHEET = """
 }
 """
 
-# FileManagerWidget list_target 스타일시트 (맥 스타일)
+# FileManagerWidget list_target 스타일시트 (Claude Design warm dark)
 TARGET_LIST_STYLESHEET = """
     QListWidget {
-        background: rgba(10, 20, 32, 120);
-        border: 1px solid rgba(100, 160, 200, 35);
-        border-radius: 12px;
-        color: #c0d0e0;
-        font-size: 9.5pt;
-        padding: 6px;
+        background: transparent;
+        border: none;
+        color: #c9ccd3;
+        font-family: 'JetBrains Mono', 'Consolas', monospace;
+        font-size: 9pt;
+        padding: 2px;
         outline: none;
     }
-    QListWidget:focus {
-        border: 1px solid rgba(100, 200, 240, 110);
-    }
     QListWidget::item {
-        padding: 6px 8px;
-        border-radius: 6px;
+        padding: 7px 10px;
+        border-radius: 8px;
         margin: 1px 0;
-    }
-    QListWidget::item:selected {
-        background: rgba(100, 200, 240, 60);
-        color: #ffffff;
+        border: 1px solid transparent;
     }
     QListWidget::item:hover {
-        background: rgba(100, 180, 240, 25);
+        background: rgba(60, 64, 76, 130);
+        border: 1px solid rgba(78, 82, 95, 180);
+        color: #f1f2f5;
+    }
+    QListWidget::item:selected {
+        background: rgba(106, 148, 223, 40);
+        border: 1px solid rgba(106, 148, 223, 90);
+        color: #f1f2f5;
     }
 """

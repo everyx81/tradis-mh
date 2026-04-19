@@ -290,33 +290,54 @@ class IndependentCard(GlassFrame):
         self._apply_card_bg(0.0)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(14, 10, 14, 10)
-        layout.setSpacing(4)
+        layout.setContentsMargins(20, 14, 20, 14)
+        layout.setSpacing(6)
 
-        # ── 클릭 가능한 헤더 ──
+        # ── 클릭 가능한 헤더 (Claude Design 톤) ──
+        from .claude_theme import C as _CT
+        from .claude_icons import pixmap as _icpx
+        from PyQt6.QtCore import QSize as _QSize
+        from PyQt6.QtGui import QIcon as _QIcon
         self.header_widget = QWidget()
         self.header_widget.setCursor(Qt.CursorShape.PointingHandCursor)
         self.header_widget.mousePressEvent = self._on_header_click
         header = QHBoxLayout(self.header_widget)
         header.setContentsMargins(0, 0, 0, 0)
-        header.setSpacing(8)
+        header.setSpacing(12)
 
-        self.lbl_arrow = QLabel("▶")
-        self.lbl_arrow.setStyleSheet("color: #6a8098; font-size: 10pt; background: transparent;")
-        self.lbl_arrow.setFixedWidth(12)
+        # 접힘/펼침 caret (Chevron)
+        self.lbl_arrow = QLabel()
+        self.lbl_arrow.setFixedSize(18, 18)
+        self.lbl_arrow.setPixmap(_icpx("Chevron", size=14, color=_CT['fg_2']))
+        self.lbl_arrow.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_arrow.setStyleSheet("background: transparent; border: none;")
         header.addWidget(self.lbl_arrow)
 
-        # 부드러운 glow dot (QPainter로 그린 QPixmap)
+        # ID pill 톤의 컨테이너
         self.lbl_badge = QLabel()
-        self.lbl_badge.setFixedSize(14, 14)
-        self.lbl_badge.setPixmap(self._make_soft_dot_pixmap('#c8d0dc', 14))
-        self.lbl_badge.setStyleSheet("background: transparent; border: none;")
+        self.lbl_badge.setFixedSize(10, 10)
+        self.lbl_badge.setStyleSheet(f"background-color: {_CT['fg_3']}; border-radius: 5px; border: none;")
         header.addWidget(self.lbl_badge)
 
-        self.lbl_title = QLabel(f"📄 {doc_type} ({len(file_list)}건)")
-        self.lbl_title.setStyleSheet("color: #a8bacc; font-weight: 500; font-size: 10.5pt; background: transparent;")
+        self.lbl_title = QLabel(doc_type)
+        self.lbl_title.setStyleSheet(f"color: {_CT['fg_0']}; font-weight: 600; font-size: 10.5pt; background: transparent;")
         self.lbl_title.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
-        header.addWidget(self.lbl_title, 1)
+        header.addWidget(self.lbl_title)
+
+        # count-pill
+        self.lbl_count_pill = QLabel(f"{len(file_list)}건")
+        self.lbl_count_pill.setStyleSheet(f"""
+            color: {_CT['fg_1']};
+            background-color: {_CT['bg_3']};
+            border: 1px solid {_CT['border_soft']};
+            border-radius: 5px;
+            padding: 2px 7px;
+            font-family: 'JetBrains Mono','Consolas',monospace;
+            font-size: 8.5pt;
+        """)
+        header.addSpacing(6)
+        header.addWidget(self.lbl_count_pill)
+        header.addStretch(1)
 
         layout.addWidget(self.header_widget)
 
@@ -444,36 +465,34 @@ class IndependentCard(GlassFrame):
         self._hover_anim = anim
 
     def _apply_card_bg(self, value):
+        """Claude Design warm dark (IndependentCard도 GroupCard와 동일 톤)."""
         self._hover_progress = float(value)
         t = max(0.0, min(1.0, float(value)))
 
         def lerp(a, b):
             return int(a + (b - a) * t)
 
-        # 프리뷰와 동일 — 내부는 아주 약간만 밝아짐
-        g1_r = lerp(18, 22);  g1_g = lerp(28, 34);  g1_b = lerp(42, 50);  g1_a = lerp(140, 165)
-        g2_r = lerp(14, 18);  g2_g = lerp(24, 30);  g2_b = lerp(38, 46);  g2_a = lerp(115, 140)
+        r = lerp(42, 50)
+        g = lerp(46, 55)
+        b = lerp(54, 64)
 
-        br_r = lerp(100, 115)
-        br_g = lerp(180, 210)
-        br_b = lerp(240, 250)
-        br_a = lerp(60, 120)
+        br_r = lerp(60, 78)
+        br_g = lerp(64, 82)
+        br_b = lerp(76, 95)
+        br_a = lerp(150, 200)
 
         self.setStyleSheet(f"""
             #IndependentCardRoot {{
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 rgba({g1_r}, {g1_g}, {g1_b}, {g1_a}),
-                    stop:1 rgba({g2_r}, {g2_g}, {g2_b}, {g2_a}));
+                background-color: rgb({r}, {g}, {b});
                 border: 1px solid rgba({br_r}, {br_g}, {br_b}, {br_a});
-                border-radius: 12px;
+                border-radius: 14px;
             }}
         """)
 
-        # 호버 시 카드 주변 파란 glow
         if hasattr(self, '_hover_shadow') and self._hover_shadow is not None:
             from PyQt6.QtGui import QColor
-            glow_alpha = lerp(0, 90)
-            self._hover_shadow.setColor(QColor(0, 180, 230, glow_alpha))
+            glow_alpha = lerp(0, 60)
+            self._hover_shadow.setColor(QColor(106, 148, 223, glow_alpha))
 
     @staticmethod
     def _make_soft_dot_pixmap(hex_color, size=14):
@@ -523,8 +542,8 @@ class IndependentCard(GlassFrame):
 
     def _update_title_count(self):
         """헤더의 '(N건)' 카운트 즉시 갱신"""
-        if hasattr(self, 'lbl_title'):
-            self.lbl_title.setText(f"📋 {self.doc_type} ({self.list_widget.count()}건)")
+        if hasattr(self, 'lbl_count_pill'):
+            self.lbl_count_pill.setText(f"{self.list_widget.count()}건")
 
     def get_status(self):
         """필터용 상태 반환 (독립 카드는 항상 green)"""
@@ -793,6 +812,37 @@ class GroupCard(GlassFrame):
         anim.start()
         self._hover_anim = anim
 
+    def _set_btn_toggle(self, text: str):
+        """btn_toggle 텍스트 + 아이콘을 한 번에 갱신 (Claude Design)."""
+        if not hasattr(self, 'btn_toggle'):
+            return
+        # 아이콘과 텍스트 사이 간격 — 텍스트 앞에 공백 2칸
+        prefix = "  "
+        self.btn_toggle.setText(prefix + text)
+        try:
+            from .claude_icons import pixmap as _icpx
+            from PyQt6.QtCore import QSize as _QSize
+            from PyQt6.QtGui import QIcon as _QIcon
+            from .claude_theme import C as _CT
+            icon_map = (
+                ("폴더 정리", "Folder"),
+                ("펼치기",    "Split"),
+                ("접기",      "Merge"),
+                ("분석 중",   "Refresh"),
+                ("재분석",    "Refresh"),
+                ("매칭",      "Merge"),
+            )
+            icon_name = None
+            for prefix_k, ic_name in icon_map:
+                if text.startswith(prefix_k):
+                    icon_name = ic_name
+                    break
+            if icon_name:
+                self.btn_toggle.setIcon(_QIcon(_icpx(icon_name, size=13, color=_CT['fg_1'])))
+                self.btn_toggle.setIconSize(_QSize(13, 13))
+        except Exception:
+            pass
+
     def _apply_card_bg(self, value):
         """Claude Design warm dark — 호버 시 bg_1 → bg_2로 부드럽게 전환."""
         self._hover_progress = float(value)
@@ -945,8 +995,34 @@ class GroupCard(GlassFrame):
         from PyQt6.QtCore import QSize as _QSize
         from PyQt6.QtGui import QIcon as _QIcon
         from .claude_theme import C as _CT
-        self.btn_toggle = NeonButton(btn_text, color="cyan")
-        self.btn_toggle.setMinimumWidth(92)
+        self.btn_toggle = QPushButton("  " + btn_text)
+        self.btn_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_toggle.setMinimumWidth(100)
+        self.btn_toggle.setMinimumHeight(32)
+        self.btn_toggle.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {_CT['bg_2']};
+                color: {_CT['fg_1']};
+                border: 1px solid {_CT['border_soft']};
+                border-radius: 8px;
+                padding: 6px 14px;
+                font-size: 9.5pt;
+                font-weight: 500;
+                text-align: center;
+            }}
+            QPushButton:hover {{
+                background-color: {_CT['bg_3']};
+                color: {_CT['fg_0']};
+                border: 1px solid {_CT['border']};
+            }}
+            QPushButton:pressed {{
+                background-color: {_CT['bg_4']};
+            }}
+            QPushButton:disabled {{
+                color: {_CT['fg_3']};
+                background-color: {_CT['bg_1']};
+            }}
+        """)
         try:
             self.btn_toggle.setIcon(_QIcon(_icpx(icon_name, size=13, color=_CT['fg_1'])))
             self.btn_toggle.setIconSize(_QSize(13, 13))
@@ -1209,7 +1285,7 @@ class GroupCard(GlassFrame):
         # Import gemini_ocr at runtime to avoid circular imports
         from auto_rename import gemini_ocr
         self._analyzing = True
-        self.btn_toggle.setText("분석 중...")
+        self._set_btn_toggle("분석 중...")
         self.btn_toggle.setEnabled(False)
         self.parent_widget.emit_log(f"Starting Analysis for ID: {self.text_id}")
         
@@ -1254,7 +1330,7 @@ class GroupCard(GlassFrame):
             path = os.path.join(self.directory, statement_file)
 
             # 분석 중 중복 실행 방지: 버튼 비활성화
-            self.btn_toggle.setText("분석 중...")
+            self._set_btn_toggle("분석 중...")
             self.btn_toggle.setEnabled(False)
             self._analyzing = True
 
@@ -1286,7 +1362,7 @@ class GroupCard(GlassFrame):
         self._update_checklist_from_mapping()
         self._run_amount_validation()
         # 버튼: EXPAND (매핑 UI 펼치기)
-        self.btn_toggle.setText("펼치기")
+        self._set_btn_toggle("펼치기")
         self.btn_toggle.setEnabled(True)
         try:
             self.btn_toggle.clicked.disconnect()
@@ -1298,7 +1374,7 @@ class GroupCard(GlassFrame):
     def _on_auto_analyze_fail(self):
         """자동 분석 실패 시 수동 분석 버튼으로 복원"""
         self._analyzing = False
-        self.btn_toggle.setText("재분석")
+        self._set_btn_toggle("재분석")
         self.btn_toggle.setEnabled(True)
         try:
             self.btn_toggle.clicked.disconnect()
@@ -1516,7 +1592,7 @@ class GroupCard(GlassFrame):
         # 매핑 UI 표시 시 중복되는 파일 목록 숨김
         if hasattr(self, 'file_list'):
             self.file_list.setVisible(False)
-        self.btn_toggle.setText("접기")
+        self._set_btn_toggle("접기")
         self.btn_toggle.setEnabled(True)
         try: self.btn_toggle.clicked.disconnect()
         except (RuntimeError, TypeError): pass
@@ -1746,14 +1822,14 @@ class GroupCard(GlassFrame):
             self.mapping_widget.setVisible(True)
             if hasattr(self, 'file_list'):
                 self.file_list.setVisible(False)
-            self.btn_toggle.setText("접기"); self.btn_toggle.setToolTip("접기")
+            self._set_btn_toggle("접기"); self.btn_toggle.setToolTip("접기")
             return
         is_visible = self.mapping_widget.isVisible()
         self.mapping_widget.setVisible(not is_visible)
         # 매핑 표시/숨김에 따라 파일 목록은 반대로
         if hasattr(self, 'file_list'):
             self.file_list.setVisible(is_visible)
-        self.btn_toggle.setText("펼치기" if is_visible else "접기")
+        self._set_btn_toggle("펼치기" if is_visible else "접기")
         self.btn_toggle.setToolTip("펼치기" if is_visible else "접기")
     
     def _refresh_file_list(self):
@@ -1995,7 +2071,7 @@ class GroupCard(GlassFrame):
             self.marking_widget.setVisible(True)
             # 폴더 정리 버튼 텍스트 원복
             if self.is_export_only and hasattr(self, 'btn_toggle'):
-                self.btn_toggle.setText("폴더 정리")
+                self._set_btn_toggle("폴더 정리")
             
             # 모던 파일 추가 버튼 (NeonButton 통일)
             btn_add = NeonButton("📁  파일 추가", color="cyan")
@@ -2008,7 +2084,7 @@ class GroupCard(GlassFrame):
         
         # 폴더 정리 버튼에 파일 수 표시
         if self.is_export_only and hasattr(self, 'btn_toggle'):
-            self.btn_toggle.setText(f"폴더 정리 ({len(self.marked_files)})")
+            self._set_btn_toggle(f"폴더 정리 ({len(self.marked_files)})")
         
         # 헤더
         lbl = QLabel(f"📎 추가 파일 ({len(self.marked_files)}):")

@@ -2014,10 +2014,10 @@ class JarvisGUI(QMainWindow):
                 counts[card.get_status()] = counts.get(card.get_status(), 0) + 1
         labels = {
             'all':    f"전체 {counts['all']}",
-            'green':  f"{counts['green']}",
-            'yellow': f"{counts['yellow']}",
-            'red':    f"{counts['red']}",
-            'gray':   f"{counts['gray']}",
+            'green':  f"완료 {counts['green']}",
+            'yellow': f"대기 {counts['yellow']}",
+            'red':    f"충돌 {counts['red']}",
+            'gray':   f"미분류 {counts['gray']}",
         }
         for key, btn in self.filter_btns.items():
             btn.setText(labels[key])
@@ -2080,7 +2080,7 @@ class JarvisGUI(QMainWindow):
             directory = report.get('directory', '')
             self.emit_log(f"Scan Report: {len(groups)} Groups, {len(unclassified)} Unclassified")
 
-            if directory: self.lbl_location.setText(f"Location: {directory}")
+            if directory: self.lbl_location.setText(directory)
 
             if not groups and not unclassified:
                 lbl = QLabel("No files to process.")
@@ -2424,13 +2424,20 @@ class JarvisGUI(QMainWindow):
         self.emit_log("Monitoring Stopped.")
 
     def update_api_status(self, connected: bool):
-        if hasattr(self, 'lbl_api_status'):
-            if connected:
-                self.lbl_api_status.setText('<span style="color:#34c759;">●</span> <span style="color:#a8c0db;">AI STATUS: CONNECTED</span>')
-                self.lbl_api_status.setStyleSheet("font-size: 9.5pt; font-weight: 500; background: transparent; border: none; letter-spacing: 0.2px;")
-            else:
-                self.lbl_api_status.setText('<span style="color:#ff6a6a;">●</span> <span style="color:#a8c0db;">AI STATUS: API KEY REQUIRED</span>')
-                self.lbl_api_status.setStyleSheet("font-size: 9.5pt; font-weight: 500; background: transparent; border: none; letter-spacing: 0.2px;")
+        if not hasattr(self, 'lbl_api_status'):
+            return
+        # 점(dot)은 별도 self._ai_dot 위젯 — 여기서는 텍스트와 점 색상만 갱신
+        if connected:
+            self.lbl_api_status.setText("AI Connected")
+            if hasattr(self, '_ai_dot'):
+                self._ai_dot.setStyleSheet(f"background-color: {CT['green']}; border-radius: 4px; border: none;")
+        else:
+            self.lbl_api_status.setText("API Key Required")
+            if hasattr(self, '_ai_dot'):
+                self._ai_dot.setStyleSheet(f"background-color: {CT['red']}; border-radius: 4px; border: none;")
+        self.lbl_api_status.setStyleSheet(
+            f"color: {CT['fg_1']}; font-size: 9.5pt; font-weight: 500; background: transparent; border: none;"
+        )
 
     def run_intelligent_merge(self):
         if hasattr(self, 'is_analyzing') and self.is_analyzing: return

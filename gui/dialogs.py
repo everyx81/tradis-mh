@@ -1224,46 +1224,7 @@ class GroupCard(GlassFrame):
         self.mapping_widget.setVisible(False)
         body_layout.addWidget(self.mapping_widget)
 
-        # ── group-sub-actions: 제외 버튼만 ──
-        _sub_sep = QFrame()
-        _sub_sep.setFixedHeight(1)
-        _sub_sep.setStyleSheet(f"background-color: {_CT['border_soft']}; border: none;")
-        body_layout.addWidget(_sub_sep)
-
-        _sub_actions = QHBoxLayout()
-        _sub_actions.setContentsMargins(0, 4, 0, 0)
-        _sub_actions.setSpacing(6)
-
-        _sub_actions.addStretch(1)
-
-        self.btn_sub_exclude = QPushButton("  제외")
-        try:
-            self.btn_sub_exclude.setIcon(_QIcon(_icpx("X", size=13, color=_CT['red'])))
-            self.btn_sub_exclude.setIconSize(_QSize(13, 13))
-        except Exception:
-            pass
-        self.btn_sub_exclude.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_sub_exclude.setStyleSheet(f"""
-            QPushButton {{
-                background-color: transparent;
-                color: {_CT['red']};
-                border: 1px solid transparent;
-                border-radius: 6px;
-                padding: 5px 10px;
-                font-family: 'Pretendard','Malgun Gothic','Segoe UI',sans-serif;
-                font-size: 8.5pt;
-                font-weight: 500;
-                text-align: center;
-            }}
-            QPushButton:hover {{
-                background-color: rgba(250, 104, 99, 28);
-                color: {_CT['red']};
-            }}
-        """)
-        self.btn_sub_exclude.clicked.connect(self._sub_action_exclude)
-        _sub_actions.addWidget(self.btn_sub_exclude)
-
-        body_layout.addLayout(_sub_actions)
+        # group-sub-actions 바 완전 제거 (사용자 요청)
 
         self.layout.addWidget(self.body_widget)
 
@@ -2079,19 +2040,135 @@ class GroupCard(GlassFrame):
         self.btn_toggle.setToolTip("펼치기" if is_visible else "접기")
     
     def _refresh_file_list(self):
-        """파일 목록 위젯 갱신"""
+        """파일 목록 위젯 갱신 (Claude Design file-row: 체크박스 + 아이콘 + 이름 + 메타 + 타입배지)"""
+        from .claude_theme import C as _CT
+        from .claude_icons import pixmap as _icpx
+        from PyQt6.QtCore import QSize as _QSize
         self.file_list.clear()
         docs = self.data.get('docs', {})
         all_files = sorted(set(docs.values()))
         for f in all_files:
-            item = QListWidgetItem(f"  ✅ {f}")
-            item.setData(Qt.ItemDataRole.UserRole, os.path.join(self.directory, f))
+            full_path = os.path.join(self.directory, f)
+            item = QListWidgetItem()
+            item.setData(Qt.ItemDataRole.UserRole, full_path)
+            # 빈 텍스트로 두고 커스텀 위젯 setItemWidget
+            item.setText("")
             self.file_list.addItem(item)
-        # 높이 자동 조정 — 아이템당 30px (padding 4+4 + 텍스트 + 여유)
-        per_item = 30
+
+            row = self._make_file_row_widget(f, full_path)
+            item.setSizeHint(row.sizeHint())
+            self.file_list.setItemWidget(item, row)
+
+        # 높이 자동 조정
+        per_item = 40
         count = self.file_list.count()
         h = max(count * per_item + 6, per_item)
-        self.file_list.setFixedHeight(min(h, 260))
+        self.file_list.setFixedHeight(min(h, 320))
+
+    def _make_file_row_widget(self, filename: str, full_path: str):
+        """파일 한 행의 커스텀 위젯 (Claude Design .file-row)."""
+        from .claude_theme import C as _CT
+        from .claude_icons import pixmap as _icpx
+        from PyQt6.QtCore import QSize as _QSize
+        import os as _os
+
+        row = QWidget()
+        row.setStyleSheet("background: transparent;")
+        lay = QHBoxLayout(row)
+        lay.setContentsMargins(10, 7, 10, 7)
+        lay.setSpacing(10)
+
+        # ① 체크박스 (녹색 채운 정사각형 + 흰색 체크)
+        chk = QLabel()
+        chk.setFixedSize(16, 16)
+        chk.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        chk.setStyleSheet(f"""
+            background-color: {_CT['green']};
+            border: 1.5px solid {_CT['green']};
+            border-radius: 4px;
+        """)
+        chk.setPixmap(_icpx("Check", size=11, color="#0d0f15", stroke_width=3))
+        lay.addWidget(chk)
+
+        # ② 파일 아이콘 (bg_3 정사각형 + File icon)
+        ico_wrap = QLabel()
+        ico_wrap.setFixedSize(20, 20)
+        ico_wrap.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        ico_wrap.setStyleSheet(f"""
+            background-color: {_CT['bg_3']};
+            border-radius: 4px;
+            border: none;
+        """)
+        ico_wrap.setPixmap(_icpx("File", size=13, color=_CT['fg_2']))
+        lay.addWidget(ico_wrap)
+
+        # ③ 파일 이름 (mono, ellipsize)
+        lbl_name = QLabel(filename)
+        lbl_name.setStyleSheet(f"""
+            color: {_CT['fg_0']};
+            font-family: 'JetBrains Mono','Consolas',monospace;
+            font-size: 9.5pt;
+            background: transparent;
+            border: none;
+        """)
+        lbl_name.setToolTip(filename)
+        lay.addWidget(lbl_name, stretch=1)
+
+        # ④ meta: size · date
+        try:
+            st = _os.stat(full_path) if _os.path.exists(full_path) else None
+            if st:
+                import datetime as _dt
+                size_kb = max(1, st.st_size // 1024)
+                meta_text = f"{size_kb} KB · {_dt.datetime.fromtimestamp(st.st_mtime).strftime('%Y-%m-%d %H:%M')}"
+            else:
+                meta_text = ""
+        except Exception:
+            meta_text = ""
+        if meta_text:
+            lbl_meta = QLabel(meta_text)
+            lbl_meta.setStyleSheet(f"""
+                color: {_CT['fg_3']};
+                font-family: 'JetBrains Mono','Consolas',monospace;
+                font-size: 8.5pt;
+                background: transparent;
+                border: none;
+            """)
+            lay.addWidget(lbl_meta)
+
+        # ⑤ 타입 배지 (B/L, INV, P/L, C/L)
+        type_badge = self._guess_file_type_badge(filename)
+        if type_badge:
+            tname, tcolor = type_badge
+            lbl_badge = QLabel(tname)
+            lbl_badge.setStyleSheet(f"""
+                color: {tcolor};
+                background-color: rgba(255,255,255,12);
+                border: 1px solid {tcolor};
+                border-radius: 4px;
+                padding: 2px 6px;
+                font-size: 8pt;
+                font-weight: 600;
+                letter-spacing: 0.5px;
+            """)
+            lay.addWidget(lbl_badge)
+
+        return row
+
+    def _guess_file_type_badge(self, filename: str):
+        """파일명으로 문서 타입 배지 결정 → (label, color)"""
+        from .claude_theme import C as _CT
+        fn = filename.lower()
+        # 파란(B/L) / 녹(INV) / 보라(P/L) / 앰버(C/L)
+        if 'b/l' in fn or 'bl' in fn or '선하증권' in filename:
+            return ('B/L', '#6ecde3')
+        if '세금계산서' in filename or '계산서' in filename and '비용' not in filename:
+            return ('INV', '#7fd49c')
+        if '납부고지서' in filename or '정산서' in filename:
+            return ('P/L', '#b48df4')
+        if '신고필증' in filename:
+            return ('C/L', '#e9ab2b')
+        return None
 
     def _fl_context_menu(self, pos):
         """파일 목록 우클릭 메뉴"""
@@ -2313,17 +2390,11 @@ class GroupCard(GlassFrame):
                 child.widget().deleteLater()
         
         if not self.marked_files:
-            # 마킹 없으면 빈 위젯 유지하되 파일 추가 버튼은 표시
-            self.marking_widget.setVisible(True)
+            # 마킹 없으면 marking_widget 완전히 숨김 (사용자 요청: 빈 파일 추가 버튼 제거)
+            self.marking_widget.setVisible(False)
             # 폴더 정리 버튼 텍스트 원복
             if self.is_export_only and hasattr(self, 'btn_toggle'):
                 self._set_btn_toggle("폴더 정리")
-            
-            # 모던 파일 추가 버튼 (NeonButton 통일)
-            btn_add = NeonButton("📁  파일 추가", color="cyan")
-            btn_add.setFixedWidth(120)
-            btn_add.clicked.connect(self._add_marking_files)
-            self.marking_layout.addWidget(btn_add)
             return
         
         self.marking_widget.setVisible(True)

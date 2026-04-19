@@ -11,39 +11,39 @@ TRADIS MH를 Claude Design 시안에 맞춰 리디자인하기 위한 테마 상
 # COLOR PALETTE (oklch → sRGB 근사치)
 # ============================================================
 C = {
-    # 배경 (어두운 → 밝은 순)
-    "bg_0": "#1b1d24",      # 최외곽 (oklch 0.17)
-    "bg_1": "#23262e",      # 패널    (oklch 0.205)
-    "bg_2": "#2a2d36",      # 카드    (oklch 0.235)
-    "bg_3": "#323640",      # 엘리베이티드 (oklch 0.27)
-    "bg_4": "#3b3f4b",      # 호버    (oklch 0.31)
+    # 배경 (oklch → sRGB 정확 변환, 어두운 → 밝은 순)
+    "bg_0": "#0d0f15",      # 최외곽 (oklch 0.17 0.012 265)
+    "bg_1": "#14171d",      # 패널    (oklch 0.205)
+    "bg_2": "#1b1e24",      # 카드    (oklch 0.235)
+    "bg_3": "#23262d",      # 엘리베이티드 (oklch 0.27)
+    "bg_4": "#2d3038",      # 호버    (oklch 0.31)
 
     # 보더
-    "border_soft":   "rgba(60, 64, 76, 150)",
-    "border":        "rgba(78, 82, 95, 180)",
-    "border_strong": "#5b5f6b",
+    "border_soft":   "rgba(45, 48, 56, 150)",
+    "border":        "rgba(63, 66, 75, 180)",
+    "border_strong": "#484b54",
 
     # 전경(텍스트)
-    "fg_0": "#f1f2f5",      # primary
-    "fg_1": "#c9ccd3",      # secondary
-    "fg_2": "#9598a2",      # tertiary
-    "fg_3": "#6b6e78",      # muted
+    "fg_0": "#f3f5f9",      # primary  (oklch 0.97)
+    "fg_1": "#c1c4c9",      # secondary (oklch 0.82)
+    "fg_2": "#8f9298",      # tertiary  (oklch 0.66)
+    "fg_3": "#5f636a",      # muted    (oklch 0.5)
 
     # 액센트 (블루)
-    "accent":        "#6a94df",
-    "accent_hi":     "#86aae9",
-    "accent_lo":     "#5281ce",
-    "accent_bg":     "rgba(106, 148, 223, 36)",
-    "accent_border": "rgba(106, 148, 223, 90)",
+    "accent":        "#4ba3f7",   # oklch 0.7 0.15 250
+    "accent_hi":     "#5ebdff",   # oklch 0.78
+    "accent_lo":     "#3284d0",   # oklch 0.6
+    "accent_bg":     "rgba(75, 163, 247, 36)",
+    "accent_border": "rgba(75, 163, 247, 90)",
 
     # 상태
-    "green":  "#5dc48a",
-    "amber":  "#d6a847",
-    "red":    "#e4715f",
-    "purple": "#bd8ed6",
+    "green":  "#59c886",     # oklch 0.75 0.14 155
+    "amber":  "#e9ab2b",     # oklch 0.78 0.15 80
+    "red":    "#fa6863",     # oklch 0.7 0.18 25
+    "purple": "#b48df4",     # oklch 0.72 0.15 300
 
     # 로그 배경(더 어두움)
-    "logs_bg": "#15171c",
+    "logs_bg": "#07090e",    # oklch 0.14
 
     # 트래픽 라이트 (macOS)
     "tl_close": "#ff5f57",

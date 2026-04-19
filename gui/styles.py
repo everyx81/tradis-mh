@@ -21,58 +21,58 @@ QMainWindow {
 }
 /* #OuterContainer는 gui_jarvis.py init_ui에서 Claude warm dark로 오버라이드됨 */
 #OuterContainer {
-    background-color: rgba(27, 29, 36, 255);
+    background-color: rgba(13, 15, 21, 255);
     border: none;
     border-radius: 14px;
 }
 QLabel {
-    color: #c9ccd3;
+    color: #c1c4c9;
     font-family: 'Pretendard', 'Malgun Gothic', 'Segoe UI', sans-serif;
     font-size: 10pt;
 }
-/* Claude Design warm dark - 입력/콤보/텍스트 위젯 */
+/* Claude Design warm dark (oklch 정확 변환) - 입력/콤보/텍스트 위젯 */
 QLineEdit {
-    background-color: rgba(42, 46, 54, 255);
-    border: 1px solid rgba(60, 64, 76, 150);
+    background-color: rgba(27, 30, 36, 255);
+    border: 1px solid rgba(45, 48, 56, 150);
     border-radius: 8px;
-    color: #f1f2f5;
+    color: #f3f5f9;
     padding: 7px 10px;
     font-family: 'Pretendard', 'Malgun Gothic', 'Segoe UI', sans-serif;
     font-size: 10pt;
-    selection-background-color: rgba(106, 148, 223, 80);
+    selection-background-color: rgba(75, 163, 247, 80);
 }
 QLineEdit:focus {
-    border: 1px solid rgba(106, 148, 223, 150);
-    background-color: rgba(50, 54, 64, 255);
+    border: 1px solid rgba(75, 163, 247, 150);
+    background-color: rgba(35, 38, 45, 255);
 }
 QComboBox {
-    background-color: rgba(42, 46, 54, 255);
-    border: 1px solid rgba(60, 64, 76, 150);
+    background-color: rgba(27, 30, 36, 255);
+    border: 1px solid rgba(45, 48, 56, 150);
     border-radius: 8px;
-    color: #f1f2f5;
+    color: #f3f5f9;
     padding: 6px 12px;
 }
 QComboBox:hover {
-    border: 1px solid rgba(106, 148, 223, 150);
+    border: 1px solid rgba(75, 163, 247, 150);
 }
 QComboBox::drop-down {
     border: none;
     background: transparent;
 }
 QComboBox QAbstractItemView {
-    background-color: rgba(50, 54, 64, 250);
-    color: #f1f2f5;
-    selection-background-color: rgba(106, 148, 223, 60);
+    background-color: rgba(35, 38, 45, 250);
+    color: #f3f5f9;
+    selection-background-color: rgba(75, 163, 247, 60);
     selection-color: #ffffff;
-    border: 1px solid rgba(78, 82, 95, 180);
+    border: 1px solid rgba(63, 66, 75, 180);
     border-radius: 6px;
     padding: 4px;
 }
 QTextEdit {
-    background-color: rgba(42, 46, 54, 255);
-    border: 1px solid rgba(60, 64, 76, 150);
+    background-color: rgba(27, 30, 36, 255);
+    border: 1px solid rgba(45, 48, 56, 150);
     border-radius: 10px;
-    color: #c9ccd3;
+    color: #c1c4c9;
     font-family: 'JetBrains Mono', 'Consolas', monospace;
     font-size: 10pt;
     padding: 10px;
@@ -85,7 +85,7 @@ QTabWidget::pane {
 }
 QTabBar::tab {
     background-color: transparent;
-    color: #9598a2;
+    color: #8f9298;
     padding: 8px 12px;
     border: 1px solid transparent;
     border-bottom: none;
@@ -94,13 +94,13 @@ QTabBar::tab {
     margin-right: 3px;
 }
 QTabBar::tab:selected {
-    background-color: rgba(50, 54, 64, 180);
-    color: #f1f2f5;
-    border-color: rgba(78, 82, 95, 180);
+    background-color: rgba(35, 38, 45, 180);
+    color: #f3f5f9;
+    border-color: rgba(63, 66, 75, 180);
 }
 QTabBar::tab:hover:!selected {
-    background-color: rgba(42, 46, 54, 150);
-    color: #c9ccd3;
+    background-color: rgba(27, 30, 36, 150);
+    color: #c1c4c9;
 }
 QScrollArea {
     border: none;
@@ -395,7 +395,7 @@ TARGET_LIST_STYLESHEET = """
     QListWidget {
         background: transparent;
         border: none;
-        color: #c9ccd3;
+        color: #c1c4c9;
         font-family: 'JetBrains Mono', 'Consolas', monospace;
         font-size: 9pt;
         padding: 2px;
@@ -408,13 +408,13 @@ TARGET_LIST_STYLESHEET = """
         border: 1px solid transparent;
     }
     QListWidget::item:hover {
-        background: rgba(60, 64, 76, 130);
-        border: 1px solid rgba(78, 82, 95, 180);
-        color: #f1f2f5;
+        background: rgba(45, 48, 56, 130);
+        border: 1px solid rgba(63, 66, 75, 180);
+        color: #f3f5f9;
     }
     QListWidget::item:selected {
-        background: rgba(106, 148, 223, 40);
-        border: 1px solid rgba(106, 148, 223, 90);
-        color: #f1f2f5;
+        background: rgba(75, 163, 247, 40);
+        border: 1px solid rgba(75, 163, 247, 90);
+        color: #f3f5f9;
     }
 """

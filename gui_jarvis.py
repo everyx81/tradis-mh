@@ -549,7 +549,27 @@ class JarvisGUI(QMainWindow):
         self.btn_maximize.setToolTip("최대화/복원")
         tb_layout.addWidget(self.btn_maximize)
 
-        tb_layout.addStretch()
+        tb_layout.addStretch(1)
+
+        # 중앙 TRADIS 타이틀 (Claude Design)
+        self.lbl_titlebar_brand = QLabel("TRADIS")
+        self.lbl_titlebar_brand.setStyleSheet(f"""
+            color: {CT['fg_1']};
+            font-size: 9pt;
+            font-weight: 600;
+            letter-spacing: 3px;
+            background: transparent;
+            border: none;
+        """)
+        self.lbl_titlebar_brand.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        tb_layout.addWidget(self.lbl_titlebar_brand)
+
+        tb_layout.addStretch(1)
+
+        # 우측 균형을 위해 더미 스페이서 (traffic lights 3개 폭 + 간격 만큼)
+        _rspacer = QWidget()
+        _rspacer.setFixedWidth(13 * 3 + 8 * 2)
+        tb_layout.addWidget(_rspacer)
 
         total_layout.addWidget(self.title_bar)
         
@@ -1988,17 +2008,19 @@ class JarvisGUI(QMainWindow):
         self.merge_layout.addWidget(self.lbl_hint)
 
     def _chip_css(self, dot_color=None):
-        """필터 chip 스타일 (색 dot + 텍스트)."""
+        """필터 chip 스타일 (색 dot + 텍스트) — 완전 둥근 pill."""
+        # 수직 padding을 늘려 border-radius: 999px가 확실히 pill 모양이 되게 함
         base = f"""
             QPushButton {{
                 background-color: {CT['bg_2']};
                 color: {CT['fg_1']};
                 border: 1px solid {CT['border_soft']};
-                border-radius: 999px;
-                padding: 5px 13px;
+                border-radius: 12px;
+                padding: 6px 14px;
                 font-size: 9pt;
                 font-weight: 500;
                 text-align: center;
+                min-height: 12px;
             }}
             QPushButton:hover {{
                 background-color: {CT['bg_3']};

@@ -290,8 +290,8 @@ class IndependentCard(GlassFrame):
         self._apply_card_bg(0.0)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 14, 20, 14)
-        layout.setSpacing(6)
+        layout.setContentsMargins(18, 10, 18, 10)
+        layout.setSpacing(4)
 
         # ── 클릭 가능한 헤더 (Claude Design 톤) ──
         from .claude_theme import C as _CT
@@ -495,13 +495,15 @@ class IndependentCard(GlassFrame):
         def lerp(a, b):
             return int(a + (b - a) * t)
 
-        r = lerp(42, 50)
-        g = lerp(46, 55)
-        b = lerp(54, 64)
+        # bg_1 (20,23,29) → bg_2 (27,30,36) on hover
+        r = lerp(20, 27)
+        g = lerp(23, 30)
+        b = lerp(29, 36)
 
-        br_r = lerp(60, 78)
-        br_g = lerp(64, 82)
-        br_b = lerp(76, 95)
+        # border soft → border
+        br_r = lerp(45, 63)
+        br_g = lerp(48, 66)
+        br_b = lerp(56, 75)
         br_a = lerp(150, 200)
 
         self.setStyleSheet(f"""
@@ -515,7 +517,8 @@ class IndependentCard(GlassFrame):
         if hasattr(self, '_hover_shadow') and self._hover_shadow is not None:
             from PyQt6.QtGui import QColor
             glow_alpha = lerp(0, 60)
-            self._hover_shadow.setColor(QColor(106, 148, 223, glow_alpha))
+            # accent: #4ba3f7 = rgb(75, 163, 247)
+            self._hover_shadow.setColor(QColor(75, 163, 247, glow_alpha))
 
     @staticmethod
     def _make_soft_dot_pixmap(hex_color, size=14):
@@ -874,15 +877,14 @@ class GroupCard(GlassFrame):
         def lerp(a, b):
             return int(a + (b - a) * t)
 
-        # warm dark bg_1 (42,46,54) → bg_2 (50,55,64) hover
-        r = lerp(42, 50)
-        g = lerp(46, 55)
-        b = lerp(54, 64)
+        # bg_1 (20,23,29) → bg_2 (27,30,36) on hover
+        r = lerp(20, 27)
+        g = lerp(23, 30)
+        b = lerp(29, 36)
 
-        # border: soft → 약간 진한 톤
-        br_r = lerp(60, 78)
-        br_g = lerp(64, 82)
-        br_b = lerp(76, 95)
+        br_r = lerp(45, 63)
+        br_g = lerp(48, 66)
+        br_b = lerp(56, 75)
         br_a = lerp(150, 200)
 
         self.setStyleSheet(f"""
@@ -893,12 +895,11 @@ class GroupCard(GlassFrame):
             }}
         """)
 
-        # 호버 glow: 은은한 아크센트(블루) 대신 약간만
         if hasattr(self, '_hover_shadow') and self._hover_shadow is not None:
             from PyQt6.QtGui import QColor
             glow_alpha = lerp(0, 60)
-            # accent oklch(0.7 0.15 250) ≈ rgb(106, 148, 223)
-            self._hover_shadow.setColor(QColor(106, 148, 223, glow_alpha))
+            # accent oklch(0.7 0.15 250) = #4ba3f7 = rgb(75, 163, 247)
+            self._hover_shadow.setColor(QColor(75, 163, 247, glow_alpha))
 
     def init_ui(self):
         # 카드 자체에 모던한 배경 (호버 시 부드럽게 밝아지는 애니메이션)
@@ -919,8 +920,8 @@ class GroupCard(GlassFrame):
         self._apply_card_bg(0.0)
 
         self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(20, 16, 20, 18)
-        self.layout.setSpacing(10)
+        self.layout.setContentsMargins(18, 12, 18, 12)
+        self.layout.setSpacing(6)
 
         # ── 클릭 가능한 헤더 ──
         self.header_widget = QWidget()
@@ -1078,7 +1079,7 @@ class GroupCard(GlassFrame):
         )
         self.lbl_body_text.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.lbl_body_text.hide()
-        self.layout.addWidget(self.lbl_body_text)
+        # 레거시 호환 위젯 — 레이아웃에 추가하지 않아 공간 차지 안 함
 
         # 레거시 호환
         self.lbl_header = self.pill_id
@@ -1254,13 +1255,13 @@ class GroupCard(GlassFrame):
     # Claude Design 시안: 기본 pill = bg_3 + fg_0, 상태별 도트 색만 변경 (err만 빨간 틴트)
     PILL_STYLES = {
         'green': {
-            'bg':     '#323640',       # CT bg_3
+            'bg':     '#23262d',       # CT bg_3
             'border': 'rgba(60, 64, 76, 180)',
             'text':   '#f1f2f5',       # CT fg_0
             'dot':    '#5dc48a',       # CT green
         },
         'yellow': {
-            'bg':     '#323640',
+            'bg':     '#23262d',
             'border': 'rgba(60, 64, 76, 180)',
             'text':   '#f1f2f5',
             'dot':    '#d6a847',       # CT amber
@@ -1273,7 +1274,7 @@ class GroupCard(GlassFrame):
             'dot':    '#e4715f',       # CT red
         },
         'gray': {
-            'bg':     '#323640',
+            'bg':     '#23262d',
             'border': 'rgba(60, 64, 76, 180)',
             'text':   '#f1f2f5',
             'dot':    '#6b6e78',       # CT fg_3

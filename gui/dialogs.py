@@ -613,29 +613,45 @@ class IndependentCard(GlassFrame):
 
     def _on_header_click(self, event):
         """헤더 영역 클릭 → 접기/펼치기 토글 (좌클릭만)"""
-        if event.button() == Qt.MouseButton.LeftButton:
-            self.toggle_collapse()
+        try:
+            if event.button() == Qt.MouseButton.LeftButton:
+                self.toggle_collapse()
+        except Exception as e:
+            print(f"[IndependentCard._on_header_click] {e}")
+            import traceback; traceback.print_exc()
 
     def toggle_collapse(self):
         """접기/펼치기 토글"""
-        # 토글 중 호버 애니메이션 억제 + drop shadow 일시 비활성화 (덜덜 떨림 방지)
-        self._toggle_in_progress = True
-        self._suspend_hover_fx()
-        was_expanded = not self.is_collapsed
-        self.is_collapsed = not self.is_collapsed
-        self.body_widget.setVisible(not self.is_collapsed)
-        self.lbl_arrow.setText("▶" if self.is_collapsed else "▼")
-        # 레이아웃 안정화 후 플래그 해제 + shadow 복원
-        QTimer.singleShot(120, self._resume_hover_fx)
-        # 펼친 상태에서 파일 변경이 있었고 지금 접히는 중이면 폴더 재스캔
-        # (이름 변경으로 분류가 바뀔 수 있어 다른 카드에도 반영 필요)
-        if was_expanded and self.is_collapsed and self._dirty:
-            self._dirty = False
-            parent = self.parent_widget
-            if hasattr(parent, 'run_intelligent_merge'):
-                # 약간 지연해서 UI 전환이 먼저 끝나고 재스캔되도록
-                from PyQt6.QtCore import QTimer
-                QTimer.singleShot(150, parent.run_intelligent_merge)
+        try:
+            # 토글 중 호버 애니메이션 억제 + drop shadow 일시 비활성화 (덜덜 떨림 방지)
+            self._toggle_in_progress = True
+            self._suspend_hover_fx()
+            was_expanded = not self.is_collapsed
+            self.is_collapsed = not self.is_collapsed
+            self.body_widget.setVisible(not self.is_collapsed)
+            # lbl_arrow 가 pixmap 기반이 된 경우를 대비 — Chevron pixmap 회전
+            try:
+                from .claude_icons import pixmap as _icpx
+                from .claude_theme import C as _CT
+                from PyQt6.QtGui import QTransform
+                pm = _icpx("Chevron", size=14, color=_CT['fg_2'])
+                if not self.is_collapsed:
+                    pm = pm.transformed(QTransform().rotate(90))
+                self.lbl_arrow.setPixmap(pm)
+            except Exception:
+                pass
+            # 레이아웃 안정화 후 플래그 해제 + shadow 복원
+            QTimer.singleShot(120, self._resume_hover_fx)
+            # 펼친 상태에서 파일 변경이 있었고 지금 접히는 중이면 폴더 재스캔
+            if was_expanded and self.is_collapsed and self._dirty:
+                self._dirty = False
+                parent = self.parent_widget
+                if hasattr(parent, 'run_intelligent_merge'):
+                    from PyQt6.QtCore import QTimer
+                    QTimer.singleShot(150, parent.run_intelligent_merge)
+        except Exception as e:
+            print(f"[IndependentCard.toggle_collapse] {e}")
+            import traceback; traceback.print_exc()
 
     def _update_title_count(self):
         """헤더의 '(N건)' 카운트 즉시 갱신"""

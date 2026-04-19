@@ -553,12 +553,12 @@ class JarvisGUI(QMainWindow):
 
         total_layout.addWidget(self.title_bar)
         
-        # 1. Main Content Grid (3 Columns: LeftStack, Right, NavBar)
+        # 1. Main Content Grid (3 Columns: LeftStack, Right, NavBar) — Claude Design 3-col
         content_widget = QWidget()
         self.main_layout = QGridLayout(content_widget)
-        self.main_layout.setContentsMargins(2, 10, 2, 10)
-        self.main_layout.setHorizontalSpacing(2)
-        self.main_layout.setVerticalSpacing(20)
+        self.main_layout.setContentsMargins(0, 0, 0, 0)
+        self.main_layout.setHorizontalSpacing(0)
+        self.main_layout.setVerticalSpacing(0)
 
         self.main_layout.setColumnStretch(0, 15)  # Left content stack
         self.main_layout.setColumnStretch(1, 5)   # Right panel
@@ -571,36 +571,49 @@ class JarvisGUI(QMainWindow):
         mk1_page = QWidget()
         mk1_layout = QHBoxLayout(mk1_page)
         mk1_layout.setContentsMargins(0, 0, 0, 0)
-        mk1_layout.setSpacing(2)
+        mk1_layout.setSpacing(0)
 
-        # Claude Design warm dark 패널 스타일 (sidebar/card 톤)
-        _panel_style = f"""
-            QFrame#ModernPanel {{
+        # Claude Design warm dark 3컬럼 — sidebar / main / targets 각각 다른 톤
+        _sidebar_style = f"""
+            QFrame#SidebarPanel {{
                 background-color: {CT["bg_1"]};
-                border: 1px solid {CT["border_soft"]};
-                border-radius: 14px;
+                border: none;
+                border-right: 1px solid {CT["border_soft"]};
+            }}
+        """
+        _main_style = f"""
+            QFrame#MainPanel {{
+                background-color: {CT["bg_0"]};
+                border: none;
+            }}
+        """
+        _targets_style = f"""
+            QFrame#TargetsPanel {{
+                background-color: {CT["bg_1"]};
+                border: none;
+                border-left: 1px solid {CT["border_soft"]};
             }}
         """
 
         self.left_panel = QFrame()
-        self.left_panel.setObjectName("ModernPanel")
-        self.left_panel.setStyleSheet(_panel_style)
+        self.left_panel.setObjectName("SidebarPanel")
+        self.left_panel.setStyleSheet(_sidebar_style)
         self.setup_left_panel()
         mk1_layout.addWidget(self.left_panel)
 
         self.middle_panel = QFrame()
-        self.middle_panel.setObjectName("ModernPanel")
-        self.middle_panel.setStyleSheet(_panel_style)
+        self.middle_panel.setObjectName("MainPanel")
+        self.middle_panel.setStyleSheet(_main_style)
         self.setup_middle_panel()
         mk1_layout.addWidget(self.middle_panel, stretch=1)
 
         self.left_content_stack.addWidget(mk1_page)  # index 0
         self.main_layout.addWidget(self.left_content_stack, 0, 0)
 
-        # --- RIGHT PANEL (FileManager) ---
+        # --- RIGHT PANEL (FileManager / Targets) ---
         self.right_panel = QFrame()
-        self.right_panel.setObjectName("ModernPanel")
-        self.right_panel.setStyleSheet(_panel_style)
+        self.right_panel.setObjectName("TargetsPanel")
+        self.right_panel.setStyleSheet(_targets_style)
         self.setup_right_panel()
         self.main_layout.addWidget(self.right_panel, 0, 1)
 
@@ -1688,10 +1701,11 @@ class JarvisGUI(QMainWindow):
 
         self.log_area = QTextEdit()
         self.log_area.setReadOnly(True)
+        self.log_area.setObjectName("ClaudeLogArea")
         self.log_area.setStyleSheet(f"""
-            QTextEdit {{
-                background-color: {CT['logs_bg']};
-                color: {CT['fg_1']};
+            QTextEdit#ClaudeLogArea {{
+                background-color: {CT['logs_bg']} !important;
+                color: {CT['fg_1']} !important;
                 border: none;
                 border-bottom-left-radius: 9px;
                 border-bottom-right-radius: 9px;

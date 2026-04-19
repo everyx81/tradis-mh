@@ -2023,6 +2023,8 @@ class JarvisGUI(QMainWindow):
         self.merge_scroll.setWidgetResizable(True)
         self.merge_scroll.setStyleSheet("background: transparent; border: none;")
         self.merge_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        # 가로 스크롤 비활성화 — 콘텐츠가 컬럼 폭에 맞춰 wrap되도록
+        self.merge_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         self.merge_container = QWidget()
         self.merge_container.setStyleSheet("background: transparent;")

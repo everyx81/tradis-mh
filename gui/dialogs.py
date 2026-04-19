@@ -1224,7 +1224,7 @@ class GroupCard(GlassFrame):
         self.mapping_widget.setVisible(False)
         body_layout.addWidget(self.mapping_widget)
 
-        # ── group-sub-actions: 파일 추가 / 폴더 열기 / 다시 분석 / 제외 ──
+        # ── group-sub-actions: 제외 버튼만 ──
         _sub_sep = QFrame()
         _sub_sep.setFixedHeight(1)
         _sub_sep.setStyleSheet(f"background-color: {_CT['border_soft']}; border: none;")
@@ -1234,49 +1234,32 @@ class GroupCard(GlassFrame):
         _sub_actions.setContentsMargins(0, 4, 0, 0)
         _sub_actions.setSpacing(6)
 
-        def _make_ghost_btn(text, icon_name, danger=False):
-            btn = QPushButton("  " + text)
-            try:
-                btn.setIcon(_QIcon(_icpx(icon_name, size=13,
-                    color=_CT['red'] if danger else _CT['fg_2'])))
-                btn.setIconSize(_QSize(13, 13))
-            except Exception:
-                pass
-            btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setStyleSheet(f"""
-                QPushButton {{
-                    background-color: transparent;
-                    color: {_CT['red'] if danger else _CT['fg_2']};
-                    border: 1px solid transparent;
-                    border-radius: 6px;
-                    padding: 5px 10px;
-                    font-family: 'Pretendard','Malgun Gothic','Segoe UI',sans-serif;
-                    font-size: 8.5pt;
-                    font-weight: 500;
-                    text-align: center;
-                }}
-                QPushButton:hover {{
-                    background-color: {"rgba(250, 104, 99, 28)" if danger else _CT['bg_3']};
-                    color: {_CT['red'] if danger else _CT['fg_0']};
-                }}
-            """)
-            return btn
-
-        self.btn_sub_add = _make_ghost_btn("파일 추가", "Plus")
-        self.btn_sub_add.clicked.connect(self._sub_action_add_file)
-        _sub_actions.addWidget(self.btn_sub_add)
-
-        self.btn_sub_open_folder = _make_ghost_btn("폴더 열기", "Folder")
-        self.btn_sub_open_folder.clicked.connect(self._sub_action_open_folder)
-        _sub_actions.addWidget(self.btn_sub_open_folder)
-
-        self.btn_sub_reanalyze = _make_ghost_btn("다시 분석", "Refresh")
-        self.btn_sub_reanalyze.clicked.connect(self._sub_action_reanalyze)
-        _sub_actions.addWidget(self.btn_sub_reanalyze)
-
         _sub_actions.addStretch(1)
 
-        self.btn_sub_exclude = _make_ghost_btn("제외", "X", danger=True)
+        self.btn_sub_exclude = QPushButton("  제외")
+        try:
+            self.btn_sub_exclude.setIcon(_QIcon(_icpx("X", size=13, color=_CT['red'])))
+            self.btn_sub_exclude.setIconSize(_QSize(13, 13))
+        except Exception:
+            pass
+        self.btn_sub_exclude.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_sub_exclude.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {_CT['red']};
+                border: 1px solid transparent;
+                border-radius: 6px;
+                padding: 5px 10px;
+                font-family: 'Pretendard','Malgun Gothic','Segoe UI',sans-serif;
+                font-size: 8.5pt;
+                font-weight: 500;
+                text-align: center;
+            }}
+            QPushButton:hover {{
+                background-color: rgba(250, 104, 99, 28);
+                color: {_CT['red']};
+            }}
+        """)
         self.btn_sub_exclude.clicked.connect(self._sub_action_exclude)
         _sub_actions.addWidget(self.btn_sub_exclude)
 
@@ -1774,7 +1757,8 @@ class GroupCard(GlassFrame):
             summary = self._make_summary_html(total, 0, ok=True)
         else:
             summary = self._make_summary_html(total, missing, ok=False)
-        self.lbl_checklist.setText("&nbsp;&nbsp;&nbsp;".join(parts) + "&nbsp;&nbsp;&nbsp;" + summary)
+        # 항목 간은 일반 공백 (줄바꿈 허용), 항목 내부 mark-name은 nbsp로 연결
+        self.lbl_checklist.setText("   ".join(parts) + "   " + summary)
     
     def _update_checklist_from_mapping(self):
         """AI 분석 후 mapping 기반으로 전체 체크리스트 갱신 (비용 항목 포함)"""
@@ -1805,7 +1789,8 @@ class GroupCard(GlassFrame):
             summary = self._make_summary_html(total, 0, ok=True)
         else:
             summary = self._make_summary_html(total, missing, ok=False)
-        self.lbl_checklist.setText("&nbsp;&nbsp;&nbsp;".join(parts) + "&nbsp;&nbsp;&nbsp;" + summary)
+        # 항목 간은 일반 공백 (줄바꿈 허용), 항목 내부 mark-name은 nbsp로 연결
+        self.lbl_checklist.setText("   ".join(parts) + "   " + summary)
 
     # ─────────────────────────────────────────────────
     # doc-chip HTML 렌더 헬퍼 (Claude Design)

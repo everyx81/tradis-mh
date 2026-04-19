@@ -1258,10 +1258,11 @@ class GroupCard(GlassFrame):
     # Claude Design 시안: 기본 pill = bg_3 + fg_0, 상태별 도트 색만 변경 (err만 빨간 틴트)
     PILL_STYLES = {
         'green': {
-            'bg':     '#23262d',       # CT bg_3
-            'border': 'rgba(60, 64, 76, 180)',
-            'text':   '#f1f2f5',       # CT fg_0
-            'dot':    '#5dc48a',       # CT green
+            # 완료: 녹색 틴트 (red/yellow와 동일한 패턴)
+            'bg':     'rgba(89, 200, 134, 36)',
+            'border': 'rgba(89, 200, 134, 130)',
+            'text':   '#a8e8bf',
+            'dot':    '#59c886',       # CT green
         },
         'yellow': {
             # 붉은색과 동일하게 amber 틴트 (bg + border + text)

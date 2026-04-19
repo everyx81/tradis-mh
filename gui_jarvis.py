@@ -635,9 +635,10 @@ class JarvisGUI(QMainWindow):
         total_layout.addWidget(content_widget)
     
     def _create_vertical_navbar(self):
-        """오른쪽 세로 NavBar — Claude Design (NAV 헤더 + 아이콘 + 라벨)"""
+        """오른쪽 세로 NavBar — Claude Design (icon above label, 세로 스택)"""
         from gui.claude_icons import pixmap as _icpx
         from PyQt6.QtCore import QSize
+        from PyQt6.QtWidgets import QToolButton
 
         self.navbar = QWidget()
         self.navbar.setFixedWidth(52)
@@ -657,7 +658,7 @@ class JarvisGUI(QMainWindow):
             }}
         """)
 
-        # NAV 헤더 라벨 (side-tabs::before 'NAV' 대체)
+        # NAV 헤더 라벨
         _nav_header = QLabel("NAV")
         _nav_header.setAlignment(Qt.AlignmentFlag.AlignCenter)
         _nav_header.setStyleSheet(f"""
@@ -672,7 +673,6 @@ class JarvisGUI(QMainWindow):
         navbar_layout.addWidget(_nav_header)
 
         self.nav_buttons = {}
-        # (tab_name, label, icon_name)
         tab_defs = [
             ("정산",     "정산", "Zap"),
             ("일정",     "일정", "Calendar"),
@@ -683,26 +683,24 @@ class JarvisGUI(QMainWindow):
 
         admin_only_tabs = {"일정", "통관", "REPORT"}
 
-        # 색상 상태 (idle / hover / active) — active 시 좌측에 얇은 accent 바
         _nav_btn_css = f"""
-            QPushButton#SideTab {{
+            QToolButton#SideTab {{
                 background-color: transparent;
                 color: {CT['fg_2']};
                 border: 1px solid transparent;
                 border-left: 2px solid transparent;
                 border-radius: 10px;
-                padding: 8px 2px;
+                padding: 8px 2px 6px 2px;
                 font-size: 9pt;
                 font-weight: 600;
-                text-align: center;
             }}
-            QPushButton#SideTab:hover {{
+            QToolButton#SideTab:hover {{
                 background-color: {CT['bg_2']};
                 color: {CT['fg_0']};
                 border: 1px solid {CT['border_soft']};
                 border-left: 2px solid {CT['border']};
             }}
-            QPushButton#SideTab:checked {{
+            QToolButton#SideTab:checked {{
                 background-color: {CT['accent_bg']};
                 color: {CT['accent_hi']};
                 border: 1px solid {CT['accent_border']};
@@ -713,7 +711,8 @@ class JarvisGUI(QMainWindow):
         for tab_name, label, icon_name in tab_defs:
             if tab_name in admin_only_tabs and self.license_tier != "admin":
                 continue
-            btn = QPushButton(f"\n{label}")
+            btn = QToolButton()
+            btn.setText(label)
             btn.setObjectName("SideTab")
             btn.setFixedSize(44, 58)
             btn.setCheckable(True)
@@ -721,12 +720,11 @@ class JarvisGUI(QMainWindow):
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.setProperty("tab_name", tab_name)
             btn.setProperty("icon_name", icon_name)
+            btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
             btn.setStyleSheet(_nav_btn_css)
-            # 아이콘 (idle 색상)
             btn.setIcon(QIcon(_icpx(icon_name, size=20, color=CT['fg_2'])))
             btn.setIconSize(QSize(20, 20))
             btn.clicked.connect(lambda checked, name=tab_name: self._on_navbar_clicked(name))
-            # 가운데 정렬을 위해 수평 wrapper 추가
             _wrap = QHBoxLayout()
             _wrap.setContentsMargins(4, 0, 4, 0)
             _wrap.addStretch()
@@ -1918,14 +1916,30 @@ class JarvisGUI(QMainWindow):
         filter_layout.addWidget(lbl_hint)
         filter_layout.addSpacing(6)
 
-        # chip factory
+        # chip factory — color dot + text (setIcon으로 dot pixmap)
+        from PyQt6.QtGui import QPixmap, QPainter, QColor
+        from PyQt6.QtCore import QSize as _QSize
+
+        def _make_dot_pixmap(hex_color: str, size: int = 10) -> QPixmap:
+            pm = QPixmap(size, size)
+            pm.fill(Qt.GlobalColor.transparent)
+            p = QPainter(pm)
+            p.setRenderHint(QPainter.RenderHint.Antialiasing)
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(QColor(hex_color))
+            p.drawEllipse(0, 0, size, size)
+            p.end()
+            return pm
+
         def _make_chip(key, text, dot_color=None):
-            btn = QPushButton(text)
+            # 텍스트 앞에 2칸 공백(아이콘 간격) + dot_color 있으면 작은 색 원 icon
+            btn = QPushButton(("  " if dot_color else "") + text)
             btn.setCheckable(True)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.setProperty("chip_key", key)
             if dot_color:
-                btn.setProperty("dot_color", dot_color)
+                btn.setIcon(QIcon(_make_dot_pixmap(dot_color, size=10)))
+                btn.setIconSize(_QSize(7, 7))
             btn.setStyleSheet(self._chip_css(dot_color))
             btn.clicked.connect(lambda: self._apply_card_filter(key))
             return btn
@@ -2014,10 +2028,10 @@ class JarvisGUI(QMainWindow):
                 counts[card.get_status()] = counts.get(card.get_status(), 0) + 1
         labels = {
             'all':    f"전체 {counts['all']}",
-            'green':  f"완료 {counts['green']}",
-            'yellow': f"대기 {counts['yellow']}",
-            'red':    f"충돌 {counts['red']}",
-            'gray':   f"미분류 {counts['gray']}",
+            'green':  f"  완료 {counts['green']}",
+            'yellow': f"  대기 {counts['yellow']}",
+            'red':    f"  충돌 {counts['red']}",
+            'gray':   f"  미분류 {counts['gray']}",
         }
         for key, btn in self.filter_btns.items():
             btn.setText(labels[key])

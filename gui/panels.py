@@ -241,8 +241,31 @@ class FileManagerWidget(QWidget):
             self.drop_overlay.setGeometry(0, 0, vp.width(), vp.height())
         self.list_widget.resizeEvent = _on_list_resize
 
+        _empty_style = f"""
+            QListWidget {{
+                background: transparent;
+                border: 1.5px dashed {CT['border']};
+                border-radius: 10px;
+                padding: 8px;
+            }}
+            QListWidget::item {{ padding: 6px 8px; border-radius: 6px; }}
+            QListWidget::item:hover {{ background: {CT['bg_3']}; }}
+        """
+        _filled_style = f"""
+            QListWidget {{
+                background: transparent;
+                border: 1px solid {CT['border_soft']};
+                border-radius: 10px;
+                padding: 4px;
+            }}
+            QListWidget::item {{ padding: 6px 8px; border-radius: 6px; }}
+            QListWidget::item:hover {{ background: {CT['bg_3']}; }}
+        """
+
         def _update_overlay_visibility():
-            self.drop_overlay.setVisible(self.list_widget.count() == 0)
+            is_empty = self.list_widget.count() == 0
+            self.drop_overlay.setVisible(is_empty)
+            self.list_widget.setStyleSheet(_empty_style if is_empty else _filled_style)
         self.list_widget.model().rowsInserted.connect(lambda *_: _update_overlay_visibility())
         self.list_widget.model().rowsRemoved.connect(lambda *_: _update_overlay_visibility())
         self.list_widget.model().modelReset.connect(_update_overlay_visibility)

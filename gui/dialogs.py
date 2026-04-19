@@ -957,22 +957,35 @@ class GroupCard(GlassFrame):
             pass
 
     def _apply_card_bg(self, value):
-        """Claude Design warm dark — 호버 시 bg_1 → bg_2로 부드럽게 전환."""
+        """Claude Design warm dark — 호버/펼침 상태에 따라 bg 단계 변경.
+        collapsed: bg_1 → hover bg_2, open: bg_2 → hover bg_3"""
         self._hover_progress = float(value)
         t = max(0.0, min(1.0, float(value)))
 
         def lerp(a, b):
             return int(a + (b - a) * t)
 
-        # bg_1 (20,23,29) → bg_2 (27,30,36) on hover
-        r = lerp(20, 27)
-        g = lerp(23, 30)
-        b = lerp(29, 36)
+        # 펼쳐진 상태면 한 단계 밝게 (디자인 .group.open)
+        is_open = not getattr(self, 'is_collapsed', True)
+        if is_open:
+            # bg_2(27,30,36) → bg_3(35,38,45)
+            base_r, hover_r = 27, 35
+            base_g, hover_g = 30, 38
+            base_b, hover_b = 36, 45
+        else:
+            # bg_1(20,23,29) → bg_2(27,30,36)
+            base_r, hover_r = 20, 27
+            base_g, hover_g = 23, 30
+            base_b, hover_b = 29, 36
+
+        r = lerp(base_r, hover_r)
+        g = lerp(base_g, hover_g)
+        b = lerp(base_b, hover_b)
 
         br_r = lerp(45, 63)
         br_g = lerp(48, 66)
         br_b = lerp(56, 75)
-        br_a = lerp(150, 200)
+        br_a = lerp(150, 200) if not is_open else lerp(200, 230)
 
         self.setStyleSheet(f"""
             #GroupCardRoot {{
@@ -984,8 +997,9 @@ class GroupCard(GlassFrame):
 
         if hasattr(self, '_hover_shadow') and self._hover_shadow is not None:
             from PyQt6.QtGui import QColor
-            glow_alpha = lerp(0, 60)
-            # accent oklch(0.7 0.15 250) = #4ba3f7 = rgb(75, 163, 247)
+            # 펼쳐진 상태면 은은한 그림자 기본 제공
+            base_glow = 40 if is_open else 0
+            glow_alpha = lerp(base_glow, 70 if is_open else 60)
             self._hover_shadow.setColor(QColor(75, 163, 247, glow_alpha))
 
     def init_ui(self):
@@ -1411,6 +1425,8 @@ class GroupCard(GlassFrame):
         self.is_collapsed = not self.is_collapsed
         self.body_widget.setVisible(not self.is_collapsed)
         self.lbl_arrow.setText("▶" if self.is_collapsed else "▼")
+        # 펼침/접힘 상태에 따라 카드 bg 재적용 (디자인 .group.open 차별화)
+        self._apply_card_bg(self._hover_progress)
         # Claude Design caret 회전 (collapsed→Chevron, open→rotated)
         if hasattr(self, 'lbl_caret'):
             try:

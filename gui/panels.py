@@ -216,42 +216,18 @@ class FileManagerWidget(QWidget):
         ov_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         ov_layout.setSpacing(10)
 
-        from PyQt6.QtGui import QPixmap, QPainter, QPen, QColor
-
-        def _make_tray_down_icon(size=40, color_rgba=(149, 152, 162, 220), stroke=2):
-            pm = QPixmap(size, size)
-            pm.fill(Qt.GlobalColor.transparent)
-            p = QPainter(pm)
-            p.setRenderHint(QPainter.RenderHint.Antialiasing)
-            pen = QPen(QColor(*color_rgba))
-            pen.setWidth(stroke)
-            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-            pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-            p.setPen(pen)
-
-            tray_x, tray_y, tray_w, tray_h = 6, 12, size - 12, size - 18
-            p.drawRoundedRect(tray_x, tray_y, tray_w, tray_h, 7, 7)
-            cx = size // 2
-            arrow_top = tray_y + 6
-            arrow_bottom = tray_y + tray_h - 8
-            p.drawLine(cx, arrow_top, cx, arrow_bottom)
-            head = 5
-            p.drawLine(cx - head, arrow_bottom - head, cx, arrow_bottom)
-            p.drawLine(cx + head, arrow_bottom - head, cx, arrow_bottom)
-
-            p.end()
-            return pm
-
+        # Claude Design empty-drop: bg_3 rounded square + ArrowDown icon + 힌트 텍스트
+        from .claude_icons import pixmap as _icpx_drop
         _icon_wrap = QLabel()
-        _icon_wrap.setFixedSize(56, 56)
+        _icon_wrap.setFixedSize(40, 40)
         _icon_wrap.setAlignment(Qt.AlignmentFlag.AlignCenter)
         _icon_wrap.setStyleSheet(f"""
             background-color: {CT['bg_3']};
-            border-radius: 12px;
+            border-radius: 10px;
             border: none;
         """)
-        _icon_wrap.setPixmap(_make_tray_down_icon(size=36, color_rgba=(149, 152, 162, 220), stroke=2))
-        ov_layout.addWidget(_icon_wrap)
+        _icon_wrap.setPixmap(_icpx_drop("ArrowDown", size=20, color=CT['fg_2']))
+        ov_layout.addWidget(_icon_wrap, alignment=Qt.AlignmentFlag.AlignCenter)
 
         _lbl_empty = QLabel("폴더를 여기로 드래그하세요")
         _lbl_empty.setStyleSheet(f"color: {CT['fg_3']}; font-size: 9.5pt; background: transparent; border: none;")

@@ -1608,16 +1608,18 @@ class JarvisGUI(QMainWindow):
 
         path_layout = QHBoxLayout()
         path_layout.setSpacing(8)
+        # 디자인: path 는 flex:1, padding 9px 12px, height ~34
         self.line_path = QLineEdit()
         self.line_path.setReadOnly(True)
         self.line_path.setPlaceholderText("~/Desktop/...")
+        self.line_path.setMinimumHeight(32)
         self.line_path.setStyleSheet(f"""
             QLineEdit {{
                 background-color: {CT['bg_2']};
                 color: {CT['fg_1']};
                 border: 1px solid {CT['border_soft']};
                 border-radius: 8px;
-                padding: 7px 10px;
+                padding: 7px 12px;
                 font-family: {_mono};
                 font-size: 9pt;
                 selection-background-color: {CT['accent_bg']};
@@ -1627,24 +1629,52 @@ class JarvisGUI(QMainWindow):
 
         from gui.claude_icons import pixmap as _icpx
         from PyQt6.QtCore import QSize as _QSize
+        # 디자인의 .btn.small: padding 6px 10px, font 11.5px (약 9pt) — 작고 컴팩트
         self.btn_browse = QPushButton("  변경")
-        self.btn_browse.setIcon(QIcon(_icpx("Folder", size=14, color=CT['fg_1'])))
-        self.btn_browse.setIconSize(_QSize(14, 14))
+        self.btn_browse.setIcon(QIcon(_icpx("Folder", size=13, color=CT['fg_1'])))
+        self.btn_browse.setIconSize(_QSize(13, 13))
         self.btn_browse.setFixedHeight(32)
-        self.btn_browse.setMinimumWidth(66)
         self.btn_browse.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_browse.setStyleSheet(self._btn_secondary_css())
         self.btn_browse.clicked.connect(self.browse_directory)
         path_layout.addWidget(self.btn_browse)
         layout.addLayout(path_layout)
 
-        # ── 3) AI SERVICE ──
+        # ── 3) AI SERVICE ── (Claude Design: label row에 ⚙ 버튼, status-row는 깨끗)
         layout.addSpacing(20)
+
+        # 섹션 라벨 + 우측 작은 ⚙ 버튼 (한 줄)
+        _ai_label_row = QHBoxLayout()
+        _ai_label_row.setContentsMargins(0, 0, 0, 0)
+        _ai_label_row.setSpacing(0)
         _ai = QLabel("AI SERVICE")
         _ai.setStyleSheet(_section_label_css)
-        layout.addWidget(_ai)
+        _ai_label_row.addWidget(_ai)
+        _ai_label_row.addStretch()
+
+        self.btn_api_settings = QPushButton()
+        self.btn_api_settings.setIcon(QIcon(_icpx("Settings", size=14, color=CT['fg_3'])))
+        self.btn_api_settings.setIconSize(_QSize(14, 14))
+        self.btn_api_settings.setFixedSize(22, 22)
+        self.btn_api_settings.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_api_settings.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                border: 1px solid transparent;
+                border-radius: 5px;
+            }}
+            QPushButton:hover {{
+                background-color: {CT['bg_2']};
+            }}
+        """)
+        self.btn_api_settings.clicked.connect(self.open_api_settings)
+        self.btn_api_settings.setToolTip("API 설정")
+        _ai_label_row.addWidget(self.btn_api_settings)
+
+        layout.addLayout(_ai_label_row)
         layout.addSpacing(8)
 
+        # 디자인 .status-row: padding 10px 12px, gap 10, bg_2, border_soft, radius 10
         ai_row = QFrame()
         ai_row.setStyleSheet(f"""
             QFrame {{
@@ -1654,7 +1684,7 @@ class JarvisGUI(QMainWindow):
             }}
         """)
         ai_row_layout = QHBoxLayout(ai_row)
-        ai_row_layout.setContentsMargins(12, 9, 10, 9)
+        ai_row_layout.setContentsMargins(12, 10, 12, 10)
         ai_row_layout.setSpacing(10)
 
         self._ai_dot = QLabel()
@@ -1666,27 +1696,18 @@ class JarvisGUI(QMainWindow):
         self.lbl_api_status.setStyleSheet(f"color: {CT['fg_1']}; font-size: 9.5pt; font-weight: 500; background: transparent; border: none;")
         ai_row_layout.addWidget(self.lbl_api_status, stretch=1)
 
+        # 디자인 .tag: mono 10.5px, fg_2, bg_3, padding 2px 6px, radius 4
         self._ai_version_tag = QLabel(f"v{__version__}")
         self._ai_version_tag.setStyleSheet(f"""
             color: {CT['fg_2']};
             background-color: {CT['bg_3']};
             font-family: {_mono};
             font-size: 8.5pt;
-            padding: 2px 6px;
+            padding: 2px 7px;
             border-radius: 4px;
             border: none;
         """)
         ai_row_layout.addWidget(self._ai_version_tag)
-
-        self.btn_api_settings = QPushButton()
-        self.btn_api_settings.setIcon(QIcon(_icpx("Settings", size=15, color=CT['fg_2'])))
-        self.btn_api_settings.setIconSize(_QSize(15, 15))
-        self.btn_api_settings.setFixedSize(28, 28)
-        self.btn_api_settings.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_api_settings.setStyleSheet(self._btn_icon_css())
-        self.btn_api_settings.clicked.connect(self.open_api_settings)
-        self.btn_api_settings.setToolTip("API 설정")
-        ai_row_layout.addWidget(self.btn_api_settings)
 
         layout.addWidget(ai_row)
 
@@ -1729,11 +1750,22 @@ class JarvisGUI(QMainWindow):
         act_layout.addWidget(self.btn_stop)
         layout.addLayout(act_layout)
 
-        # ── 5) SYSTEM LOGS ──
+        # ── 5) SYSTEM LOGS ── (라벨 우측에 로그 개수 - Claude Design)
         layout.addSpacing(20)
+        _lg_row = QHBoxLayout()
+        _lg_row.setContentsMargins(0, 0, 0, 0)
+        _lg_row.setSpacing(0)
         _lg = QLabel("SYSTEM LOGS")
         _lg.setStyleSheet(_section_label_css)
-        layout.addWidget(_lg)
+        _lg_row.addWidget(_lg)
+        _lg_row.addStretch()
+        self.lbl_log_count = QLabel("0")
+        self.lbl_log_count.setStyleSheet(
+            f"color: {CT['fg_3']}; font-family: {_mono}; font-size: 9pt; "
+            f"background: transparent; border: none; letter-spacing: 0;"
+        )
+        _lg_row.addWidget(self.lbl_log_count)
+        layout.addLayout(_lg_row)
         layout.addSpacing(8)
 
         log_wrap = QFrame()
@@ -2090,8 +2122,11 @@ class JarvisGUI(QMainWindow):
         
     def append_log(self, msg):
         MAX_LOG_LINES = 200  # 성능 최적화를 위해 로그 보관 줄 수 축소 (1000 -> 200)
-        
+
         self.log_area.append(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] {msg}")
+        # 로그 개수 라벨 갱신 (Claude Design)
+        if hasattr(self, 'lbl_log_count'):
+            self.lbl_log_count.setText(str(self.log_area.document().blockCount()))
         
         # 로그가 너무 길어지면 오래된 로그 삭제 (메모리 안정화)
         if self.log_area.document().blockCount() > MAX_LOG_LINES:

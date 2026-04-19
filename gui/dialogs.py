@@ -1093,39 +1093,63 @@ class GroupCard(GlassFrame):
         # ── 본문 (접힘/펼침 대상) ──
         self.body_widget = QWidget()
         body_layout = QVBoxLayout(self.body_widget)
-        body_layout.setContentsMargins(4, 4, 4, 4)
-        body_layout.setSpacing(4)
+        body_layout.setContentsMargins(0, 8, 0, 0)
+        body_layout.setSpacing(10)
 
-        # 필요 서류 체크리스트 (드래그/삭제/수정 지원)
+        # 필요 서류 체크리스트 (Claude Design doc-checklist container)
         from PyQt6.QtWidgets import QAbstractItemView
         from PyQt6.QtGui import QShortcut, QKeySequence
+        self._checklist_container = QFrame()
+        self._checklist_container.setStyleSheet(f"""
+            QFrame {{
+                background-color: {_CT['bg_3']};
+                border: 1px solid {_CT['border_soft']};
+                border-radius: 10px;
+            }}
+        """)
+        _checklist_lay = QVBoxLayout(self._checklist_container)
+        _checklist_lay.setContentsMargins(12, 10, 12, 10)
+        _checklist_lay.setSpacing(0)
+
         self.lbl_checklist = QLabel()
-        self.lbl_checklist.setStyleSheet("color: #a8bacc; font-size: 9.5pt; background: transparent; letter-spacing: 0.2px;")
+        self.lbl_checklist.setStyleSheet(f"""
+            color: {_CT['fg_1']};
+            font-size: 9.5pt;
+            background: transparent;
+            border: none;
+            letter-spacing: 0.1px;
+        """)
         self.lbl_checklist.setWordWrap(True)
-        body_layout.addWidget(self.lbl_checklist)
+        self.lbl_checklist.setTextFormat(Qt.TextFormat.RichText)
+        _checklist_lay.addWidget(self.lbl_checklist)
+        body_layout.addWidget(self._checklist_container)
 
         self.file_list = DraggableFileList()
-        self.file_list.setStyleSheet("""
-            QListWidget {
+        self.file_list.setStyleSheet(f"""
+            QListWidget {{
                 background: transparent;
                 border: none;
-                color: #a8bacc;
+                color: {_CT['fg_0']};
+                font-family: 'JetBrains Mono','Consolas',monospace;
                 font-size: 9.5pt;
                 padding: 2px;
-            }
-            QListWidget::item {
-                padding: 4px 8px;
-                border-radius: 6px;
+            }}
+            QListWidget::item {{
+                padding: 8px 12px;
+                border-radius: 8px;
                 margin: 1px 0;
-            }
-            QListWidget::item:selected {
-                background: rgba(100, 200, 240, 60);
-                color: #ffffff;
-            }
-            QListWidget::item:hover {
-                background: rgba(100, 180, 240, 25);
-                color: #e0eaf5;
-            }
+                border: 1px solid transparent;
+            }}
+            QListWidget::item:selected {{
+                background: {_CT['accent_bg']};
+                border: 1px solid {_CT['accent_border']};
+                color: {_CT['fg_0']};
+            }}
+            QListWidget::item:hover {{
+                background: {_CT['bg_3']};
+                border: 1px solid {_CT['border_soft']};
+                color: {_CT['fg_0']};
+            }}
         """)
         self.file_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.file_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -1156,12 +1180,32 @@ class GroupCard(GlassFrame):
             summary_text = ", ".join(docs.values())
             self.lbl_checklist.setText(summary_text[:80] + "..." if len(summary_text) > 80 else summary_text)
 
-        # [NEW] 금액 100% 매칭 검증 상태 라벨
+        # [NEW] 금액 100% 매칭 검증 상태 — Claude Design group-warning 배너
+        self._warning_frame = QFrame()
+        self._warning_frame.setStyleSheet(f"""
+            QFrame {{
+                background-color: rgba(250, 104, 99, 22);
+                border: 1px solid rgba(250, 104, 99, 65);
+                border-radius: 10px;
+            }}
+        """)
+        _warn_lay = QHBoxLayout(self._warning_frame)
+        _warn_lay.setContentsMargins(12, 10, 12, 10)
+        _warn_lay.setSpacing(10)
+        # 붉은 도트
+        _wdot = QLabel()
+        _wdot.setFixedSize(8, 8)
+        _wdot.setStyleSheet(f"background-color: {_CT['red']}; border-radius: 4px; border: none;")
+        _warn_lay.addWidget(_wdot)
         self.lbl_amount_check = QLabel()
-        self.lbl_amount_check.setStyleSheet("color: #ffaa00; font-size: 9pt; font-weight: bold;")
+        self.lbl_amount_check.setStyleSheet(
+            f"color: {_CT['red']}; font-size: 9.5pt; font-weight: 500; "
+            f"background: transparent; border: none;"
+        )
         self.lbl_amount_check.setWordWrap(True)
-        self.lbl_amount_check.hide()
-        body_layout.addWidget(self.lbl_amount_check)
+        _warn_lay.addWidget(self.lbl_amount_check, stretch=1)
+        self._warning_frame.hide()
+        body_layout.addWidget(self._warning_frame)
 
         # ── 마킹 파일 표시 섹션 ──
         self.marking_widget = QWidget()
@@ -1180,6 +1224,64 @@ class GroupCard(GlassFrame):
         self.mapping_widget.setVisible(False)
         body_layout.addWidget(self.mapping_widget)
 
+        # ── group-sub-actions: 파일 추가 / 폴더 열기 / 다시 분석 / 제외 ──
+        _sub_sep = QFrame()
+        _sub_sep.setFixedHeight(1)
+        _sub_sep.setStyleSheet(f"background-color: {_CT['border_soft']}; border: none;")
+        body_layout.addWidget(_sub_sep)
+
+        _sub_actions = QHBoxLayout()
+        _sub_actions.setContentsMargins(0, 4, 0, 0)
+        _sub_actions.setSpacing(6)
+
+        def _make_ghost_btn(text, icon_name, danger=False):
+            btn = QPushButton("  " + text)
+            try:
+                btn.setIcon(_QIcon(_icpx(icon_name, size=13,
+                    color=_CT['red'] if danger else _CT['fg_2'])))
+                btn.setIconSize(_QSize(13, 13))
+            except Exception:
+                pass
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: transparent;
+                    color: {_CT['red'] if danger else _CT['fg_2']};
+                    border: 1px solid transparent;
+                    border-radius: 6px;
+                    padding: 5px 10px;
+                    font-family: 'Pretendard','Malgun Gothic','Segoe UI',sans-serif;
+                    font-size: 8.5pt;
+                    font-weight: 500;
+                    text-align: center;
+                }}
+                QPushButton:hover {{
+                    background-color: {"rgba(250, 104, 99, 28)" if danger else _CT['bg_3']};
+                    color: {_CT['red'] if danger else _CT['fg_0']};
+                }}
+            """)
+            return btn
+
+        self.btn_sub_add = _make_ghost_btn("파일 추가", "Plus")
+        self.btn_sub_add.clicked.connect(self._sub_action_add_file)
+        _sub_actions.addWidget(self.btn_sub_add)
+
+        self.btn_sub_open_folder = _make_ghost_btn("폴더 열기", "Folder")
+        self.btn_sub_open_folder.clicked.connect(self._sub_action_open_folder)
+        _sub_actions.addWidget(self.btn_sub_open_folder)
+
+        self.btn_sub_reanalyze = _make_ghost_btn("다시 분석", "Refresh")
+        self.btn_sub_reanalyze.clicked.connect(self._sub_action_reanalyze)
+        _sub_actions.addWidget(self.btn_sub_reanalyze)
+
+        _sub_actions.addStretch(1)
+
+        self.btn_sub_exclude = _make_ghost_btn("제외", "X", danger=True)
+        self.btn_sub_exclude.clicked.connect(self._sub_action_exclude)
+        _sub_actions.addWidget(self.btn_sub_exclude)
+
+        body_layout.addLayout(_sub_actions)
+
         self.layout.addWidget(self.body_widget)
 
         # 기본 접힘 상태
@@ -1189,6 +1291,81 @@ class GroupCard(GlassFrame):
         self._run_amount_validation()
         # 초기 상태 배지 계산
         self._update_status_badge()
+
+    # ═══════════════════════════════════════════════
+    # Sub-action handlers (Claude Design group-sub-actions)
+    # ═══════════════════════════════════════════════
+    def _sub_action_add_file(self):
+        """파일 추가 — 기존 마킹 추가 로직 재활용."""
+        try:
+            self._add_marking_files()
+        except Exception as e:
+            print(f"[sub_action] add file error: {e}")
+
+    def _sub_action_open_folder(self):
+        """폴더 열기 — 카드의 directory를 파일 탐색기에서 열기."""
+        try:
+            import os as _os, subprocess as _sp
+            path = getattr(self, 'directory', '') or ''
+            if path and _os.path.exists(path):
+                if _os.name == 'nt':
+                    _os.startfile(path)  # Windows
+                else:
+                    _sp.Popen(['xdg-open', path])
+        except Exception as e:
+            print(f"[sub_action] open folder error: {e}")
+
+    def _sub_action_reanalyze(self):
+        """다시 분석 — 검증 재실행."""
+        try:
+            self._run_amount_validation()
+            self._update_status_badge()
+        except Exception as e:
+            print(f"[sub_action] reanalyze error: {e}")
+
+    def _sub_action_exclude(self):
+        """제외 — 카드 숨기기."""
+        try:
+            self.hide()
+            # 필터 카운트도 갱신
+            if hasattr(self, 'status_changed'):
+                self.status_changed.emit()
+        except Exception as e:
+            print(f"[sub_action] exclude error: {e}")
+
+    # ─────────────────────────────────────────────────
+    # Warning banner 스타일 헬퍼 (severity: green/yellow/red/neutral)
+    # ─────────────────────────────────────────────────
+    def _set_warning(self, severity, text):
+        """group-warning 배너를 상태별 색으로 갱신."""
+        if not hasattr(self, '_warning_frame'):
+            return
+        color_map = {
+            "green":   ("rgba(89, 200, 134, 22)",  "rgba(89, 200, 134, 65)",  "#59c886"),
+            "yellow":  ("rgba(233, 171, 43, 22)",  "rgba(233, 171, 43, 65)",  "#e9ab2b"),
+            "red":     ("rgba(250, 104, 99, 22)",  "rgba(250, 104, 99, 65)",  "#fa6863"),
+            "neutral": ("rgba(143, 146, 152, 22)", "rgba(143, 146, 152, 65)", "#8f9298"),
+        }
+        bg, border, fg = color_map.get(severity, color_map["neutral"])
+        self._warning_frame.setStyleSheet(f"""
+            QFrame {{
+                background-color: {bg};
+                border: 1px solid {border};
+                border-radius: 10px;
+            }}
+        """)
+        # dot / text 색도 갱신 — 자식 위젯 스타일 직접 수정
+        # (첫 번째 자식이 dot, 두 번째가 lbl_amount_check)
+        children = self._warning_frame.findChildren(QLabel)
+        for ch in children:
+            if ch.width() == 8 and ch.height() == 8:
+                ch.setStyleSheet(f"background-color: {fg}; border-radius: 4px; border: none;")
+        self.lbl_amount_check.setStyleSheet(
+            f"color: {fg}; font-size: 9.5pt; font-weight: 500; "
+            f"background: transparent; border: none;"
+        )
+        self.lbl_amount_check.setText(text)
+        self._warning_frame.show()
 
     def _on_header_click(self, event):
         """헤더 영역 클릭 → 접기/펼치기 토글 (좌클릭만)"""
@@ -1588,20 +1765,16 @@ class GroupCard(GlassFrame):
         parts = []
         for req in required:
             is_found = req['found']
-            if is_found:
-                icon = "🔵" if req.get('matched_by_amount') else "✅"
-            else:
-                icon = "❌"
-            parts.append(f"{icon} {req['name']}")
-            
+            parts.append(self._make_doc_chip_html(req['name'], is_found, req.get('matched_by_amount', False)))
+
         total = len(required)
         checked = sum(1 for req in required if req['found'])
         missing = total - checked
         if missing == 0:
-            summary = f"  🎉 전체 {total}개 항목 완료"
+            summary = self._make_summary_html(total, 0, ok=True)
         else:
-            summary = f"  ⚠️ {total}개 중 {missing}개 미확인"
-        self.lbl_checklist.setText("  ".join(parts) + summary)
+            summary = self._make_summary_html(total, missing, ok=False)
+        self.lbl_checklist.setText("&nbsp;&nbsp;&nbsp;".join(parts) + "&nbsp;&nbsp;&nbsp;" + summary)
     
     def _update_checklist_from_mapping(self):
         """AI 분석 후 mapping 기반으로 전체 체크리스트 갱신 (비용 항목 포함)"""
@@ -1616,26 +1789,61 @@ class GroupCard(GlassFrame):
                 name = label.split(':')[-1].strip()
             else:
                 name = label
-            
-            # [NEW] 금액 보정 기반 매칭 아이콘 시각적 차별화 (파랑 = 금액 매칭만)
+
             is_matched_by_amount = item.get('matched_by_amount', False)
-            if filename:
-                icon = "🔵" if is_matched_by_amount else "✅"
-            else:
-                icon = "❌"
-                
-            # 수수료계산서 포함 항목은 파일이 없어도 ✅ 처리
-            if not filename and "포함" in label:
-                icon = "✅"
-            parts.append(f"{icon} {name}")
+            is_found = bool(filename) or (not filename and "포함" in label)
+            # "수수료계산서 포함" 서브텍스트
+            sub = None
+            if "포함" in label and not filename:
+                sub = "(수수료계산서 포함)"
+            parts.append(self._make_doc_chip_html(name, is_found, is_matched_by_amount, sub=sub))
+
         total = len(parts)
         checked = sum(1 for item in self.mapping if item.get('filename', '') or '포함' in item.get('label', ''))
         missing = total - checked
         if missing == 0:
-            summary = f"  🎉 전체 {total}개 항목 완료"
+            summary = self._make_summary_html(total, 0, ok=True)
         else:
-            summary = f"  ⚠️ {total}개 중 {missing}개 미확인"
-        self.lbl_checklist.setText("  ".join(parts) + summary)
+            summary = self._make_summary_html(total, missing, ok=False)
+        self.lbl_checklist.setText("&nbsp;&nbsp;&nbsp;".join(parts) + "&nbsp;&nbsp;&nbsp;" + summary)
+
+    # ─────────────────────────────────────────────────
+    # doc-chip HTML 렌더 헬퍼 (Claude Design)
+    # ─────────────────────────────────────────────────
+    def _make_doc_chip_html(self, name, is_found, matched_by_amount=False, sub=None):
+        """체크리스트 항목 하나를 HTML로 렌더 (색 마크 + 이름 + optional sub)."""
+        if is_found:
+            # 녹색 네모 + 체크 (HTML 흰 체크 위 녹색 배경)
+            mark_bg = '#59c886'
+            mark_symbol = '✓'
+            text_color = '#c1c4c9'
+        else:
+            mark_bg = '#fa6863'
+            mark_symbol = '✕'
+            text_color = '#fa6863'
+        mark_html = (
+            f'<span style="background:{mark_bg};color:#0d0f15;'
+            f'padding:1px 4px 1px 4px;border-radius:3px;font-weight:bold;'
+            f'font-family: \'Pretendard\',sans-serif;font-size:9pt;">'
+            f'{mark_symbol}</span>'
+        )
+        sub_html = f'<span style="color:#5f636a;font-size:8.5pt;">&nbsp;{sub}</span>' if sub else ''
+        return f'{mark_html}&nbsp;<span style="color:{text_color};">{name}</span>{sub_html}'
+
+    def _make_summary_html(self, total, missing, ok=True):
+        """요약 텍스트 HTML."""
+        if ok:
+            return (
+                f'<span style="background:#59c886;color:#0d0f15;padding:1px 5px;'
+                f'border-radius:3px;font-weight:bold;font-size:9pt;">✓</span>'
+                f'&nbsp;<span style="color:#59c886;font-weight:600;">전체 {total}개 항목 완료</span>'
+            )
+        else:
+            return (
+                f'<span style="color:#e9ab2b;font-weight:bold;font-size:10pt;">⚠</span>'
+                f'&nbsp;<span style="color:#e9ab2b;font-weight:500;">'
+                f'{total}개 중 {missing}개 미확인</span>'
+            )
 
     def refresh_mapping_ui(self):
         # 카드가 접혀있으면 먼저 펼침 (body_widget이 숨김이면 내부 mapping_widget도 안 보임)
@@ -2601,7 +2809,7 @@ class GroupCard(GlassFrame):
             # 매핑 없으면 비용 항목이 있는 항목이 있는지만 간단 체크
             has_expense = any('비용: ' in item.get('label', '') for item in self.mapping) if self.mapping else False
             if not has_expense:
-                self.lbl_amount_check.hide()
+                self._warning_frame.hide()
                 # 매핑 없음 → 검증 불가 (초기 상태 유지)
                 self._validation_status = None
                 if hasattr(self, 'lbl_badge'):
@@ -2611,16 +2819,14 @@ class GroupCard(GlassFrame):
         # 비용 항목이 하나라도 있는지 확인
         has_expense_items = any('비용: ' in item.get('label', '') for item in self.mapping)
         if not has_expense_items:
-            self.lbl_amount_check.hide()
+            self._warning_frame.hide()
             # 비용 항목 없음 → 검증 스킵 (엣지 ①)
             self._validation_status = 'no_items'
             if hasattr(self, 'lbl_badge'):
                 self._update_status_badge()
             return
 
-        self.lbl_amount_check.setText("⏳ 금액 검증 중...")
-        self.lbl_amount_check.setStyleSheet("color: #aaaaaa; font-size: 9pt;")
-        self.lbl_amount_check.show()
+        self._set_warning("neutral", "금액 검증 중...")
         # 검증 시작 → 아직 결과 없음 (파일 누락 체크만 _compute_status에서 처리)
         self._validation_status = None
         if hasattr(self, 'lbl_badge'):
@@ -2665,8 +2871,7 @@ class GroupCard(GlassFrame):
                 sum_files = res.get('sum_files', 0)
 
                 if item_all and sum_matched:
-                    self.lbl_amount_check.setText("🟢 항목별/합산 금액 검증 완료")
-                    self.lbl_amount_check.setStyleSheet("color: #00ff00; font-size: 9pt; font-weight: bold;")
+                    self._set_warning("green", "항목별/합산 금액 검증 완료")
                     self._validation_status = 'green'
                 elif not item_all and sum_matched:
                     # 항목별 불일치이나 합산은 맞음 → OCR 오류 가능성
@@ -2675,13 +2880,11 @@ class GroupCard(GlassFrame):
                     names_str = ", ".join(names)
                     if len(mismatched) > 3:
                         names_str += f" 외 {len(mismatched)-3}건"
-                    self.lbl_amount_check.setText(f"🟡 {names_str} 금액 불일치 (합산은 일치)")
-                    self.lbl_amount_check.setStyleSheet("color: #ffaa00; font-size: 9pt; font-weight: bold;")
+                    self._set_warning("yellow", f"{names_str} 금액 불일치 (합산은 일치)")
                     self._validation_status = 'yellow'
                 elif item_all and not sum_matched:
                     diff = abs(sum_items - sum_files)
-                    self.lbl_amount_check.setText(f"🟡 합산 불일치 (차이: {diff:,}원)")
-                    self.lbl_amount_check.setStyleSheet("color: #ffaa00; font-size: 9pt; font-weight: bold;")
+                    self._set_warning("yellow", f"합산 불일치 (차이: {diff:,}원)")
                     self._validation_status = 'yellow'
                 else:
                     mismatched = [d for d in details if not d.get('matched') and not d.get('no_file')]
@@ -2690,8 +2893,7 @@ class GroupCard(GlassFrame):
                     names_str = ", ".join(names)
                     if len(mismatched) > 2:
                         names_str += f" 외 {len(mismatched)-2}건"
-                    self.lbl_amount_check.setText(f"🔴 {names_str} 금액 불일치, 합산 차이 {diff:,}원")
-                    self.lbl_amount_check.setStyleSheet("color: #ff4444; font-size: 9pt; font-weight: bold;")
+                    self._set_warning("red", f"{names_str} 금액 불일치, 합산 차이 {diff:,}원")
                     self._validation_status = 'red'
             except Exception:
                 pass

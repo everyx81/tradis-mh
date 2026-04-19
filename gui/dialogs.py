@@ -1264,17 +1264,18 @@ class GroupCard(GlassFrame):
             'dot':    '#5dc48a',       # CT green
         },
         'yellow': {
-            'bg':     '#23262d',
-            'border': 'rgba(60, 64, 76, 180)',
-            'text':   '#f1f2f5',
-            'dot':    '#d6a847',       # CT amber
+            # 붉은색과 동일하게 amber 틴트 (bg + border + text)
+            'bg':     'rgba(233, 171, 43, 36)',
+            'border': 'rgba(233, 171, 43, 130)',
+            'text':   '#f2d48a',
+            'dot':    '#e9ab2b',       # CT amber
         },
         'red': {
             # 디자인: .id-pill.r 은 붉은 틴트 배경 + 붉은 보더 + 붉은 텍스트
-            'bg':     'rgba(228, 113, 95, 36)',
-            'border': 'rgba(228, 113, 95, 130)',
-            'text':   '#f4b8ad',
-            'dot':    '#e4715f',       # CT red
+            'bg':     'rgba(250, 104, 99, 36)',
+            'border': 'rgba(250, 104, 99, 130)',
+            'text':   '#f8b8b4',
+            'dot':    '#fa6863',       # CT red
         },
         'gray': {
             'bg':     '#23262d',

@@ -1220,19 +1220,19 @@ class GroupCard(GlassFrame):
     def _compute_status(self):
         """카드 상태 계산 → 'green'|'yellow'|'red'|'gray'
 
-        정의 (재정의):
+        정의:
         - 🟢 이상없음: AI가 실제로 검증해서 금액 OK + 파일 누락 없음
-        - 🟡 주의: 금액 일부 불일치 OR 파일 일부 누락
-        - 🔴 문제: 금액 크게 불일치
-        - ⚪ 대기: 분석 중 / archive-only / 분석 실패 / 검증 항목 없음
+        - 🟡 대기: 정산서가 없는 카드 / 금액 일부 불일치 / 파일 일부 누락
+        - 🔴 충돌: 금액 크게 불일치
+        - ⚪ 미분류: 분석 중 / 분석 실패 / 검증 항목 없음
         """
-        # 분석 진행 중 → 대기
+        # 분석 진행 중 → 미분류
         if getattr(self, '_analyzing', False):
             return 'gray'
-        # Archive-only (폴더 정리만): 검증 불가 → 대기
+        # 정산서 없는 카드 (archive-only) → 대기 (yellow)
         if getattr(self, 'is_archive_only', False):
-            return 'gray'
-        # 매핑 없음 (미분석 or 분석 실패) → 대기
+            return 'yellow'
+        # 매핑 없음 (미분석 or 분석 실패) → 미분류
         if not getattr(self, 'mapping', None):
             return 'gray'
 
@@ -1251,7 +1251,7 @@ class GroupCard(GlassFrame):
             return 'yellow'
         if validation == 'green' and not missing:
             return 'green'
-        # validation == 'no_items' (검증 스킵) or None (아직 검증 안 함) → 대기
+        # validation == 'no_items' (검증 스킵) or None (아직 검증 안 함) → 미분류
         return 'gray'
 
     # 상태별 pill 스타일 — 프리뷰와 일치 (동일 색 계열 통일, 약간 뿌연 반투명 느낌)

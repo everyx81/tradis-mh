@@ -339,9 +339,9 @@ class IndependentCard(GlassFrame):
             background: transparent;
             border: none;
             font-family: 'JetBrains Mono','Consolas','Monaco',monospace;
-            font-size: 11pt;
+            font-size: 10pt;
             font-weight: 700;
-            letter-spacing: 0.4px;
+            letter-spacing: 0.3px;
         """)
         self.lbl_title.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
         _pill_lay.addWidget(self.lbl_title)

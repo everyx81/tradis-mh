@@ -1471,118 +1471,293 @@ class JarvisGUI(QMainWindow):
             self.file_manager.reposition_search_panel()
 
     def setup_left_panel(self):
+        """Claude Design warm dark sidebar."""
         self.left_panel.setFixedWidth(280)
         layout = QVBoxLayout(self.left_panel)
-        layout.setContentsMargins(10, 15, 10, 15)
-        layout.setSpacing(10)
-        
-        # Header
-        title_box = QVBoxLayout()
-        title_box.setSpacing(0)
-        lbl_title = QLabel("TRADIS MH")
-        lbl_title.setStyleSheet("color: #ffffff; font-family: Impact; font-size: 38pt; letter-spacing: 3px;")
-        title_box.addWidget(lbl_title)
+        layout.setContentsMargins(20, 22, 20, 18)
+        layout.setSpacing(0)
 
-        lbl_by = QLabel("by M.H. Choi")
-        lbl_by.setStyleSheet("color: #6a7a8a; font-size: 11pt; font-style: italic; letter-spacing: 1px; background: transparent; margin-left: 2px;")
-        title_box.addWidget(lbl_by)
-        layout.addLayout(title_box)
+        _section_label_css = (
+            f"color: {CT['fg_3']}; font-size: 9.5pt; font-weight: 600; "
+            f"letter-spacing: 1.8px; background: transparent; border: none;"
+        )
+        _mono = "'JetBrains Mono','Consolas',monospace"
 
-        # Subtitle
-        lbl_sub = QLabel("AUTO RENAMER")
-        lbl_sub.setStyleSheet("color: #5a6a7a; font-weight: bold; letter-spacing: 4px;")
-        layout.addWidget(lbl_sub)
-        layout.addSpacing(10)
+        # ── 1) BRAND ──
+        brand_row = QHBoxLayout()
+        brand_row.setSpacing(12)
+        brand_row.setContentsMargins(0, 0, 0, 0)
 
-        # Target Directory
+        brand_mark = QLabel("T")
+        brand_mark.setFixedSize(36, 36)
+        brand_mark.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        brand_mark.setStyleSheet(f"""
+            background-color: {CT['accent']};
+            color: #ffffff;
+            font-weight: 700;
+            font-size: 14pt;
+            border-radius: 10px;
+            letter-spacing: -0.5px;
+        """)
+        brand_row.addWidget(brand_mark)
+
+        brand_text = QVBoxLayout()
+        brand_text.setSpacing(1)
+        brand_text.setContentsMargins(0, 0, 0, 0)
+        lbl_brand = QLabel("TRADIS")
+        lbl_brand.setStyleSheet(f"color: {CT['fg_0']}; font-size: 14pt; font-weight: 700; letter-spacing: 1.5px; background: transparent;")
+        brand_text.addWidget(lbl_brand)
+        lbl_sub = QLabel("by M.H. Choi · Auto Renamer")
+        lbl_sub.setStyleSheet(f"color: {CT['fg_3']}; font-size: 8.5pt; background: transparent;")
+        brand_text.addWidget(lbl_sub)
+        brand_row.addLayout(brand_text)
+        brand_row.addStretch()
+        layout.addLayout(brand_row)
+
+        # ── 2) WATCH FOLDER ──
+        layout.addSpacing(22)
         _wf = QLabel("WATCH FOLDER")
-        _wf.setStyleSheet("color: #6a7a8a; font-size: 9pt; font-weight: 600; letter-spacing: 1.3px;")
+        _wf.setStyleSheet(_section_label_css)
         layout.addWidget(_wf)
+        layout.addSpacing(8)
+
         path_layout = QHBoxLayout()
+        path_layout.setSpacing(8)
         self.line_path = QLineEdit()
         self.line_path.setReadOnly(True)
-        self.line_path.setPlaceholderText("C:/Users/User/Desktop/...")
-        
-        self.btn_browse = NeonButton("SELECT")
+        self.line_path.setPlaceholderText("~/Desktop/...")
+        self.line_path.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {CT['bg_2']};
+                color: {CT['fg_1']};
+                border: 1px solid {CT['border_soft']};
+                border-radius: 8px;
+                padding: 7px 10px;
+                font-family: {_mono};
+                font-size: 9pt;
+                selection-background-color: {CT['accent_bg']};
+            }}
+        """)
+        path_layout.addWidget(self.line_path, stretch=1)
+
+        self.btn_browse = QPushButton("　변경　")
+        self.btn_browse.setFixedHeight(32)
+        self.btn_browse.setMinimumWidth(54)
+        self.btn_browse.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_browse.setStyleSheet(self._btn_secondary_css())
         self.btn_browse.clicked.connect(self.browse_directory)
-        self.btn_browse.setFixedWidth(90)
-        
-        path_layout.addWidget(self.line_path)
         path_layout.addWidget(self.btn_browse)
         layout.addLayout(path_layout)
-        layout.addSpacing(10)
-        
-        # API Settings - 맥 스타일 차분한 컨테이너
-        api_container = QFrame()
-        api_container.setStyleSheet("""
-            QFrame {
-                background-color: rgba(15, 28, 44, 100);
-                border: 1px solid rgba(100, 160, 200, 22);
-                border-radius: 12px;
-            }
+
+        # ── 3) AI SERVICE ──
+        layout.addSpacing(20)
+        _ai = QLabel("AI SERVICE")
+        _ai.setStyleSheet(_section_label_css)
+        layout.addWidget(_ai)
+        layout.addSpacing(8)
+
+        ai_row = QFrame()
+        ai_row.setStyleSheet(f"""
+            QFrame {{
+                background-color: {CT['bg_2']};
+                border: 1px solid {CT['border_soft']};
+                border-radius: 10px;
+            }}
         """)
-        api_container_layout = QVBoxLayout(api_container)
-        api_container_layout.setContentsMargins(14, 12, 14, 12)
-        api_container_layout.setSpacing(10)
+        ai_row_layout = QHBoxLayout(ai_row)
+        ai_row_layout.setContentsMargins(12, 9, 10, 9)
+        ai_row_layout.setSpacing(10)
 
-        # 상단: 상태 + API 버튼
-        top_row = QHBoxLayout()
-        top_row.setSpacing(8)
-        self.lbl_api_status = QLabel("● AI STATUS: CHECKING...")
-        self.lbl_api_status.setStyleSheet("color: #8aa0b5; font-size: 9.5pt; font-weight: 500; background: transparent; border: none; letter-spacing: 0.2px;")
-        top_row.addWidget(self.lbl_api_status)
-        top_row.addStretch()
+        self._ai_dot = QLabel()
+        self._ai_dot.setFixedSize(8, 8)
+        self._ai_dot.setStyleSheet(f"background-color: {CT['green']}; border-radius: 4px; border: none;")
+        ai_row_layout.addWidget(self._ai_dot)
 
-        self.btn_api_settings = NeonButton("API", color="cyan")
-        self.btn_api_settings.setFixedHeight(28)
-        self.btn_api_settings.setMinimumWidth(54)
-        self.btn_api_settings.setMaximumWidth(60)
+        self.lbl_api_status = QLabel("AI Connected")
+        self.lbl_api_status.setStyleSheet(f"color: {CT['fg_1']}; font-size: 9.5pt; font-weight: 500; background: transparent; border: none;")
+        ai_row_layout.addWidget(self.lbl_api_status, stretch=1)
+
+        self._ai_version_tag = QLabel(f"v{__version__}")
+        self._ai_version_tag.setStyleSheet(f"""
+            color: {CT['fg_2']};
+            background-color: {CT['bg_3']};
+            font-family: {_mono};
+            font-size: 8.5pt;
+            padding: 2px 6px;
+            border-radius: 4px;
+            border: none;
+        """)
+        ai_row_layout.addWidget(self._ai_version_tag)
+
+        self.btn_api_settings = QPushButton("⚙")
+        self.btn_api_settings.setFixedSize(28, 28)
+        self.btn_api_settings.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_api_settings.setStyleSheet(self._btn_icon_css())
         self.btn_api_settings.clicked.connect(self.open_api_settings)
-        top_row.addWidget(self.btn_api_settings)
-        api_container_layout.addLayout(top_row)
-        
-        # 모델/앱 버전 정보 (작고 muted — 정보성)
-        self.lbl_api_version = QLabel("Model: Gemini 3.1 Flash Lite")
-        self.lbl_api_version.setStyleSheet("color: #4a5a6a; font-size: 8pt; background: transparent;")
-        self.lbl_api_version.hide()  # 깔끔한 UI를 위해 숨김 (필요 시 표시)
-        api_container_layout.addWidget(self.lbl_api_version)
+        self.btn_api_settings.setToolTip("API 설정")
+        ai_row_layout.addWidget(self.btn_api_settings)
 
+        layout.addWidget(ai_row)
+
+        self.lbl_api_version = QLabel("")
+        self.lbl_api_version.hide()
         self.lbl_app_version = QLabel(f"{APP_NAME} v{__version__}")
-        self.lbl_app_version.setStyleSheet("color: #4a5a6a; font-size: 8pt; background: transparent;")
-        self.lbl_app_version.hide()  # 깔끔한 UI를 위해 숨김
-        api_container_layout.addWidget(self.lbl_app_version)
+        self.lbl_app_version.hide()
 
-        layout.addWidget(api_container)
-        layout.addSpacing(10)
-        
-        # 초기 API 상태 확인
         from core.config import get_api_key
         self.update_api_status(bool(get_api_key()))
-        
-        # Monitoring
+
+        # ── 4) MONITORING ──
+        layout.addSpacing(20)
         _mn = QLabel("MONITORING")
-        _mn.setStyleSheet("color: #6a7a8a; font-size: 9pt; font-weight: 600; letter-spacing: 1.3px;")
+        _mn.setStyleSheet(_section_label_css)
         layout.addWidget(_mn)
+        layout.addSpacing(8)
+
         act_layout = QHBoxLayout()
-        self.btn_start = NeonButton("START")
+        act_layout.setSpacing(8)
+
+        self.btn_start = QPushButton("▶  Start")
+        self.btn_start.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_start.setMinimumHeight(34)
+        self.btn_start.setStyleSheet(self._btn_primary_css())
         self.btn_start.clicked.connect(self.start_monitoring)
-        self.btn_stop = NeonButton("STOP", color="orange")
+
+        self.btn_stop = QPushButton("■  Stop")
+        self.btn_stop.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_stop.setMinimumHeight(34)
+        self.btn_stop.setStyleSheet(self._btn_secondary_css())
         self.btn_stop.clicked.connect(self.stop_monitoring)
         self.btn_stop.setEnabled(False)
 
         act_layout.addWidget(self.btn_start)
         act_layout.addWidget(self.btn_stop)
         layout.addLayout(act_layout)
-        layout.addStretch()
 
-        # Logs
+        # ── 5) SYSTEM LOGS ──
+        layout.addSpacing(20)
         _lg = QLabel("SYSTEM LOGS")
-        _lg.setStyleSheet("color: #6a7a8a; font-size: 9pt; font-weight: 600; letter-spacing: 1.3px;")
+        _lg.setStyleSheet(_section_label_css)
         layout.addWidget(_lg)
+        layout.addSpacing(8)
+
+        log_wrap = QFrame()
+        log_wrap.setStyleSheet(f"""
+            QFrame {{
+                background-color: {CT['logs_bg']};
+                border: 1px solid {CT['border_soft']};
+                border-radius: 10px;
+            }}
+        """)
+        log_wrap_layout = QVBoxLayout(log_wrap)
+        log_wrap_layout.setContentsMargins(0, 0, 0, 0)
+        log_wrap_layout.setSpacing(0)
+
+        log_head = QFrame()
+        log_head.setFixedHeight(26)
+        log_head.setStyleSheet(f"""
+            QFrame {{
+                background-color: {CT['bg_2']};
+                border: none;
+                border-bottom: 1px solid {CT['border_soft']};
+                border-top-left-radius: 9px;
+                border-top-right-radius: 9px;
+            }}
+        """)
+        log_head_layout = QHBoxLayout(log_head)
+        log_head_layout.setContentsMargins(10, 0, 10, 0)
+        log_head_layout.setSpacing(8)
+
+        dots_wrap = QHBoxLayout()
+        dots_wrap.setSpacing(4)
+        for _ in range(3):
+            d = QLabel()
+            d.setFixedSize(6, 6)
+            d.setStyleSheet(f"background-color: {CT['fg_3']}; border-radius: 3px;")
+            dots_wrap.addWidget(d)
+        log_head_layout.addLayout(dots_wrap)
+
+        lbl_logfile = QLabel("tradis.log")
+        lbl_logfile.setStyleSheet(f"color: {CT['fg_3']}; font-family: {_mono}; font-size: 8.5pt; background: transparent;")
+        log_head_layout.addWidget(lbl_logfile)
+        log_head_layout.addStretch()
+        lbl_live = QLabel("live")
+        lbl_live.setStyleSheet(f"color: {CT['fg_3']}; font-family: {_mono}; font-size: 8pt; background: transparent;")
+        log_head_layout.addWidget(lbl_live)
+        log_wrap_layout.addWidget(log_head)
+
         self.log_area = QTextEdit()
         self.log_area.setReadOnly(True)
-        self.log_area.setMinimumHeight(400)
-        layout.addWidget(self.log_area)
+        self.log_area.setStyleSheet(f"""
+            QTextEdit {{
+                background-color: {CT['logs_bg']};
+                color: {CT['fg_1']};
+                border: none;
+                border-bottom-left-radius: 9px;
+                border-bottom-right-radius: 9px;
+                font-family: {_mono};
+                font-size: 9pt;
+                padding: 8px 10px;
+            }}
+        """)
+        log_wrap_layout.addWidget(self.log_area, stretch=1)
+
+        layout.addWidget(log_wrap, stretch=1)
+
+    def _btn_primary_css(self):
+        return f"""
+            QPushButton {{
+                background-color: {CT['accent']};
+                color: #ffffff;
+                border: 1px solid {CT['accent_hi']};
+                border-radius: 8px;
+                padding: 6px 12px;
+                font-size: 9.5pt;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{ background-color: {CT['accent_hi']}; }}
+            QPushButton:pressed {{ background-color: {CT['accent_lo']}; }}
+            QPushButton:disabled {{
+                background-color: {CT['bg_2']};
+                color: {CT['fg_3']};
+                border: 1px solid {CT['border_soft']};
+            }}
+        """
+
+    def _btn_secondary_css(self):
+        return f"""
+            QPushButton {{
+                background-color: {CT['bg_2']};
+                color: {CT['fg_1']};
+                border: 1px solid {CT['border_soft']};
+                border-radius: 8px;
+                padding: 6px 12px;
+                font-size: 9.5pt;
+                font-weight: 500;
+            }}
+            QPushButton:hover {{
+                background-color: {CT['bg_3']};
+                color: {CT['fg_0']};
+                border: 1px solid {CT['border']};
+            }}
+            QPushButton:disabled {{ color: {CT['fg_3']}; }}
+        """
+
+    def _btn_icon_css(self):
+        return f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {CT['fg_2']};
+                border: 1px solid transparent;
+                border-radius: 6px;
+                font-size: 13pt;
+                padding: 0;
+            }}
+            QPushButton:hover {{
+                background-color: {CT['bg_3']};
+                color: {CT['fg_0']};
+            }}
+        """
 
     def setup_middle_panel(self):
         layout = QVBoxLayout(self.middle_panel)

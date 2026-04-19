@@ -40,6 +40,7 @@ from core.config import get_config_path
 
 # GUI Modules (Refactored)
 from gui.styles import GLOBAL_STYLESHEET
+from gui.claude_theme import C as CT, APP_STYLESHEET, SIDE_TAB_STYLE
 from gui.utils import resource_path, get_run_dir
 from gui.widgets import GlassFrame, NeonButton
 from gui.mk3_widgets import MK3ScheduleOnlyWidget, MK3MemoOnlyWidget
@@ -462,9 +463,16 @@ class JarvisGUI(QMainWindow):
         self.move(x, y)
         
     def init_ui(self):
-        # Apply global stylesheet to the whole window
-        self.setStyleSheet(GLOBAL_STYLESHEET)
-        
+        # Apply global stylesheet to the whole window (기존 JARVIS 베이스)
+        # Claude Design warm-dark 오버라이드는 #OuterContainer에 직접 적용한다.
+        self.setStyleSheet(GLOBAL_STYLESHEET + f"""
+            #OuterContainer {{
+                background-color: {CT["bg_0"]};
+                border: 1px solid {CT["border_soft"]};
+                border-radius: 14px;
+            }}
+        """)
+
         # Shadow wrapper: 중앙 위젯을 감싸고 외곽에 패딩을 둬서 drop shadow가 렌더될 공간 확보
         _shadow_wrapper = QWidget(self)
         _shadow_wrapper.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
@@ -495,8 +503,12 @@ class JarvisGUI(QMainWindow):
         
         # 0. Custom Title Bar — macOS 트래픽 라이트 (좌측 정렬: close|min|max)
         self.title_bar = QFrame()
-        self.title_bar.setFixedHeight(40)
-        self.title_bar.setStyleSheet("background: transparent; border: none;")
+        self.title_bar.setFixedHeight(38)
+        self.title_bar.setStyleSheet(f"""
+            background-color: {CT["bg_1"]};
+            border: none;
+            border-bottom: 1px solid {CT["border_soft"]};
+        """)
         tb_layout = QHBoxLayout(self.title_bar)
         tb_layout.setContentsMargins(18, 0, 18, 0)
         tb_layout.setSpacing(8)
@@ -561,13 +573,13 @@ class JarvisGUI(QMainWindow):
         mk1_layout.setContentsMargins(0, 0, 0, 0)
         mk1_layout.setSpacing(2)
 
-        # 모던 패널 스타일 (GlassFrame의 사이안 glow 대신 차분한 QFrame)
-        _panel_style = """
-            QFrame#ModernPanel {
-                background: rgba(14, 24, 38, 140);
-                border: 1px solid rgba(120, 200, 245, 60);
+        # Claude Design warm dark 패널 스타일 (sidebar/card 톤)
+        _panel_style = f"""
+            QFrame#ModernPanel {{
+                background-color: {CT["bg_1"]};
+                border: 1px solid {CT["border_soft"]};
                 border-radius: 14px;
-            }
+            }}
         """
 
         self.left_panel = QFrame()
@@ -610,22 +622,44 @@ class JarvisGUI(QMainWindow):
         total_layout.addWidget(content_widget)
     
     def _create_vertical_navbar(self):
-        """오른쪽 세로 NavBar 생성"""
+        """오른쪽 세로 NavBar 생성 (Claude Design warm dark)"""
         self.navbar = QWidget()
-        self.navbar.setFixedWidth(40)
+        self.navbar.setFixedWidth(52)
         navbar_layout = QVBoxLayout(self.navbar)
-        navbar_layout.setContentsMargins(5, 10, 5, 10)
-        navbar_layout.setSpacing(8)
-        
-        self.navbar.setStyleSheet("""
-            QWidget#NavBar {
-                background-color: rgba(5, 15, 30, 180);
-                border: 1px solid rgba(0, 255, 255, 100);
-                border-radius: 8px;
-            }
-            QPushButton { font-size: 9pt; font-weight: bold; padding: 0px; }
-        """)
+        navbar_layout.setContentsMargins(6, 18, 6, 14)
+        navbar_layout.setSpacing(4)
+
         self.navbar.setObjectName("NavBar")
+        self.navbar.setStyleSheet(f"""
+            QWidget#NavBar {{
+                background-color: {CT["bg_1"]};
+                border-left: 1px solid {CT["border_soft"]};
+                border-right: none;
+                border-top: none;
+                border-bottom: none;
+                border-radius: 0px;
+            }}
+            QPushButton {{
+                background-color: transparent;
+                color: {CT["fg_2"]};
+                border: 1px solid transparent;
+                border-radius: 10px;
+                padding: 10px 2px;
+                font-size: 9pt;
+                font-weight: 600;
+                text-align: center;
+            }}
+            QPushButton:hover {{
+                background-color: {CT["bg_2"]};
+                color: {CT["fg_0"]};
+                border: 1px solid {CT["border_soft"]};
+            }}
+            QPushButton:checked {{
+                background-color: {CT["accent_bg"]};
+                color: {CT["accent_hi"]};
+                border: 1px solid {CT["accent_border"]};
+            }}
+        """)
         
         self.nav_buttons = {}
         tab_defs = [
@@ -643,35 +677,12 @@ class JarvisGUI(QMainWindow):
             if tab_name in admin_only_tabs and self.license_tier != "admin":
                 continue
             btn = QPushButton(label)
-            btn.setFixedSize(30, 45)
+            btn.setFixedSize(40, 52)
             btn.setCheckable(True)
             btn.setAutoExclusive(True)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.setProperty("tab_name", tab_name)
-            
-            btn.setStyleSheet(f"""
-                QPushButton {{
-                    background-color: rgba(5, 20, 35, 120);
-                    border: 1px solid rgba(0, 255, 255, 80);
-                    border-radius: 6px;
-                    color: rgba(255, 255, 255, 200);
-                    text-align: center;
-                    padding-top: 2px;
-                }}
-                QPushButton:hover {{
-                    background-color: rgba(0, 255, 255, 30);
-                    border: 1px solid {color};
-                    color: #ffffff;
-                }}
-                QPushButton:checked {{
-                    background-color: rgba(0, 255, 255, 50);
-                    border: 1px solid {color};
-                    border-left: 3px solid {color};
-                    color: {color};
-                    font-weight: bold;
-                }}
-            """)
-            
+            # 부모 QWidget#NavBar의 스타일 상속 (개별 오버라이드 제거 — Claude warm dark 톤 적용)
             btn.clicked.connect(lambda checked, name=tab_name: self._on_navbar_clicked(name))
             navbar_layout.addWidget(btn)
             self.nav_buttons[tab_name] = btn
@@ -1460,7 +1471,7 @@ class JarvisGUI(QMainWindow):
             self.file_manager.reposition_search_panel()
 
     def setup_left_panel(self):
-        self.left_panel.setFixedWidth(330)
+        self.left_panel.setFixedWidth(280)
         layout = QVBoxLayout(self.left_panel)
         layout.setContentsMargins(10, 15, 10, 15)
         layout.setSpacing(10)

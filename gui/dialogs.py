@@ -13,8 +13,8 @@ import threading
 from PyQt6.QtWidgets import (QWidget, QLabel, QVBoxLayout, QHBoxLayout, QApplication, QAbstractItemView,
                               QPushButton, QComboBox, QDialog, QMessageBox, QLineEdit, QTextEdit,
                               QListWidget, QListWidgetItem, QTableWidget, QTableWidgetItem,
-                              QFormLayout, QHeaderView, QFrame)
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QPropertyAnimation, QEasingCurve, QPoint, QParallelAnimationGroup, QMimeData, QUrl
+                              QFormLayout, QHeaderView, QFrame, QLayout)
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QPropertyAnimation, QEasingCurve, QPoint, QParallelAnimationGroup, QMimeData, QUrl, QSize, QRect
 from PyQt6.QtGui import QPixmap, QImage, QCursor, QColor, QDrag
 
 from .widgets import GlassFrame, NeonButton
@@ -249,6 +249,76 @@ class DraggableFileList(QListWidget):
         drag = QDrag(self)
         drag.setMimeData(mime_data)
         drag.exec(Qt.DropAction.CopyAction | Qt.DropAction.MoveAction, Qt.DropAction.CopyAction)
+
+
+class FlowLayout(QLayout):
+    """Qt 표준 FlowLayout — 위젯을 가로 배치하다 폭 초과 시 자동 다음 줄."""
+
+    def __init__(self, parent=None, h_spacing=8, v_spacing=6):
+        super().__init__(parent)
+        self._h_spacing = h_spacing
+        self._v_spacing = v_spacing
+        self._items = []
+
+    def addItem(self, item):
+        self._items.append(item)
+
+    def count(self):
+        return len(self._items)
+
+    def itemAt(self, index):
+        if 0 <= index < len(self._items):
+            return self._items[index]
+        return None
+
+    def takeAt(self, index):
+        if 0 <= index < len(self._items):
+            return self._items.pop(index)
+        return None
+
+    def expandingDirections(self):
+        return Qt.Orientation(0)
+
+    def hasHeightForWidth(self):
+        return True
+
+    def heightForWidth(self, width):
+        return self._do_layout(QRect(0, 0, width, 0), True)
+
+    def setGeometry(self, rect):
+        super().setGeometry(rect)
+        self._do_layout(rect, False)
+
+    def sizeHint(self):
+        return self.minimumSize()
+
+    def minimumSize(self):
+        size = QSize()
+        for item in self._items:
+            size = size.expandedTo(item.minimumSize())
+        m = self.contentsMargins()
+        size += QSize(m.left() + m.right(), m.top() + m.bottom())
+        return size
+
+    def _do_layout(self, rect, test_only):
+        m = self.contentsMargins()
+        effective = rect.adjusted(m.left(), m.top(), -m.right(), -m.bottom())
+        x = effective.x()
+        y = effective.y()
+        line_height = 0
+        for item in self._items:
+            hint = item.sizeHint()
+            next_x = x + hint.width() + self._h_spacing
+            if next_x - self._h_spacing > effective.right() and line_height > 0:
+                x = effective.x()
+                y = y + line_height + self._v_spacing
+                next_x = x + hint.width() + self._h_spacing
+                line_height = 0
+            if not test_only:
+                item.setGeometry(QRect(x, y, hint.width(), hint.height()))
+            x = next_x
+            line_height = max(line_height, hint.height())
+        return y + line_height - rect.y() + m.bottom()
 
 
 class IndependentCard(GlassFrame):
@@ -1857,38 +1927,23 @@ class GroupCard(GlassFrame):
             if child.widget():
                 child.widget().deleteLater()
 
-        # chip 위젯들을 가로로 배치 (wrap은 수동 — 폭 제한을 근거로 새 행 생성)
         if not items and summary is None:
             return
 
-        # 한 행에 4개씩 wrap (서브 텍스트 제거되므로 폭 여유 있음)
-        PER_ROW = 4
-        current_row = None
-        for i, (name, is_found, _sub_unused) in enumerate(items):
-            if i % PER_ROW == 0:
-                current_row = QHBoxLayout()
-                current_row.setContentsMargins(0, 0, 0, 0)
-                current_row.setSpacing(16)
-                _row_wrap = QWidget()
-                _row_wrap.setStyleSheet("background: transparent;")
-                _row_wrap.setLayout(current_row)
-                self._checklist_chips_layout.addWidget(_row_wrap)
-            # sub 텍스트는 무시 (사용자 요청: "(수수료계산서 포함)" 표시 안 함)
-            current_row.addWidget(self._make_doc_chip_widget(name, is_found, sub=None))
-            if (i + 1) % PER_ROW == 0 or i == len(items) - 1:
-                current_row.addStretch(1)
+        # FlowLayout 으로 실제 폭에 따라 wrap (기존 고정 n개씩 wrap 대체)
+        flow_wrap = QWidget()
+        flow_wrap.setStyleSheet("background: transparent;")
+        flow = FlowLayout(flow_wrap, h_spacing=14, v_spacing=6)
+        flow.setContentsMargins(0, 0, 0, 0)
+
+        for name, is_found, _sub_unused in items:
+            flow.addWidget(self._make_doc_chip_widget(name, is_found, sub=None))
 
         if summary is not None:
             total, missing, ok = summary
-            sum_row = QHBoxLayout()
-            sum_row.setContentsMargins(0, 2, 0, 0)
-            sum_row.setSpacing(16)
-            sum_wrap = QWidget()
-            sum_wrap.setStyleSheet("background: transparent;")
-            sum_wrap.setLayout(sum_row)
-            sum_row.addWidget(self._make_summary_widget(total, missing, ok))
-            sum_row.addStretch(1)
-            self._checklist_chips_layout.addWidget(sum_wrap)
+            flow.addWidget(self._make_summary_widget(total, missing, ok))
+
+        self._checklist_chips_layout.addWidget(flow_wrap)
 
     def refresh_mapping_ui(self):
         # 카드가 접혀있으면 먼저 펼침 (body_widget이 숨김이면 내부 mapping_widget도 안 보임)

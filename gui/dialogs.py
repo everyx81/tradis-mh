@@ -794,38 +794,38 @@ class GroupCard(GlassFrame):
         self._hover_anim = anim
 
     def _apply_card_bg(self, value):
-        """호버 진행도(0.0~1.0)에 따라 카드 그라데이션 배경/경계/glow 보간"""
+        """Claude Design warm dark — 호버 시 bg_1 → bg_2로 부드럽게 전환."""
         self._hover_progress = float(value)
         t = max(0.0, min(1.0, float(value)))
 
         def lerp(a, b):
             return int(a + (b - a) * t)
 
-        # 프리뷰와 동일 — 내부 색은 '아주 약간만' 밝아짐 (외곽 glow가 메인)
-        g1_r = lerp(18, 22);  g1_g = lerp(28, 34);  g1_b = lerp(42, 50);  g1_a = lerp(165, 190)
-        g2_r = lerp(14, 18);  g2_g = lerp(24, 30);  g2_b = lerp(38, 46);  g2_a = lerp(140, 165)
+        # warm dark bg_1 (42,46,54) → bg_2 (50,55,64) hover
+        r = lerp(42, 50)
+        g = lerp(46, 55)
+        b = lerp(54, 64)
 
-        # 경계도 적당히 (base 70 유지 — 선명, hover는 약간만 강조)
-        br_r = lerp(100, 115)
-        br_g = lerp(180, 210)
-        br_b = lerp(240, 250)
-        br_a = lerp(70, 130)
+        # border: soft → 약간 진한 톤
+        br_r = lerp(60, 78)
+        br_g = lerp(64, 82)
+        br_b = lerp(76, 95)
+        br_a = lerp(150, 200)
 
         self.setStyleSheet(f"""
             #GroupCardRoot {{
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 rgba({g1_r}, {g1_g}, {g1_b}, {g1_a}),
-                    stop:1 rgba({g2_r}, {g2_g}, {g2_b}, {g2_a}));
+                background-color: rgb({r}, {g}, {b});
                 border: 1px solid rgba({br_r}, {br_g}, {br_b}, {br_a});
                 border-radius: 14px;
             }}
         """)
 
-        # 주된 호버 표현은 카드 주변 파란 glow (drop shadow)
+        # 호버 glow: 은은한 아크센트(블루) 대신 약간만
         if hasattr(self, '_hover_shadow') and self._hover_shadow is not None:
             from PyQt6.QtGui import QColor
-            glow_alpha = lerp(0, 120)
-            self._hover_shadow.setColor(QColor(0, 180, 230, glow_alpha))
+            glow_alpha = lerp(0, 60)
+            # accent oklch(0.7 0.15 250) ≈ rgb(106, 148, 223)
+            self._hover_shadow.setColor(QColor(106, 148, 223, glow_alpha))
 
     def init_ui(self):
         # 카드 자체에 모던한 배경 (호버 시 부드럽게 밝아지는 애니메이션)

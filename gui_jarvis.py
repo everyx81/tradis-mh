@@ -1760,116 +1760,97 @@ class JarvisGUI(QMainWindow):
         """
 
     def setup_middle_panel(self):
+        """Claude Design warm dark 중앙 패널.
+        title + breadcrumbs + filter chips + group card scroll."""
         layout = QVBoxLayout(self.middle_panel)
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(10)
-        
-        lbl_title = QLabel('폴더 및 파일 관리 <span style="color:#6a7a8a; font-weight:400; font-size:12pt;">(FOLDER &amp; FILE MANAGEMENT)</span>')
-        lbl_title.setStyleSheet("font-size: 16pt; font-weight: 600; color: #ffffff; letter-spacing: 0.5px;")
-        lbl_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lbl_title.setTextFormat(Qt.TextFormat.RichText)
-        layout.addWidget(lbl_title)
-        layout.addSpacing(18)  # 제목과 Location/재스캔 사이 여백
+        layout.setContentsMargins(22, 20, 22, 18)
+        layout.setSpacing(0)
 
-        info_row = QHBoxLayout()
-        self.lbl_location = QLabel("Location: (Not Selected)")
-        self.lbl_location.setStyleSheet("color: #aaa; font-size: 10pt;")
-        info_row.addWidget(self.lbl_location)
-        info_row.addStretch()
+        _mono = "'JetBrains Mono','Consolas',monospace"
 
-        btn_rescan = NeonButton("폴더 재스캔", color="cyan")
-        btn_rescan.setFixedSize(140, 34)
+        # ── 1) TITLE ROW ──
+        title_row = QHBoxLayout()
+        title_row.setSpacing(10)
+        title_row.setContentsMargins(0, 0, 0, 0)
+
+        lbl_title = QLabel("폴더 및 파일 관리")
+        lbl_title.setStyleSheet(f"color: {CT['fg_0']}; font-size: 15pt; font-weight: 700; letter-spacing: -0.2px; background: transparent;")
+        title_row.addWidget(lbl_title)
+
+        lbl_title_en = QLabel("FOLDER & FILE MANAGEMENT")
+        lbl_title_en.setStyleSheet(f"color: {CT['fg_3']}; font-size: 8.5pt; font-weight: 500; letter-spacing: 1.5px; background: transparent;")
+        lbl_title_en.setAlignment(Qt.AlignmentFlag.AlignBottom)
+        title_row.addWidget(lbl_title_en)
+        title_row.addStretch()
+
+        btn_rescan = QPushButton("↻  폴더 재스캔")
+        btn_rescan.setFixedHeight(32)
+        btn_rescan.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_rescan.setStyleSheet(self._btn_secondary_css())
         btn_rescan.clicked.connect(self.run_intelligent_merge)
-        info_row.addWidget(btn_rescan)
-        layout.addLayout(info_row)
-        
+        title_row.addWidget(btn_rescan)
+        layout.addLayout(title_row)
+
+        # ── 2) BREADCRUMBS (path) ──
+        layout.addSpacing(10)
+        crumbs_row = QHBoxLayout()
+        crumbs_row.setSpacing(8)
+        crumbs_row.setContentsMargins(0, 0, 0, 0)
+
+        self.lbl_location = QLabel("폴더를 선택하세요")
+        self.lbl_location.setStyleSheet(f"""
+            color: {CT['fg_2']};
+            background-color: {CT['bg_2']};
+            border: 1px solid {CT['border_soft']};
+            border-radius: 6px;
+            padding: 4px 9px;
+            font-family: {_mono};
+            font-size: 9pt;
+        """)
+        crumbs_row.addWidget(self.lbl_location)
+        crumbs_row.addStretch()
+        layout.addLayout(crumbs_row)
+
+        # ── 3) 구분선 ──
+        layout.addSpacing(14)
         line = QFrame()
         line.setFixedHeight(1)
-        line.setStyleSheet("background-color: rgba(100, 160, 200, 30); border: none;")
+        line.setStyleSheet(f"background-color: {CT['border_soft']}; border: none;")
         layout.addWidget(line)
-        
-        lbl_sec = QLabel("ID CLASSIFIED FILES (B/L, Invoice No.)")
-        lbl_sec.setStyleSheet("color: #8a9aac; font-size: 10pt; font-weight: 500; letter-spacing: 0.3px; margin-top: 10px;")
-        layout.addWidget(lbl_sec)
+        layout.addSpacing(14)
 
-        # ── 상태 필터 바 (전체/완료/검토/미매칭) ──
-        self.current_card_filter = 'all'  # 'all' | 'green' | 'yellow' | 'red' | 'gray'
-        self.group_cards = []  # 필터 대상 카드 참조 저장
+        # ── 4) FILTER CHIPS (ID classified · N groups + chips) ──
+        self.current_card_filter = 'all'
+        self.group_cards = []
 
         self.filter_bar = QWidget()
         filter_layout = QHBoxLayout(self.filter_bar)
-        filter_layout.setContentsMargins(0, 2, 0, 2)
+        filter_layout.setContentsMargins(0, 0, 0, 0)
         filter_layout.setSpacing(6)
 
-        # QPainter로 부드러운 glow dot 아이콘 생성 (이모지 아크릴 느낌 제거)
-        from PyQt6.QtGui import QPixmap, QPainter, QColor, QRadialGradient
-        from PyQt6.QtCore import QSize
+        lbl_hint = QLabel("ID CLASSIFIED")
+        lbl_hint.setStyleSheet(f"color: {CT['fg_3']}; font-size: 8.5pt; font-weight: 600; letter-spacing: 1.5px; background: transparent;")
+        filter_layout.addWidget(lbl_hint)
+        filter_layout.addSpacing(6)
 
-        def _make_soft_dot_icon(hex_color, size=22):
-            pm = QPixmap(size, size)
-            pm.fill(Qt.GlobalColor.transparent)
-            p = QPainter(pm)
-            p.setRenderHint(QPainter.RenderHint.Antialiasing)
-            c = QColor(hex_color)
-            # 외곽 glow
-            grad = QRadialGradient(size/2, size/2, size/2)
-            grad.setColorAt(0.0, QColor(c.red(), c.green(), c.blue(), 255))
-            grad.setColorAt(0.35, QColor(c.red(), c.green(), c.blue(), 200))
-            grad.setColorAt(0.65, QColor(c.red(), c.green(), c.blue(), 90))
-            grad.setColorAt(1.0, QColor(c.red(), c.green(), c.blue(), 0))
-            p.setBrush(grad)
-            p.setPen(Qt.PenStyle.NoPen)
-            p.drawEllipse(0, 0, size, size)
-            p.end()
-            return pm
-
-        dot_colors = {
-            'all':    None,        # 'all'은 dot 없음 (텍스트만)
-            'green':  '#34c759',
-            'yellow': '#ffd60a',
-            'red':    '#ff453a',
-            'gray':   '#c8d0dc',
-        }
-        self._filter_dot_icons = {k: (_make_soft_dot_icon(v) if v else None) for k, v in dot_colors.items()}
-
-        def _make_filter_btn(key, label):
-            btn = QPushButton(label)
+        # chip factory
+        def _make_chip(key, text, dot_color=None):
+            btn = QPushButton(text)
             btn.setCheckable(True)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            # 아이콘 (soft glow dot)
-            if self._filter_dot_icons[key] is not None:
-                from PyQt6.QtGui import QIcon
-                btn.setIcon(QIcon(self._filter_dot_icons[key]))
-                btn.setIconSize(QSize(14, 14))
-            btn.setStyleSheet("""
-                QPushButton {
-                    background: rgba(20,30,40,140);
-                    border: 1px solid rgba(100,160,200,40);
-                    border-radius: 14px;
-                    padding: 5px 14px 5px 10px;
-                    color: #8a9aac; font-size: 9pt; font-weight: 600;
-                    text-align: center;
-                }
-                QPushButton:hover {
-                    background: rgba(30,50,75,160);
-                    border-color: rgba(100,200,240,80);
-                    color: #c0d0e0;
-                }
-                QPushButton:checked {
-                    background: rgba(70,160,200,60);
-                    border-color: rgba(100,200,240,140);
-                    color: #a8e0ff;
-                }
-            """)
+            btn.setProperty("chip_key", key)
+            if dot_color:
+                btn.setProperty("dot_color", dot_color)
+            btn.setStyleSheet(self._chip_css(dot_color))
             btn.clicked.connect(lambda: self._apply_card_filter(key))
             return btn
 
         self.filter_btns = {
-            'all':    _make_filter_btn('all', '전체 0'),
-            'green':  _make_filter_btn('green', '0'),
-            'yellow': _make_filter_btn('yellow', '0'),
-            'red':    _make_filter_btn('red', '0'),
-            'gray':   _make_filter_btn('gray', '0'),
+            'all':    _make_chip('all',    "전체 0"),
+            'green':  _make_chip('green',  "완료 0",   CT['green']),
+            'yellow': _make_chip('yellow', "대기 0",   CT['amber']),
+            'red':    _make_chip('red',    "충돌 0",   CT['red']),
+            'gray':   _make_chip('gray',   "미분류 0", CT['fg_3']),
         }
         for key in ('all', 'green', 'yellow', 'red', 'gray'):
             filter_layout.addWidget(self.filter_btns[key])
@@ -1877,23 +1858,52 @@ class JarvisGUI(QMainWindow):
         self.filter_btns['all'].setChecked(True)
         layout.addWidget(self.filter_bar)
 
+        # ── 5) GROUP CARD SCROLL ──
+        layout.addSpacing(14)
         self.merge_scroll = QScrollArea()
         self.merge_scroll.setWidgetResizable(True)
         self.merge_scroll.setStyleSheet("background: transparent; border: none;")
-        
+        self.merge_scroll.setFrameShape(QFrame.Shape.NoFrame)
+
         self.merge_container = QWidget()
         self.merge_container.setStyleSheet("background: transparent;")
         self.merge_layout = QVBoxLayout(self.merge_container)
-        self.merge_layout.setSpacing(15)
+        self.merge_layout.setContentsMargins(0, 0, 0, 0)
+        self.merge_layout.setSpacing(10)
         self.merge_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        
+
         self.merge_scroll.setWidget(self.merge_container)
-        layout.addWidget(self.merge_scroll)
-        
-        self.lbl_hint = QLabel("Waiting for Analysis...")
+        layout.addWidget(self.merge_scroll, stretch=1)
+
+        self.lbl_hint = QLabel("분석을 기다리는 중...")
         self.lbl_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lbl_hint.setStyleSheet("color: #555; font-size: 14pt;")
+        self.lbl_hint.setStyleSheet(f"color: {CT['fg_3']}; font-size: 11pt; padding: 40px;")
         self.merge_layout.addWidget(self.lbl_hint)
+
+    def _chip_css(self, dot_color=None):
+        """필터 chip 스타일 (색 dot + 텍스트)."""
+        base = f"""
+            QPushButton {{
+                background-color: {CT['bg_2']};
+                color: {CT['fg_1']};
+                border: 1px solid {CT['border_soft']};
+                border-radius: 999px;
+                padding: 5px 13px;
+                font-size: 9pt;
+                font-weight: 500;
+                text-align: center;
+            }}
+            QPushButton:hover {{
+                background-color: {CT['bg_3']};
+                color: {CT['fg_0']};
+            }}
+            QPushButton:checked {{
+                background-color: {CT['accent_bg']};
+                border: 1px solid {CT['accent_border']};
+                color: {CT['accent_hi']};
+            }}
+        """
+        return base
 
     def _apply_card_filter(self, key):
         """필터 버튼 클릭 → 해당 상태 카드만 표시"""

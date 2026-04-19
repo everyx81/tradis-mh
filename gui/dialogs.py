@@ -881,6 +881,45 @@ class GroupCard(GlassFrame):
         pill_layout.addWidget(self.pill_id)
 
         header.addWidget(self.id_pill)
+
+        # ── group-meta: 카테고리 · 건수(pill) ── (Claude Design 헤더 인라인 메타)
+        from .claude_theme import C as _CT
+        _company = self.data.get('company', '') or ''
+        _file_count = len(self.data.get('docs', {}))
+
+        self.lbl_meta_company = QLabel(_company)
+        self.lbl_meta_company.setStyleSheet(
+            f"color: {_CT['fg_2']}; font-size: 10pt; background: transparent; border: none;"
+        )
+        self.lbl_meta_company.setWordWrap(False)
+        # 긴 회사명은 ... 으로 줄임
+        from PyQt6.QtGui import QFontMetrics
+        self.lbl_meta_company.setMaximumWidth(260)
+        self.lbl_meta_company.setToolTip(_company)
+        if _company:
+            _fm = QFontMetrics(self.lbl_meta_company.font())
+            self.lbl_meta_company.setText(_fm.elidedText(_company, Qt.TextElideMode.ElideRight, 260))
+        header.addSpacing(10)
+        header.addWidget(self.lbl_meta_company)
+
+        _dot_sep1 = QLabel("·")
+        _dot_sep1.setStyleSheet(f"color: {_CT['fg_3']}; background: transparent; border: none;")
+        header.addSpacing(6)
+        header.addWidget(_dot_sep1)
+
+        self.lbl_count_pill = QLabel(f"{_file_count}건")
+        self.lbl_count_pill.setStyleSheet(f"""
+            color: {_CT['fg_1']};
+            background-color: {_CT['bg_3']};
+            border: 1px solid {_CT['border_soft']};
+            border-radius: 5px;
+            padding: 2px 7px;
+            font-family: 'JetBrains Mono','Consolas',monospace;
+            font-size: 8.5pt;
+        """)
+        header.addSpacing(6)
+        header.addWidget(self.lbl_count_pill)
+
         header.addStretch(1)
 
         # 기존 버튼 로직 결정
@@ -891,16 +930,28 @@ class GroupCard(GlassFrame):
         self.is_export_only = is_export_only
         self.is_archive_only = is_export_only or is_import_no_settlement
 
-        # ── 액션 버튼 (NeonButton — 부드러운 420ms 호버 + 파란 glow 통일) ──
+        # ── 액션 버튼 ──
         if self.is_archive_only:
             btn_text = "폴더 정리"
+            icon_name = "Folder"
         elif has_statement:
             btn_text = "분석 중..."
+            icon_name = "Refresh"
         else:
             btn_text = "매칭"
+            icon_name = "Merge"
 
+        from .claude_icons import pixmap as _icpx
+        from PyQt6.QtCore import QSize as _QSize
+        from PyQt6.QtGui import QIcon as _QIcon
+        from .claude_theme import C as _CT
         self.btn_toggle = NeonButton(btn_text, color="cyan")
         self.btn_toggle.setMinimumWidth(92)
+        try:
+            self.btn_toggle.setIcon(_QIcon(_icpx(icon_name, size=13, color=_CT['fg_1'])))
+            self.btn_toggle.setIconSize(_QSize(13, 13))
+        except Exception:
+            pass
         if self.is_archive_only:
             self.btn_toggle.clicked.connect(self._archive_export_only)
         else:
@@ -909,13 +960,14 @@ class GroupCard(GlassFrame):
 
         self.layout.addWidget(self.header_widget)
 
-        # ── 카드 하단 서브 텍스트 (ID 반복 + 회사명 + 건수) ──
+        # ── 카드 하단 서브 텍스트 (헤더 group-meta로 대체됨 - 호환성 위해 hidden) ──
         file_count = len(self.data.get('docs', {}))
         self.lbl_body_text = QLabel(f"{self.text_id}  ({self.data['company']}) · {file_count}건")
         self.lbl_body_text.setStyleSheet(
             "color: #a8bacc; font-size: 10pt; background: transparent; padding-left: 4px;"
         )
         self.lbl_body_text.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.lbl_body_text.hide()
         self.layout.addWidget(self.lbl_body_text)
 
         # 레거시 호환

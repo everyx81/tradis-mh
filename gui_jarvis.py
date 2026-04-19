@@ -28,7 +28,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QGridLayout,
                              QStackedWidget, QSizePolicy)
 from PyQt6.QtCore import (Qt, QTimer, pyqtSignal, QPropertyAnimation, QEasingCurve, 
                           QPoint, QParallelAnimationGroup, QEvent)
-from PyQt6.QtGui import QPixmap, QFont
+from PyQt6.QtGui import QPixmap, QFont, QIcon
 
 # Internal Modules (Logic)
 from auto_rename import AutoRenamer, check_single_instance, set_api_key, Archiver
@@ -635,11 +635,14 @@ class JarvisGUI(QMainWindow):
         total_layout.addWidget(content_widget)
     
     def _create_vertical_navbar(self):
-        """오른쪽 세로 NavBar 생성 (Claude Design warm dark)"""
+        """오른쪽 세로 NavBar — Claude Design (NAV 헤더 + 아이콘 + 라벨)"""
+        from gui.claude_icons import pixmap as _icpx
+        from PyQt6.QtCore import QSize
+
         self.navbar = QWidget()
         self.navbar.setFixedWidth(52)
         navbar_layout = QVBoxLayout(self.navbar)
-        navbar_layout.setContentsMargins(6, 18, 6, 14)
+        navbar_layout.setContentsMargins(0, 6, 0, 14)
         navbar_layout.setSpacing(4)
 
         self.navbar.setObjectName("NavBar")
@@ -652,62 +655,108 @@ class JarvisGUI(QMainWindow):
                 border-bottom: none;
                 border-radius: 0px;
             }}
-            QPushButton {{
+        """)
+
+        # NAV 헤더 라벨 (side-tabs::before 'NAV' 대체)
+        _nav_header = QLabel("NAV")
+        _nav_header.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        _nav_header.setStyleSheet(f"""
+            color: {CT['fg_3']};
+            font-size: 8pt;
+            font-weight: 700;
+            letter-spacing: 3px;
+            background: transparent;
+            border: none;
+            padding: 4px 0 8px 0;
+        """)
+        navbar_layout.addWidget(_nav_header)
+
+        self.nav_buttons = {}
+        # (tab_name, label, icon_name)
+        tab_defs = [
+            ("정산",     "정산", "Zap"),
+            ("일정",     "일정", "Calendar"),
+            ("통관",     "통관", "Layers"),
+            ("REPORT",   "보고", "Book"),
+            ("SETTINGS", "설정", "Cog"),
+        ]
+
+        admin_only_tabs = {"일정", "통관", "REPORT"}
+
+        # 색상 상태 (idle / hover / active) — active 시 좌측에 얇은 accent 바
+        _nav_btn_css = f"""
+            QPushButton#SideTab {{
                 background-color: transparent;
-                color: {CT["fg_2"]};
+                color: {CT['fg_2']};
                 border: 1px solid transparent;
+                border-left: 2px solid transparent;
                 border-radius: 10px;
-                padding: 10px 2px;
+                padding: 8px 2px;
                 font-size: 9pt;
                 font-weight: 600;
                 text-align: center;
             }}
-            QPushButton:hover {{
-                background-color: {CT["bg_2"]};
-                color: {CT["fg_0"]};
-                border: 1px solid {CT["border_soft"]};
+            QPushButton#SideTab:hover {{
+                background-color: {CT['bg_2']};
+                color: {CT['fg_0']};
+                border: 1px solid {CT['border_soft']};
+                border-left: 2px solid {CT['border']};
             }}
-            QPushButton:checked {{
-                background-color: {CT["accent_bg"]};
-                color: {CT["accent_hi"]};
-                border: 1px solid {CT["accent_border"]};
+            QPushButton#SideTab:checked {{
+                background-color: {CT['accent_bg']};
+                color: {CT['accent_hi']};
+                border: 1px solid {CT['accent_border']};
+                border-left: 2px solid {CT['accent']};
             }}
-        """)
-        
-        self.nav_buttons = {}
-        tab_defs = [
-            ("정산", "정\n산", "#00ffff"),
-            ("일정", "일\n정", "#00ff88"),
-            ("통관", "통\n관", "#ffa500"),
-            ("REPORT", "보\n고", "#ff88ff"),
-            ("SETTINGS", "설\n정", "#aaaaaa"),
-        ]
+        """
 
-        # admin 전용 탭
-        admin_only_tabs = {"일정", "통관", "REPORT"}
-
-        for tab_name, label, color in tab_defs:
+        for tab_name, label, icon_name in tab_defs:
             if tab_name in admin_only_tabs and self.license_tier != "admin":
                 continue
-            btn = QPushButton(label)
-            btn.setFixedSize(40, 52)
+            btn = QPushButton(f"\n{label}")
+            btn.setObjectName("SideTab")
+            btn.setFixedSize(44, 58)
             btn.setCheckable(True)
             btn.setAutoExclusive(True)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.setProperty("tab_name", tab_name)
-            # 부모 QWidget#NavBar의 스타일 상속 (개별 오버라이드 제거 — Claude warm dark 톤 적용)
+            btn.setProperty("icon_name", icon_name)
+            btn.setStyleSheet(_nav_btn_css)
+            # 아이콘 (idle 색상)
+            btn.setIcon(QIcon(_icpx(icon_name, size=20, color=CT['fg_2'])))
+            btn.setIconSize(QSize(20, 20))
             btn.clicked.connect(lambda checked, name=tab_name: self._on_navbar_clicked(name))
-            navbar_layout.addWidget(btn)
+            # 가운데 정렬을 위해 수평 wrapper 추가
+            _wrap = QHBoxLayout()
+            _wrap.setContentsMargins(4, 0, 4, 0)
+            _wrap.addStretch()
+            _wrap.addWidget(btn)
+            _wrap.addStretch()
+            navbar_layout.addLayout(_wrap)
             self.nav_buttons[tab_name] = btn
         
         navbar_layout.addStretch()
         self.nav_buttons["정산"].setChecked(True)
+        # 초기 active 탭 아이콘을 accent 색으로 표시
+        _icon_name = self.nav_buttons["정산"].property("icon_name")
+        if _icon_name:
+            self.nav_buttons["정산"].setIcon(QIcon(_icpx(_icon_name, size=20, color=CT['accent_hi'])))
+            self.nav_buttons["정산"].setIconSize(QSize(20, 20))
         self.current_nav_tab = "정산"
         self.main_layout.addWidget(self.navbar, 0, 2)
     
     def _on_navbar_clicked(self, tab_name):
+        from gui.claude_icons import pixmap as _icpx
+        from PyQt6.QtCore import QSize
         for name, btn in self.nav_buttons.items():
-            btn.setChecked(name == tab_name)
+            is_active = (name == tab_name)
+            btn.setChecked(is_active)
+            # 아이콘 색상도 active/idle에 맞춰 갱신
+            icon_name = btn.property("icon_name")
+            if icon_name:
+                color = CT['accent_hi'] if is_active else CT['fg_2']
+                btn.setIcon(QIcon(_icpx(icon_name, size=20, color=color)))
+                btn.setIconSize(QSize(20, 20))
         self.current_nav_tab = tab_name
 
         # 1) QStackedWidget 페이지 전환
@@ -1504,8 +1553,13 @@ class JarvisGUI(QMainWindow):
         brand_mark = QLabel("T")
         brand_mark.setFixedSize(36, 36)
         brand_mark.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # 대각선 그라디언트: accent → accent_lo (135deg)
         brand_mark.setStyleSheet(f"""
-            background-color: {CT['accent']};
+            background: qlineargradient(
+                x1:0, y1:0, x2:1, y2:1,
+                stop:0 {CT['accent_hi']},
+                stop:1 {CT['accent_lo']}
+            );
             color: #ffffff;
             font-weight: 700;
             font-size: 14pt;
@@ -1553,9 +1607,13 @@ class JarvisGUI(QMainWindow):
         """)
         path_layout.addWidget(self.line_path, stretch=1)
 
-        self.btn_browse = QPushButton("　변경　")
+        from gui.claude_icons import pixmap as _icpx
+        from PyQt6.QtCore import QSize as _QSize
+        self.btn_browse = QPushButton("  변경")
+        self.btn_browse.setIcon(QIcon(_icpx("Folder", size=14, color=CT['fg_1'])))
+        self.btn_browse.setIconSize(_QSize(14, 14))
         self.btn_browse.setFixedHeight(32)
-        self.btn_browse.setMinimumWidth(54)
+        self.btn_browse.setMinimumWidth(66)
         self.btn_browse.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_browse.setStyleSheet(self._btn_secondary_css())
         self.btn_browse.clicked.connect(self.browse_directory)
@@ -1602,7 +1660,9 @@ class JarvisGUI(QMainWindow):
         """)
         ai_row_layout.addWidget(self._ai_version_tag)
 
-        self.btn_api_settings = QPushButton("⚙")
+        self.btn_api_settings = QPushButton()
+        self.btn_api_settings.setIcon(QIcon(_icpx("Settings", size=15, color=CT['fg_2'])))
+        self.btn_api_settings.setIconSize(_QSize(15, 15))
         self.btn_api_settings.setFixedSize(28, 28)
         self.btn_api_settings.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_api_settings.setStyleSheet(self._btn_icon_css())
@@ -1630,13 +1690,17 @@ class JarvisGUI(QMainWindow):
         act_layout = QHBoxLayout()
         act_layout.setSpacing(8)
 
-        self.btn_start = QPushButton("▶  Start")
+        self.btn_start = QPushButton("  Start")
+        self.btn_start.setIcon(QIcon(_icpx("Play", size=13, color="#ffffff")))
+        self.btn_start.setIconSize(_QSize(13, 13))
         self.btn_start.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_start.setMinimumHeight(34)
         self.btn_start.setStyleSheet(self._btn_primary_css())
         self.btn_start.clicked.connect(self.start_monitoring)
 
-        self.btn_stop = QPushButton("■  Stop")
+        self.btn_stop = QPushButton("  Stop")
+        self.btn_stop.setIcon(QIcon(_icpx("Stop", size=11, color=CT['fg_2'])))
+        self.btn_stop.setIconSize(_QSize(11, 11))
         self.btn_stop.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_stop.setMinimumHeight(34)
         self.btn_stop.setStyleSheet(self._btn_secondary_css())
@@ -1702,6 +1766,9 @@ class JarvisGUI(QMainWindow):
         self.log_area = QTextEdit()
         self.log_area.setReadOnly(True)
         self.log_area.setObjectName("ClaudeLogArea")
+        # 좁은 사이드바에서 긴 로그가 세로로 쪼개지는 문제: wrap 끄고 가로 스크롤 허용
+        self.log_area.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
+        self.log_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.log_area.setStyleSheet(f"""
             QTextEdit#ClaudeLogArea {{
                 background-color: {CT['logs_bg']} !important;
@@ -1710,8 +1777,8 @@ class JarvisGUI(QMainWindow):
                 border-bottom-left-radius: 9px;
                 border-bottom-right-radius: 9px;
                 font-family: {_mono};
-                font-size: 9pt;
-                padding: 8px 10px;
+                font-size: 8.5pt;
+                padding: 6px 8px;
             }}
         """)
         log_wrap_layout.addWidget(self.log_area, stretch=1)
@@ -1797,7 +1864,11 @@ class JarvisGUI(QMainWindow):
         title_row.addWidget(lbl_title_en)
         title_row.addStretch()
 
-        btn_rescan = QPushButton("↻  폴더 재스캔")
+        from gui.claude_icons import pixmap as _icpx
+        from PyQt6.QtCore import QSize as _QSize
+        btn_rescan = QPushButton("  폴더 재스캔")
+        btn_rescan.setIcon(QIcon(_icpx("Scan", size=16, color=CT['fg_1'])))
+        btn_rescan.setIconSize(_QSize(16, 16))
         btn_rescan.setFixedHeight(32)
         btn_rescan.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_rescan.setStyleSheet(self._btn_secondary_css())

@@ -137,20 +137,22 @@ class FileManagerWidget(QWidget):
         self.lbl_target_count.setStyleSheet(_SECTION_COUNT_CSS)
         c1_header.addWidget(self.lbl_target_count)
 
-        self.btn_refresh_target = QPushButton("↻")
+        from .claude_icons import pixmap as _icpx
+        from PyQt6.QtCore import QSize as _QSize
+        from PyQt6.QtGui import QIcon as _QIcon
+        self.btn_refresh_target = QPushButton()
+        self.btn_refresh_target.setIcon(_QIcon(_icpx("Refresh", size=13, color=CT['fg_2'])))
+        self.btn_refresh_target.setIconSize(_QSize(13, 13))
         self.btn_refresh_target.setFixedSize(26, 22)
         self.btn_refresh_target.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_refresh_target.setStyleSheet(f"""
             QPushButton {{
                 background-color: transparent;
-                color: {CT['fg_2']};
                 border: 1px solid transparent;
                 border-radius: 6px;
-                font-size: 11pt;
             }}
             QPushButton:hover {{
                 background-color: {CT['bg_3']};
-                color: {CT['fg_0']};
             }}
         """)
         self.btn_refresh_target.clicked.connect(self.refresh_targets)
@@ -308,7 +310,9 @@ class FileManagerWidget(QWidget):
             }}
         """
 
-        self.btn_to_import = QPushButton("↓  수입")
+        self.btn_to_import = QPushButton("  수입")
+        self.btn_to_import.setIcon(_QIcon(_icpx("Download", size=14, color=CT['fg_2'])))
+        self.btn_to_import.setIconSize(_QSize(14, 14))
         self.btn_to_import.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_to_import.setStyleSheet(_min_btn_css)
         self.btn_to_import.clicked.connect(lambda: self._quick_export_to('import'))
@@ -319,7 +323,9 @@ class FileManagerWidget(QWidget):
         _sep1.setStyleSheet(f"background-color: {CT['border']}; border: none;")
         btn_layout.addWidget(_sep1)
 
-        self.btn_to_export = QPushButton("↑  수출")
+        self.btn_to_export = QPushButton("  수출")
+        self.btn_to_export.setIcon(_QIcon(_icpx("Upload", size=14, color=CT['fg_2'])))
+        self.btn_to_export.setIconSize(_QSize(14, 14))
         self.btn_to_export.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_to_export.setStyleSheet(_min_btn_css)
         self.btn_to_export.clicked.connect(lambda: self._quick_export_to('export'))
@@ -330,7 +336,9 @@ class FileManagerWidget(QWidget):
         _sep2.setStyleSheet(f"background-color: {CT['border']}; border: none;")
         btn_layout.addWidget(_sep2)
 
-        self.btn_toggle_search = QPushButton("⌕  검색")
+        self.btn_toggle_search = QPushButton("  검색")
+        self.btn_toggle_search.setIcon(_QIcon(_icpx("Search", size=14, color=CT['fg_2'])))
+        self.btn_toggle_search.setIconSize(_QSize(14, 14))
         self.btn_toggle_search.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_toggle_search.setStyleSheet(_min_btn_css)
         self.btn_toggle_search.clicked.connect(self._toggle_search_panel)

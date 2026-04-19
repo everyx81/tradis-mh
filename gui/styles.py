@@ -17,92 +17,90 @@ QToolTip {
     font-weight: 500;
 }
 QMainWindow {
-    background-color: rgba(5, 10, 15, 230);
+    background-color: transparent;
 }
+/* #OuterContainer는 gui_jarvis.py init_ui에서 Claude warm dark로 오버라이드됨 */
 #OuterContainer {
-    background: qradialgradient(cx:0.5, cy:0.4, radius:1.1, fx:0.5, fy:0.4,
-        stop:0    rgba(30, 70, 110, 255),
-        stop:0.5  rgba(15, 30, 50, 255),
-        stop:1    rgba(7, 14, 24, 255));
+    background-color: rgba(13, 15, 21, 255);
     border: none;
     border-radius: 14px;
 }
 QLabel {
-    color: #a9b7c6;
-    font-family: 'Malgun Gothic';
+    color: #c1c4c9;
+    font-family: 'Pretendard', 'Malgun Gothic', 'Segoe UI', sans-serif;
     font-size: 10pt;
 }
-/* 맥 스타일 입력/콤보/텍스트 위젯 */
+/* Claude Design warm dark (oklch 정확 변환) - 입력/콤보/텍스트 위젯 */
 QLineEdit {
-    background-color: rgba(15, 28, 44, 180) !important;
-    border: 1px solid rgba(100, 160, 200, 40);
-    border-radius: 10px;
-    color: #c0d5ea !important;
-    padding: 8px 12px;
-    font-family: 'Malgun Gothic';
+    background-color: rgba(27, 30, 36, 255);
+    border: 1px solid rgba(45, 48, 56, 150);
+    border-radius: 8px;
+    color: #f3f5f9;
+    padding: 7px 10px;
+    font-family: 'Pretendard', 'Malgun Gothic', 'Segoe UI', sans-serif;
     font-size: 10pt;
-    selection-background-color: rgba(100, 200, 240, 80);
+    selection-background-color: rgba(75, 163, 247, 80);
 }
 QLineEdit:focus {
-    border: 1px solid rgba(100, 200, 240, 120);
-    background-color: rgba(22, 38, 58, 200) !important;
+    border: 1px solid rgba(75, 163, 247, 150);
+    background-color: rgba(35, 38, 45, 255);
 }
 QComboBox {
-    background-color: rgba(15, 28, 44, 180) !important;
-    border: 1px solid rgba(100, 160, 200, 40);
-    border-radius: 10px;
-    color: #c0d5ea !important;
-    padding: 6px 14px;
+    background-color: rgba(27, 30, 36, 255);
+    border: 1px solid rgba(45, 48, 56, 150);
+    border-radius: 8px;
+    color: #f3f5f9;
+    padding: 6px 12px;
 }
 QComboBox:hover {
-    border: 1px solid rgba(100, 200, 240, 100);
+    border: 1px solid rgba(75, 163, 247, 150);
 }
 QComboBox::drop-down {
     border: none;
     background: transparent;
 }
 QComboBox QAbstractItemView {
-    background-color: rgba(18, 30, 46, 250);
-    color: #c0d5ea;
-    selection-background-color: rgba(100, 200, 240, 60);
+    background-color: rgba(35, 38, 45, 250);
+    color: #f3f5f9;
+    selection-background-color: rgba(75, 163, 247, 60);
     selection-color: #ffffff;
-    border: 1px solid rgba(100, 180, 240, 80);
+    border: 1px solid rgba(63, 66, 75, 180);
     border-radius: 6px;
     padding: 4px;
 }
 QTextEdit {
-    background-color: rgba(10, 20, 32, 180) !important;
-    border: 1px solid rgba(100, 160, 200, 30);
+    background-color: rgba(27, 30, 36, 255);
+    border: 1px solid rgba(45, 48, 56, 150);
     border-radius: 10px;
-    color: #a8bacc !important;
-    font-family: 'Consolas';
+    color: #c1c4c9;
+    font-family: 'JetBrains Mono', 'Consolas', monospace;
     font-size: 10pt;
     padding: 10px;
 }
 QTabWidget::pane {
-    border: 2px solid rgba(0, 255, 255, 150);
-    background-color: rgba(5, 15, 25, 100);
-    border-radius: 12px;
-    margin-top: -1px;
+    border: none;
+    background-color: transparent;
+    border-radius: 0px;
+    margin-top: 0px;
 }
 QTabBar::tab {
-    background-color: rgba(10, 20, 30, 180);
-    color: rgba(150, 180, 200, 200);
+    background-color: transparent;
+    color: #8f9298;
     padding: 8px 12px;
-    border: 1px solid rgba(0, 255, 255, 80);
+    border: 1px solid transparent;
     border-bottom: none;
     border-top-left-radius: 8px;
     border-top-right-radius: 8px;
     margin-right: 3px;
 }
 QTabBar::tab:selected {
-    background-color: rgba(0, 60, 80, 200);
-    color: #00ffff;
-    border-color: rgba(0, 255, 255, 200);
+    background-color: rgba(35, 38, 45, 180);
+    color: #f3f5f9;
+    border-color: rgba(63, 66, 75, 180);
 }
 QTabBar::tab:hover:!selected {
-    background-color: rgba(0, 80, 100, 150);
-    color: #aaffff;
+    background-color: rgba(27, 30, 36, 150);
+    color: #c1c4c9;
 }
 QScrollArea {
     border: none;
@@ -392,30 +390,31 @@ TREE_VIEW_STYLESHEET = """
 }
 """
 
-# FileManagerWidget list_target 스타일시트 (맥 스타일)
+# FileManagerWidget list_target 스타일시트 (Claude Design warm dark)
 TARGET_LIST_STYLESHEET = """
     QListWidget {
-        background: rgba(10, 20, 32, 120);
-        border: 1px solid rgba(100, 160, 200, 35);
-        border-radius: 12px;
-        color: #c0d0e0;
-        font-size: 9.5pt;
-        padding: 6px;
+        background: transparent;
+        border: none;
+        color: #c1c4c9;
+        font-family: 'JetBrains Mono', 'Consolas', monospace;
+        font-size: 9pt;
+        padding: 2px;
         outline: none;
     }
-    QListWidget:focus {
-        border: 1px solid rgba(100, 200, 240, 110);
-    }
     QListWidget::item {
-        padding: 6px 8px;
-        border-radius: 6px;
+        padding: 7px 10px;
+        border-radius: 8px;
         margin: 1px 0;
-    }
-    QListWidget::item:selected {
-        background: rgba(100, 200, 240, 60);
-        color: #ffffff;
+        border: 1px solid transparent;
     }
     QListWidget::item:hover {
-        background: rgba(100, 180, 240, 25);
+        background: rgba(45, 48, 56, 130);
+        border: 1px solid rgba(63, 66, 75, 180);
+        color: #f3f5f9;
+    }
+    QListWidget::item:selected {
+        background: rgba(75, 163, 247, 40);
+        border: 1px solid rgba(75, 163, 247, 90);
+        color: #f3f5f9;
     }
 """

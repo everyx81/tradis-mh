@@ -290,7 +290,8 @@ class IndependentCard(GlassFrame):
         self._apply_card_bg(0.0)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(18, 10, 18, 10)
+        # IndependentCard 카드 내부 여백 — 디자인 .group-head 매칭
+        layout.setContentsMargins(18, 8, 18, 8)
         layout.setSpacing(4)
 
         # ── 클릭 가능한 헤더 (Claude Design 톤) ──
@@ -338,9 +339,9 @@ class IndependentCard(GlassFrame):
             background: transparent;
             border: none;
             font-family: 'JetBrains Mono','Consolas','Monaco',monospace;
-            font-size: 10pt;
-            font-weight: 600;
-            letter-spacing: 0.3px;
+            font-size: 11pt;
+            font-weight: 700;
+            letter-spacing: 0.4px;
         """)
         self.lbl_title.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
         _pill_lay.addWidget(self.lbl_title)
@@ -920,8 +921,9 @@ class GroupCard(GlassFrame):
         self._apply_card_bg(0.0)
 
         self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(18, 12, 18, 12)
-        self.layout.setSpacing(6)
+        # 디자인 .group-head { padding: 14px 18px; } — top/bottom 8, 좌우 18로 컴팩트
+        self.layout.setContentsMargins(18, 8, 18, 8)
+        self.layout.setSpacing(4)
 
         # ── 클릭 가능한 헤더 ──
         self.header_widget = QWidget()
@@ -1032,16 +1034,17 @@ class GroupCard(GlassFrame):
         from .claude_theme import C as _CT
         self.btn_toggle = QPushButton("  " + btn_text)
         self.btn_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_toggle.setMinimumWidth(100)
-        self.btn_toggle.setMinimumHeight(32)
+        self.btn_toggle.setMinimumWidth(88)
+        # 디자인 .btn.small: padding 6px 10px, font-size 11.5px (~8.5pt) Pretendard/Inter
         self.btn_toggle.setStyleSheet(f"""
             QPushButton {{
                 background-color: {_CT['bg_2']};
                 color: {_CT['fg_1']};
                 border: 1px solid {_CT['border_soft']};
                 border-radius: 8px;
-                padding: 6px 14px;
-                font-size: 9.5pt;
+                padding: 6px 10px;
+                font-family: 'Pretendard','Malgun Gothic','Segoe UI',sans-serif;
+                font-size: 8.5pt;
                 font-weight: 500;
                 text-align: center;
             }}
@@ -1306,9 +1309,9 @@ class GroupCard(GlassFrame):
             QLabel#PillId {{
                 color: {s['text']};
                 font-family: 'JetBrains Mono','Consolas','Monaco',monospace;
-                font-size: 10pt;
-                font-weight: 600;
-                letter-spacing: 0.3px;
+                font-size: 11pt;
+                font-weight: 700;
+                letter-spacing: 0.4px;
                 background: transparent;
                 border: none;
             }}

@@ -1129,26 +1129,24 @@ class GroupCard(GlassFrame):
             QListWidget {{
                 background: transparent;
                 border: none;
+                outline: 0;
                 color: {_CT['fg_0']};
-                font-family: 'JetBrains Mono','Consolas',monospace;
-                font-size: 9.5pt;
                 padding: 2px;
+                show-decoration-selected: 0;
             }}
             QListWidget::item {{
-                padding: 8px 12px;
-                border-radius: 8px;
-                margin: 1px 0;
+                padding: 0;
+                margin: 2px 0;
                 border: 1px solid transparent;
+                border-radius: 8px;
             }}
             QListWidget::item:selected {{
                 background: {_CT['accent_bg']};
                 border: 1px solid {_CT['accent_border']};
-                color: {_CT['fg_0']};
             }}
             QListWidget::item:hover {{
                 background: {_CT['bg_3']};
                 border: 1px solid {_CT['border_soft']};
-                color: {_CT['fg_0']};
             }}
         """)
         self.file_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
@@ -2040,30 +2038,30 @@ class GroupCard(GlassFrame):
         self.btn_toggle.setToolTip("펼치기" if is_visible else "접기")
     
     def _refresh_file_list(self):
-        """파일 목록 위젯 갱신 (Claude Design file-row: 체크박스 + 아이콘 + 이름 + 메타 + 타입배지)"""
+        """파일 목록 위젯 갱신 (Claude Design file-row: 체크박스 + 아이콘 + 이름 + 메타)"""
         from .claude_theme import C as _CT
         from .claude_icons import pixmap as _icpx
         from PyQt6.QtCore import QSize as _QSize
         self.file_list.clear()
         docs = self.data.get('docs', {})
         all_files = sorted(set(docs.values()))
+        ROW_HEIGHT = 36
         for f in all_files:
             full_path = os.path.join(self.directory, f)
             item = QListWidgetItem()
             item.setData(Qt.ItemDataRole.UserRole, full_path)
-            # 빈 텍스트로 두고 커스텀 위젯 setItemWidget
             item.setText("")
+            # 명시적 sizeHint 지정 (row 자체 sizeHint가 0이 될 수 있음)
+            item.setSizeHint(_QSize(0, ROW_HEIGHT))
             self.file_list.addItem(item)
 
             row = self._make_file_row_widget(f, full_path)
-            item.setSizeHint(row.sizeHint())
             self.file_list.setItemWidget(item, row)
 
         # 높이 자동 조정
-        per_item = 40
         count = self.file_list.count()
-        h = max(count * per_item + 6, per_item)
-        self.file_list.setFixedHeight(min(h, 320))
+        h = max(count * (ROW_HEIGHT + 4) + 4, ROW_HEIGHT)
+        self.file_list.setFixedHeight(min(h, 360))
 
     def _make_file_row_widget(self, filename: str, full_path: str):
         """파일 한 행의 커스텀 위젯 (Claude Design .file-row)."""
@@ -2074,8 +2072,9 @@ class GroupCard(GlassFrame):
 
         row = QWidget()
         row.setStyleSheet("background: transparent;")
+        row.setMinimumHeight(32)
         lay = QHBoxLayout(row)
-        lay.setContentsMargins(10, 7, 10, 7)
+        lay.setContentsMargins(10, 5, 10, 5)
         lay.setSpacing(10)
 
         # ① 체크박스 (녹색 채운 정사각형 + 흰색 체크)
@@ -2102,7 +2101,7 @@ class GroupCard(GlassFrame):
         ico_wrap.setPixmap(_icpx("File", size=13, color=_CT['fg_2']))
         lay.addWidget(ico_wrap)
 
-        # ③ 파일 이름 (mono, ellipsize)
+        # ③ 파일 이름 (mono)
         lbl_name = QLabel(filename)
         lbl_name.setStyleSheet(f"""
             color: {_CT['fg_0']};
@@ -2136,39 +2135,7 @@ class GroupCard(GlassFrame):
             """)
             lay.addWidget(lbl_meta)
 
-        # ⑤ 타입 배지 (B/L, INV, P/L, C/L)
-        type_badge = self._guess_file_type_badge(filename)
-        if type_badge:
-            tname, tcolor = type_badge
-            lbl_badge = QLabel(tname)
-            lbl_badge.setStyleSheet(f"""
-                color: {tcolor};
-                background-color: rgba(255,255,255,12);
-                border: 1px solid {tcolor};
-                border-radius: 4px;
-                padding: 2px 6px;
-                font-size: 8pt;
-                font-weight: 600;
-                letter-spacing: 0.5px;
-            """)
-            lay.addWidget(lbl_badge)
-
         return row
-
-    def _guess_file_type_badge(self, filename: str):
-        """파일명으로 문서 타입 배지 결정 → (label, color)"""
-        from .claude_theme import C as _CT
-        fn = filename.lower()
-        # 파란(B/L) / 녹(INV) / 보라(P/L) / 앰버(C/L)
-        if 'b/l' in fn or 'bl' in fn or '선하증권' in filename:
-            return ('B/L', '#6ecde3')
-        if '세금계산서' in filename or '계산서' in filename and '비용' not in filename:
-            return ('INV', '#7fd49c')
-        if '납부고지서' in filename or '정산서' in filename:
-            return ('P/L', '#b48df4')
-        if '신고필증' in filename:
-            return ('C/L', '#e9ab2b')
-        return None
 
     def _fl_context_menu(self, pos):
         """파일 목록 우클릭 메뉴"""

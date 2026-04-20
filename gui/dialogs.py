@@ -1702,7 +1702,7 @@ class GroupCard(GlassFrame):
         """캐시된 정산서 분석 결과를 활용하여 비용 항목까지 포함한 체크리스트 표시"""
         docs = self.data['docs']
         is_export = "수출신고필증" in docs or "반송신고필증" in docs
-        
+
         # 기본 필수 서류
         if is_export:
             required = [
@@ -1710,12 +1710,37 @@ class GroupCard(GlassFrame):
                 {"name": "반송신고필증" if "반송신고필증" in docs else "수출신고필증", "found": True},
             ]
         else:
+            # 수입: 징수형태 기반으로 납부고지서/수입세금계산서 필요 여부 결정
+            # - 11: 관/부가세 있으면 납부고지서 필요 (수입세금계산서 필요)
+            # - 14: 수입세금계산서 불필요. 관/부가세 있으면 납부고지서 필요
+            # - 43: 수입세금계산서 + 납부고지서 모두 불필요
+            levy_type, has_tax = self._get_levy_info()
+            need_payment_notice = True  # 기본값: 필요
+            need_tax_invoice = True
+            if levy_type == "11":
+                need_tax_invoice = True
+                need_payment_notice = has_tax
+            elif levy_type == "14":
+                need_tax_invoice = False
+                need_payment_notice = has_tax
+            elif levy_type == "43":
+                need_tax_invoice = False
+                need_payment_notice = False
+
             required = [
                 {"name": "자금정산서", "found": "자금정산서" in docs or "정산서" in docs},
                 {"name": "수입신고필증", "found": "수입신고필증" in docs},
-                {"name": "납부고지서", "found": "납부고지서" in docs or any("납부영수증" in v for v in docs.values())},
-                {"name": "수입세금계산서", "found": "수입세금계산서" in docs},
             ]
+            if need_payment_notice:
+                required.append({
+                    "name": "납부고지서",
+                    "found": "납부고지서" in docs or any("납부영수증" in v for v in docs.values())
+                })
+            if need_tax_invoice:
+                required.append({
+                    "name": "수입세금계산서",
+                    "found": "수입세금계산서" in docs
+                })
         
         # 캐시에서 정산서 분석 결과 조회 → 비용 항목 추가
         statement_file = docs.get("자금정산서") or docs.get("정산서")
@@ -2298,6 +2323,34 @@ class GroupCard(GlassFrame):
         count = self.file_list.count()
         h = max(count * (ROW_HEIGHT + 4) + 4, ROW_HEIGHT)
         self.file_list.setFixedHeight(min(h, 360))
+
+    def _get_levy_info(self):
+        """수입신고필증 캐시에서 (징수형태, 관세+부가세>0 여부) 반환.
+        징수형태 없으면 ('Unknown', True) — 보수적으로 모두 필요로 처리.
+        """
+        try:
+            docs = self.data.get('docs', {})
+            dec_file = docs.get("수입신고필증")
+            if not dec_file:
+                return ("Unknown", True)
+            from auto_rename import gemini_ocr
+            fp = os.path.join(self.directory, dec_file)
+            cached = gemini_ocr._get_cached_result(fp)
+            if not cached:
+                return ("Unknown", True)
+            lt = str(cached.get("levy_type", "Unknown")).strip()
+            # 관세 + 부가세 → has_tax
+            def _to_int(x):
+                try:
+                    return int(str(x).replace(',', '').replace('원', '').strip())
+                except (ValueError, AttributeError):
+                    return 0
+            duty = _to_int(cached.get("customs_duty", 0))
+            vat = _to_int(cached.get("vat", 0))
+            has_tax = (duty + vat) > 0
+            return (lt, has_tax)
+        except Exception:
+            return ("Unknown", True)
 
     def _file_sort_key(self, filename: str):
         """파일 정렬 키 — 문서 종류 기반 논리 순서 (병합 순서와 동일).

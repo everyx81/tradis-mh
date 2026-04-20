@@ -23,11 +23,11 @@ C = {
     "border":        "rgba(63, 66, 75, 180)",
     "border_strong": "#484b54",
 
-    # 전경(텍스트)
-    "fg_0": "#f3f5f9",      # primary  (oklch 0.97)
-    "fg_1": "#c1c4c9",      # secondary (oklch 0.82)
-    "fg_2": "#8f9298",      # tertiary  (oklch 0.66)
-    "fg_3": "#5f636a",      # muted    (oklch 0.5)
+    # 전경(텍스트) — 브라우저 oklch 렌더와 매치되도록 sRGB 범위에서 톤업
+    "fg_0": "#f8fafc",      # primary  (oklch 0.97) — 거의 white, 선명
+    "fg_1": "#d5d9df",      # secondary (oklch 0.82) — 살짝 밝게
+    "fg_2": "#9ea1a8",      # tertiary  (oklch 0.66)
+    "fg_3": "#6a6e76",      # muted    (oklch 0.5)
 
     # 액센트 (블루)
     "accent":        "#4ba3f7",   # oklch 0.7 0.15 250

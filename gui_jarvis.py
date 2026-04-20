@@ -2216,6 +2216,13 @@ class JarvisGUI(QMainWindow):
         self.filter_btns['all'].setChecked(True)
         layout.addWidget(self.filter_bar)
 
+        # ── filter-row 와 카드 목록 사이 구분선 (Claude Design .filter-row border-bottom) ──
+        layout.addSpacing(10)
+        _filter_sep = QFrame()
+        _filter_sep.setFixedHeight(1)
+        _filter_sep.setStyleSheet(f"background-color: {CT['border_soft']}; border: none;")
+        layout.addWidget(_filter_sep)
+
         # ── 5) GROUP CARD SCROLL ──
         layout.addSpacing(14)
         self.merge_scroll = QScrollArea()

@@ -162,9 +162,10 @@ class AutoRenamer:
                 if os.path.getsize(fp) == 0:
                     return
 
-            # 최소 파일 크기 체크 (10KB 미만은 불완전한 PDF로 간주)
+            # 최소 파일 크기 체크 (2KB 미만은 불완전한 PDF로 간주)
+            # 이체증 같이 작은 PDF (5~30KB)도 처리되도록 임계값 완화
             try:
-                if os.path.getsize(fp) < 10240:
+                if os.path.getsize(fp) < 2048:
                     self.log(f" -> [건너뜀] 파일 크기 부족 ({os.path.getsize(fp)} bytes): {fn}")
                     return
             except OSError:

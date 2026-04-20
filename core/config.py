@@ -26,6 +26,55 @@ def get_custom_naming():
         "merge_order": cfg.get("merge_order", DEFAULT_MERGE_ORDER),
     }
 
+
+# ─────────────────────────────────────────────────
+# 자동 이름 변경 제외 키워드 (사용자 추가/삭제 가능)
+# ─────────────────────────────────────────────────
+def get_rename_skip_keywords() -> list:
+    """config.json 의 rename_skip_keywords (없으면 constants 의 기본값)."""
+    cfg = CONFIG.get("rename_skip_keywords")
+    if isinstance(cfg, list):
+        return [str(k) for k in cfg if k]
+    # 최초엔 constants 의 기본값 반환
+    try:
+        from core.constants import RENAME_SKIP_KEYWORDS
+        return list(RENAME_SKIP_KEYWORDS)
+    except Exception:
+        return []
+
+
+def set_rename_skip_keywords(keywords: list):
+    """config.json 에 키워드 리스트 저장 (중복 제거, 공백 제거)."""
+    seen = set()
+    cleaned = []
+    for k in keywords:
+        k = str(k).strip()
+        if k and k not in seen:
+            seen.add(k)
+            cleaned.append(k)
+    CONFIG["rename_skip_keywords"] = cleaned
+    _save_config(CONFIG)
+    return cleaned
+
+
+def add_rename_skip_keyword(keyword: str) -> list:
+    """단일 키워드 추가 후 전체 리스트 반환."""
+    kws = get_rename_skip_keywords()
+    k = str(keyword).strip()
+    if k and k not in kws:
+        kws.append(k)
+        set_rename_skip_keywords(kws)
+    return kws
+
+
+def remove_rename_skip_keyword(keyword: str) -> list:
+    """단일 키워드 삭제 후 전체 리스트 반환."""
+    kws = get_rename_skip_keywords()
+    if keyword in kws:
+        kws.remove(keyword)
+        set_rename_skip_keywords(kws)
+    return kws
+
 def get_config_path():
     """설정 파일 경로 반환 (data/config.json)"""
     if getattr(sys, 'frozen', False):

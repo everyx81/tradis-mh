@@ -695,6 +695,121 @@ class FileManagerWidget(QWidget):
         btn_naming_settings.clicked.connect(self._show_naming_dialog)
         t4_layout.addWidget(btn_naming_settings)
 
+        # === 자동 이름 변경 제외 키워드 섹션 ===
+        t4_layout.addSpacing(20)
+        lbl_skip_header = QLabel("자동 이름 변경 제외 키워드")
+        lbl_skip_header.setStyleSheet(
+            f"color: {CT['fg_0']}; font-weight: 600; letter-spacing: 0.2px; "
+            f"background: transparent; border: none;"
+        )
+        t4_layout.addWidget(lbl_skip_header)
+
+        lbl_skip_desc = QLabel(
+            "파일명에 이 키워드 중 하나라도 포함되면 AI 이름 변경을 건너뜁니다.\n"
+            "(시스템 내장: 10., 미분류_, 이미 변경된 파일은 항상 제외)"
+        )
+        lbl_skip_desc.setStyleSheet(
+            f"color: {CT['fg_3']}; font-size: 9pt; background: transparent; border: none;"
+        )
+        lbl_skip_desc.setWordWrap(True)
+        t4_layout.addWidget(lbl_skip_desc)
+
+        # 입력 + 추가 버튼 (한 줄)
+        skip_input_row = QHBoxLayout()
+        skip_input_row.setSpacing(8)
+        self.input_skip_keyword = QLineEdit()
+        self.input_skip_keyword.setPlaceholderText("예: 월별납부")
+        self.input_skip_keyword.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {CT['bg_2']};
+                color: {CT['fg_0']};
+                border: 1px solid {CT['border_soft']};
+                border-radius: 8px;
+                padding: 6px 10px;
+                font-size: 10pt;
+            }}
+            QLineEdit:focus {{ border: 1px solid {CT['accent_border']}; }}
+        """)
+        self.input_skip_keyword.returnPressed.connect(self._on_add_skip_keyword)
+        skip_input_row.addWidget(self.input_skip_keyword, stretch=1)
+
+        self.btn_add_skip_keyword = QPushButton("추가")
+        self.btn_add_skip_keyword.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_add_skip_keyword.setFixedHeight(32)
+        self.btn_add_skip_keyword.setMinimumWidth(56)
+        self.btn_add_skip_keyword.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {CT['accent']};
+                color: #ffffff;
+                border: 1px solid {CT['accent_hi']};
+                border-radius: 8px;
+                padding: 6px 12px;
+                font-size: 9.5pt;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{ background-color: {CT['accent_hi']}; }}
+            QPushButton:pressed {{ background-color: {CT['accent_lo']}; }}
+        """)
+        self.btn_add_skip_keyword.clicked.connect(self._on_add_skip_keyword)
+        skip_input_row.addWidget(self.btn_add_skip_keyword)
+        t4_layout.addLayout(skip_input_row)
+
+        # 키워드 리스트 (각 아이템 더블클릭/Delete 키 = 삭제)
+        self.list_skip_keywords = QListWidget()
+        self.list_skip_keywords.setStyleSheet(f"""
+            QListWidget {{
+                background-color: {CT['bg_2']};
+                color: {CT['fg_1']};
+                border: 1px solid {CT['border_soft']};
+                border-radius: 8px;
+                padding: 4px;
+                outline: 0;
+                font-size: 10pt;
+            }}
+            QListWidget::item {{
+                padding: 6px 10px;
+                border-radius: 6px;
+                margin: 1px 0;
+            }}
+            QListWidget::item:hover {{ background-color: {CT['bg_3']}; }}
+            QListWidget::item:selected {{
+                background-color: {CT['accent_bg']};
+                color: {CT['fg_0']};
+            }}
+        """)
+        self.list_skip_keywords.setMaximumHeight(130)
+        self.list_skip_keywords.itemDoubleClicked.connect(self._on_remove_skip_keyword_item)
+        # Delete 키로 삭제
+        from PyQt6.QtGui import QShortcut as _QShortcut, QKeySequence as _QKeySequence
+        _sc_del = _QShortcut(_QKeySequence(Qt.Key.Key_Delete), self.list_skip_keywords)
+        _sc_del.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        _sc_del.activated.connect(self._on_remove_skip_keyword_selected)
+        t4_layout.addWidget(self.list_skip_keywords)
+
+        # 삭제 버튼
+        self.btn_remove_skip_keyword = QPushButton("선택 키워드 삭제")
+        self.btn_remove_skip_keyword.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_remove_skip_keyword.setFixedHeight(28)
+        self.btn_remove_skip_keyword.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {CT['red']};
+                border: 1px solid {CT['border_soft']};
+                border-radius: 6px;
+                padding: 4px 10px;
+                font-size: 9pt;
+            }}
+            QPushButton:hover {{
+                background-color: rgba(250, 104, 99, 30);
+                border: 1px solid rgba(250, 104, 99, 120);
+            }}
+        """)
+        self.btn_remove_skip_keyword.clicked.connect(self._on_remove_skip_keyword_selected)
+        t4_layout.addWidget(self.btn_remove_skip_keyword)
+
+        # 초기 리스트 채우기
+        self._refresh_skip_keywords_list()
+
         # === 한비로 메일 설정 섹션 ===
         t4_layout.addSpacing(20)
         lbl_mail_header = QLabel("한비로 메일 설정")
@@ -2658,6 +2773,64 @@ class FileManagerWidget(QWidget):
     def _request_startup_guide(self):
         """시작 가이드 재표시 요청"""
         self.startup_guide_requested.emit()
+
+    # ─────────────────────────────────────────────
+    # 자동 이름 변경 제외 키워드 관리
+    # ─────────────────────────────────────────────
+    def _refresh_skip_keywords_list(self):
+        """config 에서 키워드 로드 후 리스트 위젯에 표시."""
+        try:
+            from core.config import get_rename_skip_keywords
+            kws = get_rename_skip_keywords()
+        except Exception:
+            kws = []
+        self.list_skip_keywords.clear()
+        for k in kws:
+            self.list_skip_keywords.addItem(k)
+
+    def _on_add_skip_keyword(self):
+        """입력된 키워드를 리스트에 추가."""
+        text = self.input_skip_keyword.text().strip()
+        if not text:
+            return
+        try:
+            from core.config import add_rename_skip_keyword
+            add_rename_skip_keyword(text)
+        except Exception as e:
+            self.emit_log(f"[오류] 키워드 추가 실패: {e}")
+            return
+        self.input_skip_keyword.clear()
+        self._refresh_skip_keywords_list()
+        self.emit_log(f"[설정] 제외 키워드 추가: '{text}'")
+
+    def _on_remove_skip_keyword_item(self, item):
+        """더블클릭으로 아이템 삭제."""
+        if item is None:
+            return
+        kw = item.text()
+        try:
+            from core.config import remove_rename_skip_keyword
+            remove_rename_skip_keyword(kw)
+        except Exception as e:
+            self.emit_log(f"[오류] 키워드 삭제 실패: {e}")
+            return
+        self._refresh_skip_keywords_list()
+        self.emit_log(f"[설정] 제외 키워드 삭제: '{kw}'")
+
+    def _on_remove_skip_keyword_selected(self):
+        """선택된 아이템(들) 삭제 (Delete 키 / 버튼)."""
+        items = self.list_skip_keywords.selectedItems()
+        if not items:
+            return
+        try:
+            from core.config import remove_rename_skip_keyword
+            for item in items:
+                kw = item.text()
+                remove_rename_skip_keyword(kw)
+                self.emit_log(f"[설정] 제외 키워드 삭제: '{kw}'")
+        except Exception as e:
+            self.emit_log(f"[오류] 키워드 삭제 실패: {e}")
+        self._refresh_skip_keywords_list()
 
     def _show_naming_dialog(self):
         """파일 네이밍 설정 다이얼로그 (Frosted Glass 스타일)"""

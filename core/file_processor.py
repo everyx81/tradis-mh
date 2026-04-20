@@ -135,10 +135,11 @@ class AutoRenamer:
             return
 
         # [NEW] 파일명에 제외 키워드가 포함되면 자동 이름 변경 건너뜀
-        # (사용자가 수동으로 지정한 파일 보호 — constants.RENAME_SKIP_KEYWORDS 에 추가 가능)
+        # 사용자가 설정 탭에서 추가/삭제 가능 (core.config.rename_skip_keywords)
         try:
-            from core.constants import RENAME_SKIP_KEYWORDS
-            matched_kw = next((kw for kw in RENAME_SKIP_KEYWORDS if kw and kw in fn), None)
+            from core.config import get_rename_skip_keywords
+            kws = get_rename_skip_keywords()
+            matched_kw = next((kw for kw in kws if kw and kw in fn), None)
             if matched_kw:
                 self.log(f" -> [제외 키워드 '{matched_kw}'] 자동 이름 변경 건너뜀: {fn}")
                 return

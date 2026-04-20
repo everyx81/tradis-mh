@@ -244,22 +244,52 @@ class FileManagerWidget(QWidget):
         _empty_style = f"""
             QListWidget {{
                 background: transparent;
+                color: {CT['fg_0']};
                 border: 1.5px dashed {CT['border']};
                 border-radius: 10px;
                 padding: 8px;
+                outline: 0;
+                font-size: 10pt;
             }}
-            QListWidget::item {{ padding: 6px 8px; border-radius: 6px; }}
-            QListWidget::item:hover {{ background: {CT['bg_3']}; }}
+            QListWidget::item {{
+                padding: 7px 10px;
+                border-radius: 6px;
+                color: {CT['fg_0']};
+            }}
+            QListWidget::item:hover {{
+                background: {CT['bg_3']};
+                color: {CT['fg_0']};
+            }}
+            QListWidget::item:selected {{
+                background: {CT['accent_bg']};
+                color: {CT['fg_0']};
+                border: 1px solid {CT['accent_border']};
+            }}
         """
         _filled_style = f"""
             QListWidget {{
                 background: transparent;
+                color: {CT['fg_0']};
                 border: 1px solid {CT['border_soft']};
                 border-radius: 10px;
                 padding: 4px;
+                outline: 0;
+                font-size: 10pt;
             }}
-            QListWidget::item {{ padding: 6px 8px; border-radius: 6px; }}
-            QListWidget::item:hover {{ background: {CT['bg_3']}; }}
+            QListWidget::item {{
+                padding: 7px 10px;
+                border-radius: 6px;
+                color: {CT['fg_0']};
+            }}
+            QListWidget::item:hover {{
+                background: {CT['bg_3']};
+                color: {CT['fg_0']};
+            }}
+            QListWidget::item:selected {{
+                background: {CT['accent_bg']};
+                color: {CT['fg_0']};
+                border: 1px solid {CT['accent_border']};
+            }}
         """
 
         def _update_overlay_visibility():

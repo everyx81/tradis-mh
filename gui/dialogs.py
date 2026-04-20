@@ -1887,19 +1887,34 @@ class GroupCard(GlassFrame):
             except Exception as e:
                 print(f"캐시 조회 오류: {e}")
         
-        # not_applicable 플래그 포함해서 전달
-        items = [
-            {
+        # 사용자의 chip override 적용
+        try:
+            from core.config import get_chip_overrides
+            overrides = get_chip_overrides(self.text_id)
+        except Exception:
+            overrides = {}
+
+        items = []
+        for req in required:
+            default_na = req.get('not_applicable', False)
+            ov = overrides.get(req['name'], "")
+            if ov == "force_applicable":
+                not_app = False
+            elif ov == "force_not_applicable":
+                not_app = True
+            else:
+                not_app = default_na
+            items.append({
                 'name': req['name'],
                 'found': req.get('found', False),
-                'not_applicable': req.get('not_applicable', False),
-            }
-            for req in required
-        ]
-        # 요약은 "해당 없음" 항목 제외하고 계산
-        applicable = [r for r in required if not r.get('not_applicable', False)]
+                'not_applicable': not_app,
+                'default_not_applicable': default_na,
+            })
+
+        # 요약은 override 반영된 not_applicable 기준
+        applicable = [it for it in items if not it.get('not_applicable', False)]
         total = len(applicable)
-        checked = sum(1 for req in applicable if req.get('found', False))
+        checked = sum(1 for it in applicable if it.get('found', False))
         missing = total - checked
         self._rebuild_checklist(items, summary=(total, missing, missing == 0))
 
@@ -1959,6 +1974,13 @@ class GroupCard(GlassFrame):
                     return True
             return False
 
+        # 사용자의 chip override 로드 (BL별)
+        try:
+            from core.config import get_chip_overrides
+            overrides = get_chip_overrides(self.text_id)
+        except Exception:
+            overrides = {}
+
         items = []
         for item in self.mapping:
             label = item.get('label', '')
@@ -1973,15 +1995,24 @@ class GroupCard(GlassFrame):
             sub = None
             if "포함" in label and not filename:
                 sub = "(수수료계산서 포함)"
-            not_app = name in na_set
-            # 월납업체: 매출 수수료 항목은 not_applicable
+            # 기본 not_applicable (징수형태 / 월납업체 기반)
+            default_na = name in na_set
             if is_monthly and _is_fee_item(name):
+                default_na = True
+            # 사용자 override 적용
+            ov = overrides.get(name, "")
+            if ov == "force_applicable":
+                not_app = False
+            elif ov == "force_not_applicable":
                 not_app = True
+            else:
+                not_app = default_na
             items.append({
                 'name': name,
                 'found': is_found,
                 'sub': sub,
                 'not_applicable': not_app,
+                'default_not_applicable': default_na,  # 토글 계산용
             })
 
         applicable_items = [it for it in items if not it.get('not_applicable', False)]
@@ -1993,13 +2024,24 @@ class GroupCard(GlassFrame):
     # ─────────────────────────────────────────────────
     # doc-chip 위젯 렌더 (Claude Design - file list 체크박스 스타일과 동일)
     # ─────────────────────────────────────────────────
-    def _make_doc_chip_widget(self, name, is_found, sub=None, not_applicable=False):
+    def _make_doc_chip_widget(self, name, is_found, sub=None, not_applicable=False,
+                              default_not_applicable=None):
         """체크리스트 한 항목의 위젯 (16x16 체크박스 + 이름 + 옵션 서브텍스트).
-        not_applicable=True: 회색 빈 네모 + '해당없음' 서브텍스트로 흐리게 표시"""
+        not_applicable=True: 회색 빈 네모 + '해당없음' 서브텍스트로 흐리게 표시
+        클릭 시 해당 여부 토글 (config 에 BL별로 저장)"""
         from .claude_theme import C as _CT
         from .claude_icons import pixmap as _icpx
         w = QWidget()
         w.setStyleSheet("background: transparent;")
+        w.setCursor(Qt.CursorShape.PointingHandCursor)
+        # 클릭 핸들러 — mousePressEvent 오버라이드
+        _default_na = default_not_applicable if default_not_applicable is not None else not_applicable
+        def _on_click(ev, _name=name, _default_na=_default_na):
+            if ev.button() == Qt.MouseButton.LeftButton:
+                self._on_chip_click(_name, _default_na)
+        w.mousePressEvent = _on_click
+        # 툴팁: "클릭하면 해당 여부 전환"
+        w.setToolTip(f"'{name}' — 클릭하면 해당/해당없음 전환")
         lay = QHBoxLayout(w)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(6)
@@ -2175,19 +2217,40 @@ class GroupCard(GlassFrame):
                 name = it.get('name', '')
                 is_found = it.get('found', False)
                 not_applicable = it.get('not_applicable', False)
+                default_na = it.get('default_not_applicable', not_applicable)
             else:
-                # 레거시 tuple (name, is_found, sub)
                 name = it[0]
                 is_found = it[1]
                 not_applicable = False
-            flow.addWidget(self._make_doc_chip_widget(name, is_found, sub=None,
-                                                      not_applicable=not_applicable))
+                default_na = False
+            flow.addWidget(self._make_doc_chip_widget(
+                name, is_found, sub=None,
+                not_applicable=not_applicable,
+                default_not_applicable=default_na,
+            ))
 
         if summary is not None:
             total, missing, ok = summary
             flow.addWidget(self._make_summary_widget(total, missing, ok))
 
         self._checklist_chips_layout.addWidget(flow_wrap)
+
+    def _on_chip_click(self, chip_name: str, default_na: bool):
+        """체크리스트 chip 클릭 → 해당 여부 토글."""
+        try:
+            from core.config import toggle_chip_applicability
+            toggle_chip_applicability(self.text_id, chip_name, default_na)
+        except Exception as e:
+            print(f"[chip click] {e}")
+            return
+        # 체크리스트 재구성 (override 반영)
+        try:
+            if self.mapping:
+                self._update_checklist_from_mapping()
+            else:
+                self._update_checklist_basic()
+        except Exception as e:
+            print(f"[chip refresh] {e}")
 
     def _make_levy_badge(self, code: str, name: str):
         """징수형태 배지 (예: '징수형태 14')"""

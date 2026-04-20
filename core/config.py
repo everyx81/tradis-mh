@@ -129,6 +129,62 @@ def is_monthly_billing_company(company: str) -> bool:
             return True
     return False
 
+
+# ─────────────────────────────────────────────────
+# 체크리스트 chip 상태 override (BL별 수동 변경)
+# - '해당없음' 을 사용자 클릭으로 '해당됨' 으로 override 가능 (반대도 가능)
+# - BL별 저장 → 앱 재시작해도 유지
+# - 구조: {bl_id: {chip_name: 'force_applicable' | 'force_not_applicable'}}
+# ─────────────────────────────────────────────────
+def get_chip_overrides(bl_id: str = None) -> dict:
+    all_ov = CONFIG.get("chip_overrides", {})
+    if not isinstance(all_ov, dict):
+        return {}
+    if bl_id is None:
+        return all_ov
+    return all_ov.get(bl_id, {}) or {}
+
+
+def set_chip_override(bl_id: str, chip_name: str, state: str):
+    """state: 'force_applicable' / 'force_not_applicable' / '' (제거)"""
+    all_ov = CONFIG.get("chip_overrides", {})
+    if not isinstance(all_ov, dict):
+        all_ov = {}
+    bl_ov = all_ov.get(bl_id, {}) or {}
+    if state:
+        bl_ov[chip_name] = state
+    else:
+        bl_ov.pop(chip_name, None)
+    if bl_ov:
+        all_ov[bl_id] = bl_ov
+    else:
+        all_ov.pop(bl_id, None)
+    CONFIG["chip_overrides"] = all_ov
+    _save_config(CONFIG)
+
+
+def toggle_chip_applicability(bl_id: str, chip_name: str, default_not_applicable: bool) -> bool:
+    """사용자 클릭 시 chip 의 해당 여부를 토글.
+    반환값: 토글 후의 not_applicable 상태"""
+    current = get_chip_overrides(bl_id).get(chip_name, "")
+    # 현재 화면 상태 계산
+    if current == "force_applicable":
+        now_na = False
+    elif current == "force_not_applicable":
+        now_na = True
+    else:
+        now_na = default_not_applicable
+    # 토글
+    new_na = not now_na
+    # default 와 같으면 override 제거, 다르면 force 저장
+    if new_na == default_not_applicable:
+        set_chip_override(bl_id, chip_name, "")
+    elif new_na:
+        set_chip_override(bl_id, chip_name, "force_not_applicable")
+    else:
+        set_chip_override(bl_id, chip_name, "force_applicable")
+    return new_na
+
 def get_config_path():
     """설정 파일 경로 반환 (data/config.json)"""
     if getattr(sys, 'frozen', False):

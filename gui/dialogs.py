@@ -1702,6 +1702,8 @@ class GroupCard(GlassFrame):
         """캐시된 정산서 분석 결과를 활용하여 비용 항목까지 포함한 체크리스트 표시"""
         docs = self.data['docs']
         is_export = "수출신고필증" in docs or "반송신고필증" in docs
+        # 징수형태 배지 (수입에만 표시, AI가 추출한 값)
+        self._levy_badge_info = None
 
         # 기본 필수 서류
         if is_export:
@@ -1711,11 +1713,8 @@ class GroupCard(GlassFrame):
             ]
         else:
             # 수입: 징수형태 기반으로 납부고지서/수입세금계산서 필요 여부 결정
-            # - 11: 관/부가세 있으면 납부고지서 필요 (수입세금계산서 필요)
-            # - 14: 수입세금계산서 불필요. 관/부가세 있으면 납부고지서 필요
-            # - 43: 수입세금계산서 + 납부고지서 모두 불필요
             levy_type, has_tax = self._get_levy_info()
-            need_payment_notice = True  # 기본값: 필요
+            need_payment_notice = True
             need_tax_invoice = True
             if levy_type == "11":
                 need_tax_invoice = True
@@ -1727,20 +1726,27 @@ class GroupCard(GlassFrame):
                 need_tax_invoice = False
                 need_payment_notice = False
 
+            # 징수형태 배지 정보 저장 (렌더 시 상단에 표시)
+            _LEVY_NAMES = {"11": "자진신고납부", "14": "수시부과", "43": "사후납부"}
+            if levy_type and levy_type != "Unknown":
+                self._levy_badge_info = (levy_type, _LEVY_NAMES.get(levy_type, ""))
+
             required = [
                 {"name": "자금정산서", "found": "자금정산서" in docs or "정산서" in docs},
                 {"name": "수입신고필증", "found": "수입신고필증" in docs},
             ]
-            if need_payment_notice:
-                required.append({
-                    "name": "납부고지서",
-                    "found": "납부고지서" in docs or any("납부영수증" in v for v in docs.values())
-                })
-            if need_tax_invoice:
-                required.append({
-                    "name": "수입세금계산서",
-                    "found": "수입세금계산서" in docs
-                })
+            # 납부고지서는 항상 리스트에 추가 (필요 없으면 not_applicable)
+            _pn_found = "납부고지서" in docs or any("납부영수증" in v for v in docs.values())
+            required.append({
+                "name": "납부고지서",
+                "found": _pn_found,
+                "not_applicable": not need_payment_notice,
+            })
+            required.append({
+                "name": "수입세금계산서",
+                "found": "수입세금계산서" in docs,
+                "not_applicable": not need_tax_invoice,
+            })
         
         # 캐시에서 정산서 분석 결과 조회 → 비용 항목 추가
         statement_file = docs.get("자금정산서") or docs.get("정산서")
@@ -1882,9 +1888,19 @@ class GroupCard(GlassFrame):
             except Exception as e:
                 print(f"캐시 조회 오류: {e}")
         
-        items = [(req['name'], req['found'], None) for req in required]
-        total = len(required)
-        checked = sum(1 for req in required if req['found'])
+        # not_applicable 플래그 포함해서 전달
+        items = [
+            {
+                'name': req['name'],
+                'found': req.get('found', False),
+                'not_applicable': req.get('not_applicable', False),
+            }
+            for req in required
+        ]
+        # 요약은 "해당 없음" 항목 제외하고 계산
+        applicable = [r for r in required if not r.get('not_applicable', False)]
+        total = len(applicable)
+        checked = sum(1 for req in applicable if req.get('found', False))
         missing = total - checked
         self._rebuild_checklist(items, summary=(total, missing, missing == 0))
 
@@ -1914,8 +1930,9 @@ class GroupCard(GlassFrame):
     # ─────────────────────────────────────────────────
     # doc-chip 위젯 렌더 (Claude Design - file list 체크박스 스타일과 동일)
     # ─────────────────────────────────────────────────
-    def _make_doc_chip_widget(self, name, is_found, sub=None):
-        """체크리스트 한 항목의 위젯 (16x16 체크박스 + 이름 + 옵션 서브텍스트)."""
+    def _make_doc_chip_widget(self, name, is_found, sub=None, not_applicable=False):
+        """체크리스트 한 항목의 위젯 (16x16 체크박스 + 이름 + 옵션 서브텍스트).
+        not_applicable=True: 회색 빈 네모 + '해당없음' 서브텍스트로 흐리게 표시"""
         from .claude_theme import C as _CT
         from .claude_icons import pixmap as _icpx
         w = QWidget()
@@ -1924,11 +1941,32 @@ class GroupCard(GlassFrame):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(6)
 
-        # 16x16 체크박스 (파일 리스트와 동일한 스타일)
+        # 16x16 체크박스
         mark = QLabel()
         mark.setFixedSize(16, 16)
         mark.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        if is_found:
+
+        if not_applicable:
+            # 해당 없음: 빈 회색 네모 + 얇은 보더
+            mark.setStyleSheet(f"""
+                background-color: transparent;
+                border: 1.5px dashed {_CT['fg_3']};
+                border-radius: 4px;
+            """)
+            # 중앙에 '—' 기호 (minus) 약하게
+            mark.setText("—")
+            _font = mark.font()
+            _font.setBold(True)
+            mark.setFont(_font)
+            mark.setStyleSheet(f"""
+                background-color: transparent;
+                color: {_CT['fg_3']};
+                border: 1.5px dashed {_CT['fg_3']};
+                border-radius: 4px;
+                font-size: 9pt;
+            """)
+            name_color = _CT['fg_3']
+        elif is_found:
             mark.setStyleSheet(f"""
                 background-color: {_CT['green']};
                 border: 1.5px solid {_CT['green']};
@@ -1947,16 +1985,28 @@ class GroupCard(GlassFrame):
         lay.addWidget(mark)
 
         lbl = QLabel(name)
-        lbl.setStyleSheet(f"""
-            color: {name_color};
-            font-size: 9.5pt;
-            background: transparent;
-            border: none;
-        """)
+        # 해당 없음이면 취소선 + 흐린 색
+        if not_applicable:
+            lbl.setStyleSheet(f"""
+                color: {_CT['fg_3']};
+                font-size: 9.5pt;
+                background: transparent;
+                border: none;
+                text-decoration: line-through;
+            """)
+        else:
+            lbl.setStyleSheet(f"""
+                color: {name_color};
+                font-size: 9.5pt;
+                background: transparent;
+                border: none;
+            """)
         lay.addWidget(lbl)
 
-        if sub:
-            lbl_sub = QLabel(sub)
+        # 서브텍스트: not_applicable 이면 '해당없음', 일반이면 sub 파라미터
+        sub_text = "(해당없음)" if not_applicable else sub
+        if sub_text:
+            lbl_sub = QLabel(sub_text)
             lbl_sub.setStyleSheet(f"""
                 color: {_CT['fg_3']};
                 font-size: 8.5pt;
@@ -2024,7 +2074,7 @@ class GroupCard(GlassFrame):
 
     def _rebuild_checklist(self, items, summary=None):
         """체크리스트 컨테이너를 위젯 chip들로 재구성.
-        items: [(name, is_found, sub), ...]
+        items: [(name, is_found, sub), ...] 또는 [{'name':, 'found':, 'not_applicable':}, ...]
         summary: (total, missing, ok) 또는 None"""
         # 기존 children 제거
         while self._checklist_chips_layout.count():
@@ -2032,23 +2082,65 @@ class GroupCard(GlassFrame):
             if child.widget():
                 child.widget().deleteLater()
 
-        if not items and summary is None:
+        if not items and summary is None and not getattr(self, '_levy_badge_info', None):
             return
 
-        # FlowLayout 으로 실제 폭에 따라 wrap (기존 고정 n개씩 wrap 대체)
+        # 징수형태 배지 (수입 카드에 있을 때만, 체크리스트 상단에 별도 행)
+        badge = getattr(self, '_levy_badge_info', None)
+        if badge:
+            badge_row = QWidget()
+            badge_row.setStyleSheet("background: transparent;")
+            _br_lay = QHBoxLayout(badge_row)
+            _br_lay.setContentsMargins(0, 0, 0, 6)
+            _br_lay.setSpacing(6)
+            _br_lay.addWidget(self._make_levy_badge(badge[0], badge[1]))
+            _br_lay.addStretch()
+            self._checklist_chips_layout.addWidget(badge_row)
+
+        # FlowLayout 으로 실제 폭에 따라 wrap
         flow_wrap = QWidget()
         flow_wrap.setStyleSheet("background: transparent;")
         flow = FlowLayout(flow_wrap, h_spacing=14, v_spacing=6)
         flow.setContentsMargins(0, 0, 0, 0)
 
-        for name, is_found, _sub_unused in items:
-            flow.addWidget(self._make_doc_chip_widget(name, is_found, sub=None))
+        for it in items:
+            if isinstance(it, dict):
+                name = it.get('name', '')
+                is_found = it.get('found', False)
+                not_applicable = it.get('not_applicable', False)
+            else:
+                # 레거시 tuple (name, is_found, sub)
+                name = it[0]
+                is_found = it[1]
+                not_applicable = False
+            flow.addWidget(self._make_doc_chip_widget(name, is_found, sub=None,
+                                                      not_applicable=not_applicable))
 
         if summary is not None:
             total, missing, ok = summary
             flow.addWidget(self._make_summary_widget(total, missing, ok))
 
         self._checklist_chips_layout.addWidget(flow_wrap)
+
+    def _make_levy_badge(self, code: str, name: str):
+        """징수형태 배지 (예: '징수형태 43 · 사후납부')"""
+        from .claude_theme import C as _CT
+        w = QLabel()
+        txt = f"징수형태 {code}"
+        if name:
+            txt += f" · {name}"
+        w.setText(txt)
+        w.setStyleSheet(f"""
+            color: {_CT['accent_hi']};
+            background-color: {_CT['accent_bg']};
+            border: 1px solid {_CT['accent_border']};
+            border-radius: 5px;
+            padding: 3px 10px;
+            font-size: 8.5pt;
+            font-weight: 600;
+            letter-spacing: 0.3px;
+        """)
+        return w
 
     def refresh_mapping_ui(self):
         # 카드가 접혀있으면 먼저 펼침 (body_widget이 숨김이면 내부 mapping_widget도 안 보임)

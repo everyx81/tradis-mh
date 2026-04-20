@@ -230,6 +230,10 @@ class GeminiOCR:
             if result and 'doc_type' in result:
                 from .utils import normalize_doc_type
                 result['doc_type'] = normalize_doc_type(result['doc_type'])
+            # 수입신고필증에 levy_type 필드가 없는 구 캐시는 재분석을 위해 무효화
+            if result and result.get('doc_type') == '수입신고필증':
+                if 'levy_type' not in result:
+                    return None
             return result
         except Exception as e:
             print(f"캐시 읽기 오류: {e}")

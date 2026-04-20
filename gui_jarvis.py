@@ -2408,7 +2408,11 @@ class JarvisGUI(QMainWindow):
                 is_export = any('수출신고필증' in v or '반송신고필증' in v for v in docs.values())
                 is_import = any('수입신고필증' in v for v in docs.values())
                 if not has_statement and not is_export and not is_import:
-                    self.emit_log(f"[건너뜀] {text_id}: 자금정산서/신고필증 없음")
+                    self.emit_log(f"[건너뜀] {text_id}: 자금정산서/신고필증 없음 — 미분류로 이동")
+                    # 카드로 표시되지 않는 그룹의 파일들을 미분류에 추가 (사용자 요청)
+                    for _fn in docs.values():
+                        if _fn and _fn not in unclassified:
+                            unclassified.append(_fn)
                     continue
                 try:
                     card = GroupCard(self, self.renamer, directory, text_id, data, unclassified)

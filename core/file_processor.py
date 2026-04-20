@@ -134,6 +134,17 @@ class AutoRenamer:
         if fn.startswith("10.") or fn.startswith("미분류_"):
             return
 
+        # [NEW] 파일명에 제외 키워드가 포함되면 자동 이름 변경 건너뜀
+        # (사용자가 수동으로 지정한 파일 보호 — constants.RENAME_SKIP_KEYWORDS 에 추가 가능)
+        try:
+            from core.constants import RENAME_SKIP_KEYWORDS
+            matched_kw = next((kw for kw in RENAME_SKIP_KEYWORDS if kw and kw in fn), None)
+            if matched_kw:
+                self.log(f" -> [제외 키워드 '{matched_kw}'] 자동 이름 변경 건너뜀: {fn}")
+                return
+        except Exception:
+            pass
+
         if fp in self.processing_files:
             return
         self.processing_files.add(fp)

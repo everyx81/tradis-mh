@@ -2280,7 +2280,7 @@ class GroupCard(GlassFrame):
         from PyQt6.QtCore import QSize as _QSize
         self.file_list.clear()
         docs = self.data.get('docs', {})
-        all_files = sorted(set(docs.values()))
+        all_files = sorted(set(docs.values()), key=self._file_sort_key)
         ROW_HEIGHT = 36
         for f in all_files:
             full_path = os.path.join(self.directory, f)
@@ -2298,6 +2298,45 @@ class GroupCard(GlassFrame):
         count = self.file_list.count()
         h = max(count * (ROW_HEIGHT + 4) + 4, ROW_HEIGHT)
         self.file_list.setFixedHeight(min(h, 360))
+
+    def _file_sort_key(self, filename: str):
+        """파일 정렬 키 — 문서 종류 기반 논리 순서 (병합 순서와 동일).
+        1. 자금정산서/정산서
+        2. 수입/수출/반송 신고필증
+        3. 납부고지서
+        4. 수입세금계산서
+        5. 통관수수료계산서 / 수수료계산서
+        6. 비용계산서 (선박운임/운송료/창고료 등)
+        7. 그 외 (알파벳)
+        """
+        fn = filename or ""
+        # 그룹 번호 + 하위 정렬 문자열
+        if "자금정산서" in fn or "정산서" in fn:
+            return (1, fn)
+        if "수입신고필증" in fn:
+            return (2, 0, fn)
+        if "수출신고필증" in fn:
+            return (2, 1, fn)
+        if "반송신고필증" in fn:
+            return (2, 2, fn)
+        if "납부고지서" in fn or "납부영수증" in fn:
+            return (3, fn)
+        if "수입세금계산서" in fn:
+            return (4, fn)
+        if "통관수수료계산서" in fn or ("수수료계산서" in fn and "통관" not in fn):
+            return (5, fn)
+        # 비용 계산서 (선박운임, 운송료, 창고료, 항공운임, 보세운송료 등)
+        _expense_kws = [
+            "선박운임", "해상운임", "항공운임",
+            "운송료", "보세운송", "창고료", "보관료",
+            "운송", "보험료",
+        ]
+        if any(kw in fn for kw in _expense_kws):
+            return (6, fn)
+        # 계산서 일반 (자금청구서 등)
+        if "계산서" in fn or "청구서" in fn:
+            return (7, fn)
+        return (99, fn)
 
     def _make_file_row_widget(self, filename: str, full_path: str):
         """파일 한 행의 커스텀 위젯 (Claude Design .file-row)."""
@@ -2482,7 +2521,7 @@ class GroupCard(GlassFrame):
         """체크리스트 우클릭 → 파일 관리 메뉴"""
         from PyQt6.QtWidgets import QMenu
         docs = self.data.get('docs', {})
-        all_files = sorted(set(docs.values()))
+        all_files = sorted(set(docs.values()), key=self._file_sort_key)
         if not all_files:
             return
 

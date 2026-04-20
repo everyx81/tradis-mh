@@ -618,13 +618,83 @@ class IndependentCard(GlassFrame):
         return pm
 
     def _on_header_click(self, event):
-        """헤더 영역 클릭 → 접기/펼치기 토글 (좌클릭만)"""
+        """헤더 클릭 → 좌클릭: 접기/펼치기 / 우클릭: 컨텍스트 메뉴"""
         try:
             if event.button() == Qt.MouseButton.LeftButton:
                 self.toggle_collapse()
+            elif event.button() == Qt.MouseButton.RightButton:
+                self._show_card_context_menu(event.globalPosition().toPoint())
         except Exception as e:
             print(f"[IndependentCard._on_header_click] {e}")
             import traceback; traceback.print_exc()
+
+    def _show_card_context_menu(self, global_pos):
+        """카드 헤더 우클릭 메뉴"""
+        from PyQt6.QtWidgets import QMenu
+        from .claude_theme import C as _CT
+        file_count = len(self.file_list)
+        menu = QMenu(self)
+        menu.setStyleSheet(f"""
+            QMenu {{
+                background-color: {_CT['bg_2']};
+                border: 1px solid {_CT['border']};
+                border-radius: 8px;
+                padding: 6px 0px;
+                color: {_CT['fg_0']};
+                font-size: 9.5pt;
+            }}
+            QMenu::item {{
+                padding: 8px 22px;
+                border-radius: 4px;
+                margin: 2px 6px;
+            }}
+            QMenu::item:selected {{
+                background-color: {_CT['accent_bg']};
+                color: {_CT['accent_hi']};
+            }}
+        """)
+        act_delete = menu.addAction(f"🗑️  카드 전체 삭제 ({file_count}개 파일)")
+        act_delete.triggered.connect(self._delete_card_all_files)
+        menu.exec(global_pos)
+
+    def _delete_card_all_files(self):
+        """IndependentCard 의 모든 파일을 디스크에서 삭제"""
+        from .dialogs import JarvisMessageBox
+        if not self.file_list:
+            return
+        msg = f"'{self.doc_type}' 카드의 파일 {len(self.file_list)}개를 모두 삭제합니다.\n\n"
+        msg += "삭제될 파일:\n"
+        msg += "\n".join(f"  • {f}" for f in self.file_list[:10])
+        if len(self.file_list) > 10:
+            msg += f"\n  ... 외 {len(self.file_list) - 10}개"
+        msg += "\n\n이 작업은 되돌릴 수 없습니다. 계속하시겠습니까?"
+        if not JarvisMessageBox.question(self, "카드 전체 삭제 확인", msg):
+            return
+        deleted = []
+        failed = []
+        for f in self.file_list:
+            fp = os.path.join(self.directory, f)
+            try:
+                if os.path.exists(fp):
+                    os.remove(fp)
+                    deleted.append(f)
+            except Exception as e:
+                failed.append((f, str(e)))
+        try:
+            self.parent_widget.emit_log(
+                f"[카드 삭제] {self.doc_type} — {len(deleted)}개 삭제, {len(failed)}개 실패"
+            )
+        except Exception:
+            pass
+        try:
+            self.parent_widget.rename_trigger_signal.emit()
+        except Exception:
+            pass
+        if failed:
+            JarvisMessageBox.warning(
+                self, "일부 삭제 실패",
+                f"{len(failed)}개 파일 삭제 실패:\n" + "\n".join(f"  • {n}: {e}" for n, e in failed[:5])
+            )
 
     def toggle_collapse(self):
         """접기/펼치기 토글"""
@@ -1451,9 +1521,88 @@ class GroupCard(GlassFrame):
         self._warning_frame.show()
 
     def _on_header_click(self, event):
-        """헤더 영역 클릭 → 접기/펼치기 토글 (좌클릭만)"""
+        """헤더 영역 클릭 → 좌클릭: 접기/펼치기 / 우클릭: 컨텍스트 메뉴"""
         if event.button() == Qt.MouseButton.LeftButton:
             self.toggle_collapse()
+        elif event.button() == Qt.MouseButton.RightButton:
+            self._show_card_context_menu(event.globalPosition().toPoint())
+
+    def _show_card_context_menu(self, global_pos):
+        """카드 헤더 우클릭 → 카드 전체 삭제 메뉴"""
+        from PyQt6.QtWidgets import QMenu
+        from .claude_theme import C as _CT
+        docs = self.data.get('docs', {})
+        file_count = len(set(docs.values()))
+        menu = QMenu(self)
+        menu.setStyleSheet(f"""
+            QMenu {{
+                background-color: {_CT['bg_2']};
+                border: 1px solid {_CT['border']};
+                border-radius: 8px;
+                padding: 6px 0px;
+                color: {_CT['fg_0']};
+                font-size: 9.5pt;
+            }}
+            QMenu::item {{
+                padding: 8px 22px;
+                border-radius: 4px;
+                margin: 2px 6px;
+            }}
+            QMenu::item:selected {{
+                background-color: {_CT['accent_bg']};
+                color: {_CT['accent_hi']};
+            }}
+            QMenu::separator {{
+                height: 1px;
+                background: {_CT['border_soft']};
+                margin: 4px 0;
+            }}
+        """)
+        act_delete = menu.addAction(f"🗑️  카드 전체 삭제 ({file_count}개 파일)")
+        act_delete.triggered.connect(self._delete_card_all_files)
+        menu.exec(global_pos)
+
+    def _delete_card_all_files(self):
+        """카드의 모든 파일을 디스크에서 삭제 (확인 후)"""
+        docs = self.data.get('docs', {})
+        all_files = list(set(docs.values()))
+        if not all_files:
+            return
+        msg = f"'{self.text_id}' 카드의 파일 {len(all_files)}개를 모두 삭제합니다.\n\n"
+        msg += "삭제될 파일:\n"
+        msg += "\n".join(f"  • {f}" for f in all_files[:10])
+        if len(all_files) > 10:
+            msg += f"\n  ... 외 {len(all_files) - 10}개"
+        msg += "\n\n이 작업은 되돌릴 수 없습니다. 계속하시겠습니까?"
+        if not JarvisMessageBox.question(self, "카드 전체 삭제 확인", msg):
+            return
+        # 삭제 실행
+        deleted = []
+        failed = []
+        for f in all_files:
+            fp = os.path.join(self.directory, f)
+            try:
+                if os.path.exists(fp):
+                    os.remove(fp)
+                    deleted.append(f)
+            except Exception as e:
+                failed.append((f, str(e)))
+        try:
+            self.parent_widget.emit_log(
+                f"[카드 삭제] {self.text_id} — {len(deleted)}개 삭제, {len(failed)}개 실패"
+            )
+        except Exception:
+            pass
+        # 재스캔 트리거 (카드 목록 갱신)
+        try:
+            self.parent_widget.rename_trigger_signal.emit()
+        except Exception:
+            pass
+        if failed:
+            JarvisMessageBox.warning(
+                self, "일부 삭제 실패",
+                f"{len(failed)}개 파일 삭제 실패:\n" + "\n".join(f"  • {n}: {e}" for n, e in failed[:5])
+            )
 
     def toggle_collapse(self):
         """접기/펼치기 토글"""

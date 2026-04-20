@@ -1498,22 +1498,40 @@ class GroupCard(GlassFrame):
         if not getattr(self, 'mapping', None):
             return 'gray'
 
-        # 파일 누락 체크 (매핑 항목 중 파일이 없고 "포함" 라벨도 아닌 것)
+        # 파일 누락 체크 — 해당없음(NA) 항목은 제외
+        try:
+            na_set = self._compute_na_set()
+        except Exception:
+            na_set = set()
+        def _item_name(it):
+            lbl = it.get('label', '')
+            if ']' in lbl:
+                return lbl.split(']')[-1].strip()
+            elif ':' in lbl:
+                return lbl.split(':')[-1].strip()
+            return lbl
         missing = any(
-            not item.get('filename', '') and '포함' not in item.get('label', '')
+            (not item.get('filename', ''))
+            and '포함' not in item.get('label', '')
+            and _item_name(item) not in na_set
             for item in self.mapping
         )
 
         validation = getattr(self, '_validation_status', None)
 
-        # 우선순위: red > yellow > green > gray
+        # 검증이 'no_items' (검증 항목 없음) 이어도 파일 누락 없으면 녹색
         if validation == 'red':
             return 'red'
         if validation == 'yellow' or missing:
             return 'yellow'
         if validation == 'green' and not missing:
             return 'green'
-        # validation == 'no_items' (검증 스킵) or None (아직 검증 안 함) → 미분류
+        # no_items + 파일 누락 없음 → 모든 필요 항목이 NA라는 뜻 → 녹색 (완료)
+        if validation == 'no_items' and not missing:
+            return 'green'
+        # None (아직 검증 안 함) + 파일 누락 없음 → 녹색
+        if validation is None and not missing:
+            return 'green'
         return 'gray'
 
     # 상태별 pill 스타일 — 프리뷰와 일치 (동일 색 계열 통일, 약간 뿌연 반투명 느낌)
@@ -2436,12 +2454,31 @@ class GroupCard(GlassFrame):
             btn_preview.clicked.connect(lambda _, c=combo: self._show_thumbnail_popup(c.currentText()))
             row_layout.addWidget(btn_preview)
             
+            # not_applicable 여부 계산 (징수형태 / 월납업체 / 사용자 override)
+            try:
+                _na_set = self._compute_na_set()
+            except Exception:
+                _na_set = set()
+            _label_raw = item.get('label', '')
+            if ']' in _label_raw:
+                _item_name = _label_raw.split(']')[-1].strip()
+            elif ':' in _label_raw:
+                _item_name = _label_raw.split(':')[-1].strip()
+            else:
+                _item_name = _label_raw
+            _is_na = _item_name in _na_set
+
             lbl = QLabel(f"➡ {item['label']}")
 
             # 매칭 상태에 따른 라벨 색상 (모던·차분 톤)
             has_file = bool(item.get('filename', ''))
             is_included = '포함' in item['label']
-            if item.get('matched_by_amount', False):
+            if _is_na:
+                # 해당없음 — 회색 + 해당없음 접미사
+                lbl.setText(f"➡ {item['label']}  (해당없음)")
+                lbl.setStyleSheet("color: #6a6e76; background: transparent; font-size: 10pt;")
+                lbl.setToolTip("해당없음 항목 — 금액 검증/파일 요구 안 함")
+            elif item.get('matched_by_amount', False):
                 lbl.setStyleSheet("color: #64b5ef; background: transparent; font-weight: 600; font-size: 10pt;")
                 lbl.setToolTip("총금액 비교로 매칭되었습니다.")
             elif not has_file and not is_included:
@@ -2451,7 +2488,7 @@ class GroupCard(GlassFrame):
                 lbl.setStyleSheet("color: #8aa5c0; background: transparent; font-size: 10pt;")
             else:
                 lbl.setStyleSheet("color: #a8c5e0; background: transparent; font-size: 10pt;")
-                
+
             lbl.setMinimumWidth(120)
             row_layout.addWidget(lbl)
             

@@ -23,10 +23,12 @@ class CircleToggle(QWidget):
         self._monitoring = False
         self._hover = False
         self._pressed = False
-        self._size = size
+        self._size = size              # 실제 토글 원 크기
+        self._glow_margin = 32         # 외곽 glow를 그릴 여백
         self._scale = 1.0
         self._pulse_progress = 0.0   # 0.0 ~ 1.0 반복
-        self.setFixedSize(size, size)
+        # 위젯 전체 크기 = 토글 + glow 여백
+        self.setFixedSize(size + 2 * self._glow_margin, size + 2 * self._glow_margin)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
         # pulse 애니메이션 (2.4초 루프, ON 상태일 때만)
@@ -114,6 +116,7 @@ class CircleToggle(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
 
+        # 위젯 전체 중앙 (glow 여백 포함된 크기)
         cx = self.width() / 2.0
         cy = self.height() / 2.0
 
@@ -122,33 +125,45 @@ class CircleToggle(QWidget):
         p.scale(self._scale, self._scale)
         p.translate(-cx, -cy)
 
-        # 외곽 ring 크기 — 위젯 폭의 거의 전체
-        ring_inset = 0.5   # 외곽선 두께 절반
-        outer_r = self._size / 2.0 - ring_inset
+        outer_r = self._size / 2.0   # 토글 원 반지름 60
+        margin = self._glow_margin   # 32px glow 여백
 
-        # ── on 상태: 외곽 glow (여러 겹의 원) ──
+        # ── on 상태: 다층 radial gradient 로 뿌연 녹색 glow ──
         if self._monitoring:
-            green = QColor("#59c886")
-            # 부드러운 외곽 glow (6px 두께, 투명도 낮게)
-            glow_pen = QPen(QColor(89, 200, 134, 22))
-            glow_pen.setWidth(12)
-            p.setPen(glow_pen)
-            p.setBrush(Qt.BrushStyle.NoBrush)
-            p.drawEllipse(QRectF(ring_inset, ring_inset,
-                                 self._size - 2*ring_inset, self._size - 2*ring_inset))
+            # 여러 겹 겹쳐서 부드러운 blur 효과
+            # 가장 먼 외곽부터 시작 (더 투명)
+            glow_layers = [
+                # (radius_delta, alpha)
+                (28, 10),
+                (22, 18),
+                (16, 28),
+                (10, 45),
+                (5,  70),
+            ]
+            p.setPen(Qt.PenStyle.NoPen)
+            for dr, alpha in glow_layers:
+                r = outer_r + dr
+                grad = QRadialGradient(cx, cy, r)
+                grad.setColorAt(0.0, QColor(89, 200, 134, 0))
+                # 안쪽까지 완전 투명 → 테두리 근처부터 불투명
+                inner_stop = (outer_r - 2) / r
+                grad.setColorAt(max(0.0, inner_stop), QColor(89, 200, 134, 0))
+                grad.setColorAt(min(1.0, inner_stop + 0.05), QColor(89, 200, 134, alpha))
+                grad.setColorAt(1.0, QColor(89, 200, 134, 0))
+                p.setBrush(QBrush(grad))
+                p.drawEllipse(QRectF(cx - r, cy - r, 2 * r, 2 * r))
 
             # ── pulse 링 (애니메이션) ──
-            # pulse_progress 0.0 → 1.0 로 진행
-            # scale 0.9 → 1.25, opacity 0.5 → 0
             t = self._pulse_progress
             pulse_scale = 0.9 + 0.35 * t
             pulse_opacity = max(0.0, 0.5 * (1.0 - t))
-            pulse_alpha = int(255 * pulse_opacity * 0.4)
+            pulse_alpha = int(255 * pulse_opacity * 0.5)
             if pulse_alpha > 0:
                 pulse_pen = QPen(QColor(89, 200, 134, pulse_alpha))
                 pulse_pen.setWidth(2)
                 p.setPen(pulse_pen)
-                rx = self._size / 2.0 * pulse_scale
+                p.setBrush(Qt.BrushStyle.NoBrush)
+                rx = outer_r * pulse_scale
                 p.drawEllipse(QRectF(cx - rx, cy - rx, 2 * rx, 2 * rx))
 
         # ── 외곽 링 테두리 ──
@@ -160,8 +175,8 @@ class CircleToggle(QWidget):
         ring_pen.setWidth(2)
         p.setPen(ring_pen)
         p.setBrush(Qt.BrushStyle.NoBrush)
-        p.drawEllipse(QRectF(ring_inset, ring_inset,
-                             self._size - 2*ring_inset, self._size - 2*ring_inset))
+        p.drawEllipse(QRectF(cx - outer_r + 1, cy - outer_r + 1,
+                             2 * outer_r - 2, 2 * outer_r - 2))
 
         # ── 내부 원 (72px) ──
         inner_r = 36.0
@@ -183,10 +198,9 @@ class CircleToggle(QWidget):
         p.drawEllipse(QRectF(cx - inner_r, cy - inner_r, 2 * inner_r, 2 * inner_r))
 
         # ── 아이콘 (Play 또는 Stop) ──
-        icon_color = "#59c886" if self._monitoring else "#c1c4c9"  # green or fg_1
+        icon_color = "#59c886" if self._monitoring else "#c1c4c9"
         icon_name = "Stop" if self._monitoring else "Play"
         icon_pm = _icpx(icon_name, size=28, color=icon_color, stroke_width=1.5)
-        # 28x28 아이콘을 중앙에 배치
         p.drawPixmap(int(cx - 14), int(cy - 14), icon_pm)
 
         p.end()

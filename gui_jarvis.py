@@ -1568,11 +1568,13 @@ class JarvisGUI(QMainWindow):
         self._today_stats = {"processed": 0, "pending": 0, "errors": 0}
 
         # ═══════════════════════════════════════
-        # 1) HERO CENTER — brand + toggle + state + stats
+        # 1) HERO CENTER — brand + toggle + state + stats (세로 중앙 정렬)
         # ═══════════════════════════════════════
         hero_center = QVBoxLayout()
-        hero_center.setSpacing(24)
-        hero_center.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
+        hero_center.setSpacing(22)
+        hero_center.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        # 위쪽 stretch (내용물을 하단 statusbar와 함께 중앙으로)
+        hero_center.addStretch(1)
 
         # ── BRAND hero ──
         brand_col = QVBoxLayout()
@@ -1689,6 +1691,8 @@ class JarvisGUI(QMainWindow):
         stats_row.addWidget(_sep2)
         stats_row.addLayout(stat_err_col)
         hero_center.addLayout(stats_row)
+        # 아래쪽 stretch (상/하 대칭으로 세로 중앙 정렬)
+        hero_center.addStretch(1)
 
         layout.addLayout(hero_center, stretch=1)
 

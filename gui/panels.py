@@ -646,12 +646,26 @@ class FileManagerWidget(QWidget):
         self.tabs.currentChanged.connect(self._on_tab_changed)
 
     def _setup_settings_tab(self):
-        """SETTINGS 탭 생성"""
+        """SETTINGS 탭 생성 (스크롤 가능)"""
         tab4 = QWidget()
         tab4.setStyleSheet("background-color: transparent;")
-        t4_layout = QVBoxLayout(tab4)
+        tab4_outer_lay = QVBoxLayout(tab4)
+        tab4_outer_lay.setContentsMargins(0, 0, 0, 0)
+        tab4_outer_lay.setSpacing(0)
+
+        # 콘텐츠가 많아 잘리는 문제 해결 — QScrollArea 로 감싸기
+        _settings_scroll = QScrollArea()
+        _settings_scroll.setWidgetResizable(True)
+        _settings_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        _settings_scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+        _settings_inner = QWidget()
+        _settings_inner.setStyleSheet("background-color: transparent;")
+        t4_layout = QVBoxLayout(_settings_inner)
         t4_layout.setContentsMargins(10, 20, 10, 20)
         t4_layout.setSpacing(15)
+        _settings_scroll.setWidget(_settings_inner)
+        tab4_outer_lay.addWidget(_settings_scroll)
+
         t4_layout.addWidget(QLabel("폴더 정리 경로 설정"))
         
         self.btn_set_imp = NeonButton("수입 서버 경로 설정")
@@ -698,6 +712,7 @@ class FileManagerWidget(QWidget):
         # === 자동 이름 변경 제외 키워드 섹션 ===
         t4_layout.addSpacing(20)
         lbl_skip_header = QLabel("자동 이름 변경 제외 키워드")
+        lbl_skip_header.setMinimumHeight(24)
         lbl_skip_header.setStyleSheet(
             f"color: {CT['fg_0']}; font-weight: 600; letter-spacing: 0.2px; "
             f"background: transparent; border: none;"
@@ -712,6 +727,7 @@ class FileManagerWidget(QWidget):
             f"color: {CT['fg_3']}; font-size: 9pt; background: transparent; border: none;"
         )
         lbl_skip_desc.setWordWrap(True)
+        lbl_skip_desc.setMinimumHeight(40)
         t4_layout.addWidget(lbl_skip_desc)
 
         # 입력 + 추가 버튼 (한 줄)
@@ -719,6 +735,7 @@ class FileManagerWidget(QWidget):
         skip_input_row.setSpacing(8)
         self.input_skip_keyword = QLineEdit()
         self.input_skip_keyword.setPlaceholderText("예: 월별납부")
+        self.input_skip_keyword.setMinimumHeight(34)
         self.input_skip_keyword.setStyleSheet(f"""
             QLineEdit {{
                 background-color: {CT['bg_2']};
@@ -735,15 +752,15 @@ class FileManagerWidget(QWidget):
 
         self.btn_add_skip_keyword = QPushButton("추가")
         self.btn_add_skip_keyword.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_add_skip_keyword.setFixedHeight(32)
-        self.btn_add_skip_keyword.setMinimumWidth(56)
+        self.btn_add_skip_keyword.setFixedHeight(34)
+        self.btn_add_skip_keyword.setMinimumWidth(60)
         self.btn_add_skip_keyword.setStyleSheet(f"""
             QPushButton {{
                 background-color: {CT['accent']};
                 color: #ffffff;
                 border: 1px solid {CT['accent_hi']};
                 border-radius: 8px;
-                padding: 6px 12px;
+                padding: 4px 12px;
                 font-size: 9.5pt;
                 font-weight: 600;
             }}
@@ -777,7 +794,8 @@ class FileManagerWidget(QWidget):
                 color: {CT['fg_0']};
             }}
         """)
-        self.list_skip_keywords.setMaximumHeight(130)
+        self.list_skip_keywords.setMaximumHeight(140)
+        self.list_skip_keywords.setMinimumHeight(80)
         self.list_skip_keywords.itemDoubleClicked.connect(self._on_remove_skip_keyword_item)
         # Delete 키로 삭제
         from PyQt6.QtGui import QShortcut as _QShortcut, QKeySequence as _QKeySequence
@@ -789,7 +807,7 @@ class FileManagerWidget(QWidget):
         # 삭제 버튼
         self.btn_remove_skip_keyword = QPushButton("선택 키워드 삭제")
         self.btn_remove_skip_keyword.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_remove_skip_keyword.setFixedHeight(28)
+        self.btn_remove_skip_keyword.setFixedHeight(32)
         self.btn_remove_skip_keyword.setStyleSheet(f"""
             QPushButton {{
                 background-color: transparent;
@@ -813,6 +831,7 @@ class FileManagerWidget(QWidget):
         # === 한비로 메일 설정 섹션 ===
         t4_layout.addSpacing(20)
         lbl_mail_header = QLabel("한비로 메일 설정")
+        lbl_mail_header.setMinimumHeight(24)
         lbl_mail_header.setStyleSheet("color: #00ffff; font-weight: bold;")
         t4_layout.addWidget(lbl_mail_header)
         
@@ -821,13 +840,14 @@ class FileManagerWidget(QWidget):
         mail_row1.addWidget(QLabel("ID:"))
         self.input_hanbiro_email = QLineEdit()
         self.input_hanbiro_email.setPlaceholderText("userid")
+        self.input_hanbiro_email.setMinimumHeight(32)
         self.input_hanbiro_email.setStyleSheet("""
-            QLineEdit { 
-                background-color: rgba(5, 15, 30, 200); 
-                border: 1px solid #00aaaa; 
-                border-radius: 5px; 
-                color: #ffffff; 
-                padding: 5px; 
+            QLineEdit {
+                background-color: rgba(5, 15, 30, 200);
+                border: 1px solid #00aaaa;
+                border-radius: 5px;
+                color: #ffffff;
+                padding: 6px 8px;
             }
         """)
         mail_row1.addWidget(self.input_hanbiro_email)
@@ -842,13 +862,14 @@ class FileManagerWidget(QWidget):
         self.input_hanbiro_password = QLineEdit()
         self.input_hanbiro_password.setEchoMode(QLineEdit.EchoMode.Password)
         self.input_hanbiro_password.setPlaceholderText("********")
+        self.input_hanbiro_password.setMinimumHeight(32)
         self.input_hanbiro_password.setStyleSheet("""
-            QLineEdit { 
-                background-color: rgba(5, 15, 30, 200); 
-                border: 1px solid #00aaaa; 
-                border-radius: 5px; 
-                color: #ffffff; 
-                padding: 5px; 
+            QLineEdit {
+                background-color: rgba(5, 15, 30, 200);
+                border: 1px solid #00aaaa;
+                border-radius: 5px;
+                color: #ffffff;
+                padding: 6px 8px;
             }
         """)
         mail_row2.addWidget(self.input_hanbiro_password)
@@ -873,6 +894,7 @@ class FileManagerWidget(QWidget):
         # === 관리자 잠금 해제 섹션 ===
         t4_layout.addSpacing(20)
         lbl_admin_header = QLabel("관리자 잠금 해제")
+        lbl_admin_header.setMinimumHeight(24)
         lbl_admin_header.setStyleSheet("color: #ff88ff; font-weight: bold;")
         t4_layout.addWidget(lbl_admin_header)
 
@@ -880,13 +902,14 @@ class FileManagerWidget(QWidget):
         self.input_admin_pw = QLineEdit()
         self.input_admin_pw.setEchoMode(QLineEdit.EchoMode.Password)
         self.input_admin_pw.setPlaceholderText("관리자 비밀번호")
+        self.input_admin_pw.setMinimumHeight(32)
         self.input_admin_pw.setStyleSheet("""
             QLineEdit {
                 background-color: rgba(5, 15, 30, 200);
                 border: 1px solid #ff88ff;
                 border-radius: 5px;
                 color: #ffffff;
-                padding: 5px;
+                padding: 6px 8px;
             }
         """)
         admin_row.addWidget(self.input_admin_pw)

@@ -491,6 +491,8 @@ class IndependentCard(GlassFrame):
         # 우클릭 메뉴
         self.list_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.list_widget.customContextMenuRequested.connect(self._show_context_menu)
+        # 더블 클릭 → 파일 열기
+        self.list_widget.itemDoubleClicked.connect(self._open_item_file)
 
         # 키보드 단축키
         from PyQt6.QtGui import QKeySequence, QShortcut
@@ -500,6 +502,10 @@ class IndependentCard(GlassFrame):
         shortcut_f2 = QShortcut(QKeySequence(Qt.Key.Key_F2), self.list_widget)
         shortcut_f2.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
         shortcut_f2.activated.connect(self._rename_selected)
+        # Enter → 열기
+        shortcut_enter = QShortcut(QKeySequence(Qt.Key.Key_Return), self.list_widget)
+        shortcut_enter.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        shortcut_enter.activated.connect(self._open_selected_file)
 
     def paintEvent(self, event):
         """GlassFrame의 글로우 paintEvent를 건너뛰고 스타일시트로 렌더"""
@@ -807,6 +813,32 @@ class IndependentCard(GlassFrame):
         item = self.list_widget.currentItem()
         if item:
             self._delete_file(item)
+
+    def _open_item_file(self, item):
+        """더블클릭 → OS 기본 프로그램으로 파일 열기."""
+        if not item:
+            return
+        path = item.data(Qt.ItemDataRole.UserRole)
+        self._open_file_path(path)
+
+    def _open_selected_file(self):
+        """Enter 키 → 선택 파일 열기."""
+        item = self.list_widget.currentItem()
+        if item:
+            self._open_item_file(item)
+
+    def _open_file_path(self, path: str):
+        if not path:
+            return
+        import os as _os, subprocess as _sp
+        try:
+            if _os.path.exists(path):
+                if _os.name == 'nt':
+                    _os.startfile(path)
+                else:
+                    _sp.Popen(['xdg-open', path])
+        except Exception as e:
+            print(f"[open file] {e}")
 
     def _delete_file(self, item):
         """파일 삭제"""
@@ -1255,6 +1287,8 @@ class GroupCard(GlassFrame):
         self.file_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.file_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.file_list.customContextMenuRequested.connect(self._fl_context_menu)
+        # 더블 클릭 → 파일 열기
+        self.file_list.itemDoubleClicked.connect(self._fl_open_file_item)
 
         # 키보드 단축키
         sc_del = QShortcut(QKeySequence(Qt.Key.Key_Delete), self.file_list)
@@ -1263,6 +1297,10 @@ class GroupCard(GlassFrame):
         sc_f2 = QShortcut(QKeySequence(Qt.Key.Key_F2), self.file_list)
         sc_f2.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
         sc_f2.activated.connect(self._fl_rename_selected)
+        # Enter 키로 파일 열기
+        sc_enter = QShortcut(QKeySequence(Qt.Key.Key_Return), self.file_list)
+        sc_enter.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        sc_enter.activated.connect(self._fl_open_selected)
 
         # 파일 목록 채우기
         self._refresh_file_list()
@@ -2262,11 +2300,15 @@ class GroupCard(GlassFrame):
         row = QWidget()
         row.setStyleSheet("background: transparent;")
         row.setMinimumHeight(32)
-        # 행이 부모보다 넓어지지 않도록 — Expanding 정책 + 부모 width 따라감
         row.setSizePolicy(_QSP.Policy.Expanding, _QSP.Policy.Preferred)
         lay = QHBoxLayout(row)
         lay.setContentsMargins(10, 5, 10, 5)
         lay.setSpacing(10)
+
+        # 더블클릭 → 파일 열기 (setItemWidget 이 마우스 이벤트를 가로채므로 직접 처리)
+        def _on_dbl_click(_ev, _p=full_path):
+            self._open_file_with_default(_p)
+        row.mouseDoubleClickEvent = _on_dbl_click
 
         # ① 체크박스 (녹색 채운 정사각형 + 흰색 체크)
         chk = QLabel()
@@ -2396,6 +2438,35 @@ class GroupCard(GlassFrame):
         if item:
             path = item.data(Qt.ItemDataRole.UserRole)
             self._fl_delete_by_path(path, os.path.basename(path))
+
+    def _fl_open_file_item(self, item):
+        """파일 리스트 아이템 더블클릭 → OS 기본 프로그램으로 열기."""
+        if not item:
+            return
+        path = item.data(Qt.ItemDataRole.UserRole)
+        self._open_file_with_default(path)
+
+    def _fl_open_selected(self):
+        """선택 아이템 열기 (Enter 키)."""
+        item = self.file_list.currentItem()
+        if item:
+            path = item.data(Qt.ItemDataRole.UserRole)
+            self._open_file_with_default(path)
+
+    def _open_file_with_default(self, path: str):
+        """OS 기본 프로그램으로 파일 실행."""
+        if not path:
+            return
+        import os as _os, subprocess as _sp
+        try:
+            if not _os.path.exists(path):
+                return
+            if _os.name == 'nt':
+                _os.startfile(path)
+            else:
+                _sp.Popen(['xdg-open', path])
+        except Exception as e:
+            print(f"[open file] {e}")
 
     def _fl_context_menu_from_checklist(self, pos):
         """체크리스트 우클릭 → 파일 관리 메뉴"""

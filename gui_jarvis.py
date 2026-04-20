@@ -661,7 +661,7 @@ class JarvisGUI(QMainWindow):
         from PyQt6.QtWidgets import QToolButton
 
         self.navbar = QWidget()
-        self.navbar.setFixedWidth(52)
+        self.navbar.setFixedWidth(58)
         navbar_layout = QVBoxLayout(self.navbar)
         navbar_layout.setContentsMargins(0, 6, 0, 14)
         navbar_layout.setSpacing(4)
@@ -679,16 +679,17 @@ class JarvisGUI(QMainWindow):
         """)
 
         # NAV 헤더 라벨
+        # 디자인 .side-tabs::before — NAV 라벨, opacity 0.5
         _nav_header = QLabel("NAV")
         _nav_header.setAlignment(Qt.AlignmentFlag.AlignCenter)
         _nav_header.setStyleSheet(f"""
-            color: {CT['fg_3']};
-            font-size: 8pt;
+            color: rgba(106, 110, 118, 128);
+            font-size: 7.5pt;
             font-weight: 700;
-            letter-spacing: 3px;
+            letter-spacing: 3.5px;
             background: transparent;
             border: none;
-            padding: 4px 0 8px 0;
+            padding: 6px 0 10px 0;
         """)
         navbar_layout.addWidget(_nav_header)
 
@@ -703,38 +704,39 @@ class JarvisGUI(QMainWindow):
 
         admin_only_tabs = {"일정", "통관", "REPORT"}
 
+        # 디자인 .side-tab: padding 14px 4px, border-radius 10, font 11.5px, letter-spacing 0.02em
         _nav_btn_css = f"""
             QToolButton#SideTab {{
                 background-color: transparent;
                 color: {CT['fg_2']};
                 border: 1px solid transparent;
-                border-left: 2px solid transparent;
                 border-radius: 10px;
-                padding: 8px 2px 6px 2px;
-                font-size: 9pt;
+                padding: 12px 4px 10px 4px;
+                font-size: 8.6pt;
                 font-weight: 600;
+                letter-spacing: 0.4px;
             }}
             QToolButton#SideTab:hover {{
                 background-color: {CT['bg_2']};
                 color: {CT['fg_0']};
                 border: 1px solid {CT['border_soft']};
-                border-left: 2px solid {CT['border']};
             }}
             QToolButton#SideTab:checked {{
                 background-color: {CT['accent_bg']};
                 color: {CT['accent_hi']};
                 border: 1px solid {CT['accent_border']};
-                border-left: 2px solid {CT['accent']};
             }}
         """
 
+        # 디자인 .side-tab.active::before — 외부 좌측 2.5px 스트라이프 + accent glow
+        # QSS는 :before 미지원 → 각 버튼 옆에 QFrame 스트라이프 위젯을 수동 배치
         for tab_name, label, icon_name in tab_defs:
             if tab_name in admin_only_tabs and self.license_tier != "admin":
                 continue
             btn = QToolButton()
             btn.setText(label)
             btn.setObjectName("SideTab")
-            btn.setFixedSize(44, 58)
+            btn.setFixedSize(44, 64)
             btn.setCheckable(True)
             btn.setAutoExclusive(True)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -745,21 +747,42 @@ class JarvisGUI(QMainWindow):
             btn.setIcon(QIcon(_icpx(icon_name, size=20, color=CT['fg_2'])))
             btn.setIconSize(QSize(20, 20))
             btn.clicked.connect(lambda checked, name=tab_name: self._on_navbar_clicked(name))
-            _wrap = QHBoxLayout()
-            _wrap.setContentsMargins(4, 0, 4, 0)
-            _wrap.addStretch()
-            _wrap.addWidget(btn)
-            _wrap.addStretch()
-            navbar_layout.addLayout(_wrap)
+
+            # active 스트라이프 (탭 왼쪽 외부 2.5px)
+            _stripe = QFrame()
+            _stripe.setFixedSize(3, 28)
+            _stripe.setStyleSheet(f"""
+                background-color: transparent;
+                border: none;
+                border-radius: 1.5px;
+            """)
+            btn._stripe = _stripe  # 참조 보관해 클릭 시 표시/숨김 제어
+
+            _row = QHBoxLayout()
+            _row.setContentsMargins(0, 0, 0, 0)
+            _row.setSpacing(2)
+            _row.addWidget(_stripe)
+            _row.addWidget(btn)
+            # 우측 여백 (stripe 너비 보정)
+            _right_spacer = QWidget()
+            _right_spacer.setFixedWidth(3)
+            _row.addWidget(_right_spacer)
+            navbar_layout.addLayout(_row)
             self.nav_buttons[tab_name] = btn
         
         navbar_layout.addStretch()
         self.nav_buttons["정산"].setChecked(True)
-        # 초기 active 탭 아이콘을 accent 색으로 표시
+        # 초기 active 탭 아이콘을 accent 색으로 표시 + 스트라이프 활성화
         _icon_name = self.nav_buttons["정산"].property("icon_name")
         if _icon_name:
             self.nav_buttons["정산"].setIcon(QIcon(_icpx(_icon_name, size=20, color=CT['accent_hi'])))
             self.nav_buttons["정산"].setIconSize(QSize(20, 20))
+        if hasattr(self.nav_buttons["정산"], '_stripe'):
+            self.nav_buttons["정산"]._stripe.setStyleSheet(f"""
+                background-color: {CT['accent']};
+                border: none;
+                border-radius: 1.5px;
+            """)
         self.current_nav_tab = "정산"
         self.main_layout.addWidget(self.navbar, 0, 2)
     
@@ -775,6 +798,19 @@ class JarvisGUI(QMainWindow):
                 color = CT['accent_hi'] if is_active else CT['fg_2']
                 btn.setIcon(QIcon(_icpx(icon_name, size=20, color=color)))
                 btn.setIconSize(QSize(20, 20))
+            # 좌측 스트라이프 (active 일 때만 accent 색, 그외 투명)
+            if hasattr(btn, '_stripe'):
+                if is_active:
+                    btn._stripe.setStyleSheet(f"""
+                        background-color: {CT['accent']};
+                        border: none;
+                        border-radius: 1.5px;
+                    """)
+                else:
+                    btn._stripe.setStyleSheet("""
+                        background-color: transparent;
+                        border: none;
+                    """)
         self.current_nav_tab = tab_name
 
         # 1) QStackedWidget 페이지 전환

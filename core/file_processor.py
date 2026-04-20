@@ -390,6 +390,53 @@ class AutoRenamer:
         for k, v in groups.items():
             cs = v.pop('company_set')
             v['company'] = ", ".join(sorted(list(cs))[:2]) if cs else "Unknown"
+
+        # ═══════════════════════════════════════════════
+        # 미분류_{doctype}_{company}_{amount}.pdf 파일을
+        # 회사명 매칭으로 해당 BL 그룹의 빈 고정 슬롯에 자동 할당
+        # ═══════════════════════════════════════════════
+        import re as _re
+        _FIXED_MATCHABLE = ["수입세금계산서", "납부고지서", "자금정산서", "정산서",
+                             "수입신고필증", "수출신고필증", "반송신고필증"]
+        _uncl_moved = []
+        for f in list(uncl):
+            if not f.startswith("미분류_"):
+                continue
+            # 미분류_{doctype}_{company}_{amount}.pdf 또는 미분류_{doctype}_{company}_확인필요.pdf
+            m = _re.match(r'^미분류_([^_]+)_(.+?)_(?:\d+|확인필요|[^_]+)\.pdf$', f, _re.IGNORECASE)
+            if not m:
+                continue
+            file_doctype = m.group(1).strip()
+            file_company = m.group(2).strip()
+            if file_doctype not in _FIXED_MATCHABLE:
+                continue
+            if not file_company:
+                continue
+
+            # 회사명이 일치하면서 해당 doc_type 슬롯이 비어 있는 BL 그룹 찾기
+            candidates = []
+            for bl_id, bl_data in groups.items():
+                if file_doctype in bl_data.get('docs', {}):
+                    continue  # 이미 슬롯 채워짐
+                group_company = bl_data.get('company', '') or ''
+                # 회사명 부분 매칭 (양방향, 공백 제거)
+                gc_clean = group_company.replace(" ", "")
+                fc_clean = file_company.replace(" ", "")
+                if fc_clean and gc_clean and (fc_clean in gc_clean or gc_clean in fc_clean):
+                    candidates.append(bl_id)
+
+            # 후보가 정확히 1개일 때만 자동 할당 (여러 그룹이면 애매 → 사용자 판단)
+            if len(candidates) == 1:
+                target_bl = candidates[0]
+                groups[target_bl].setdefault('docs', {})[file_doctype] = f
+                _uncl_moved.append(f)
+                self.log(f" -> [자동 매칭] 미분류 → {target_bl} / {file_doctype}: {f}")
+
+        # 매칭된 파일은 uncl에서 제거
+        for f in _uncl_moved:
+            if f in uncl:
+                uncl.remove(f)
+
         if self.merge_request_callback:
             self.merge_request_callback({'directory': dr, 'groups': groups, 'unclassified': uncl,
                                         'independent': independent_groups})

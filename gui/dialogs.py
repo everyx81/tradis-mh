@@ -1828,10 +1828,20 @@ class GroupCard(GlassFrame):
                                                 continue
                                         fp = os.path.join(self.directory, f)
                                         f_cached = gemini_ocr._get_cached_result(fp)
+                                        f_amt = 0
                                         if f_cached:
                                             f_amt = parse_amount(f_cached.get('total_amount', 0))
-                                            if f_amt > 0:
-                                                uncl_amounts[f] = f_amt
+                                        # Fallback: 파일명 끝의 _숫자.pdf 패턴에서 금액 추출
+                                        # (미분류_수입세금계산서_희래_216280.pdf 같은 경우)
+                                        if f_amt == 0:
+                                            try:
+                                                _m_amt = _re.search(r'_(\d{3,})\.pdf$', f, _re.IGNORECASE)
+                                                if _m_amt:
+                                                    f_amt = int(_m_amt.group(1))
+                                            except Exception:
+                                                pass
+                                        if f_amt > 0:
+                                            uncl_amounts[f] = f_amt
 
                                 matching_files = [f for f, amt in uncl_amounts.items() if amt == item_amt]
                                 if len(matching_files) == 1:

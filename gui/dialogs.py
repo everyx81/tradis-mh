@@ -1906,6 +1906,27 @@ class GroupCard(GlassFrame):
 
     def _update_checklist_from_mapping(self):
         """AI 분석 후 mapping 기반으로 전체 체크리스트 갱신 (비용 항목 포함)"""
+        # 징수형태 기반 not_applicable 판단 (수입만)
+        docs = self.data.get('docs', {})
+        is_export = "수출신고필증" in docs or "반송신고필증" in docs
+        na_set = set()
+        if not is_export:
+            levy_type, has_tax = self._get_levy_info()
+            _LEVY_NAMES = {"11": "자진신고납부", "14": "수시부과", "43": "사후납부"}
+            if levy_type and levy_type != "Unknown":
+                self._levy_badge_info = (levy_type, _LEVY_NAMES.get(levy_type, ""))
+            # 필요 여부 판정
+            if levy_type == "11":
+                if not has_tax:
+                    na_set.add("납부고지서")
+            elif levy_type == "14":
+                na_set.add("수입세금계산서")
+                if not has_tax:
+                    na_set.add("납부고지서")
+            elif levy_type == "43":
+                na_set.add("수입세금계산서")
+                na_set.add("납부고지서")
+
         items = []
         for item in self.mapping:
             label = item.get('label', '')
@@ -1920,10 +1941,18 @@ class GroupCard(GlassFrame):
             sub = None
             if "포함" in label and not filename:
                 sub = "(수수료계산서 포함)"
-            items.append((name, is_found, sub))
+            not_app = name in na_set
+            items.append({
+                'name': name,
+                'found': is_found,
+                'sub': sub,
+                'not_applicable': not_app,
+            })
 
-        total = len(items)
-        checked = sum(1 for item in self.mapping if item.get('filename', '') or '포함' in item.get('label', ''))
+        # 요약은 not_applicable 제외
+        applicable_items = [it for it in items if not it.get('not_applicable', False)]
+        total = len(applicable_items)
+        checked = sum(1 for it in applicable_items if it.get('found', False))
         missing = total - checked
         self._rebuild_checklist(items, summary=(total, missing, missing == 0))
 

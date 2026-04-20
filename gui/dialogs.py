@@ -3446,24 +3446,100 @@ class GroupCard(GlassFrame):
             del parent.marked_data[self.text_id]
         self.deleteLater()
 
+    def _compute_na_set(self):
+        """현재 BL 카드의 not_applicable 항목 이름 집합을 반환.
+        (징수형태 / 월납업체 / 사용자 override 종합)"""
+        docs = self.data.get('docs', {})
+        is_export = "수출신고필증" in docs or "반송신고필증" in docs
+        na = set()
+        if not is_export:
+            levy_type, has_tax = self._get_levy_info()
+            if levy_type == "11":
+                if not has_tax:
+                    na.add("납부고지서")
+            elif levy_type == "14":
+                na.add("수입세금계산서")
+                if not has_tax:
+                    na.add("납부고지서")
+            elif levy_type == "43":
+                na.add("수입세금계산서")
+                na.add("납부고지서")
+        # 월납업체
+        try:
+            from core.config import is_monthly_billing_company
+            company = self.data.get('company', '') or ''
+            if is_monthly_billing_company(company):
+                _FEE_KWS = [
+                    "통관수수료", "검역수수료", "식품검역", "식물검역", "동물검역",
+                    "요건대행수수료", "요건수수료", "요건면제수수료",
+                    "폐기수수료", "폐기 수수료",
+                    "취하수수료", "검사수수료", "갈음수수료",
+                    "원산지증명서", "CITES", "통관고유부호",
+                    "환급수수료", "분증수수료", "기납증수수료",
+                    "반입수수료", "반출수수료", "신고전물품확인수수료",
+                    "선사선적 핸들링", "선사선적핸들링",
+                    "BL분할수수료", "개청비",
+                    "구매확인서 수수료", "구매확인서수수료",
+                    "검사비지원수수료",
+                    "배차핸들링", "배차 핸들링",
+                    "HANDLING",
+                ]
+                # mapping 에서 비용 항목 이름 추출해 키워드 매칭
+                for item in self.mapping:
+                    label = item.get('label', '')
+                    if ':' not in label:
+                        continue
+                    name = label.split(':')[-1].strip()
+                    n = name.replace(" ", "")
+                    for kw in _FEE_KWS:
+                        if kw.replace(" ", "") in n or n in kw.replace(" ", ""):
+                            na.add(name)
+                            break
+        except Exception:
+            pass
+        # 사용자 override
+        try:
+            from core.config import get_chip_overrides
+            overrides = get_chip_overrides(self.text_id)
+            for chip_name, state in overrides.items():
+                if state == "force_not_applicable":
+                    na.add(chip_name)
+                elif state == "force_applicable" and chip_name in na:
+                    na.discard(chip_name)
+        except Exception:
+            pass
+        return na
+
     def _run_amount_validation(self):
-        """항목별 1:1 금액 비교 + 전체 합산 비교 2단계 검증"""
+        """항목별 1:1 금액 비교 + 전체 합산 비교 2단계 검증.
+        not_applicable 항목 (월납업체 매출 수수료, 징수형태 14/43 수입세금계산서 등)은
+        검증 대상에서 제외."""
         if not self.mapping:
-            # 매핑 없으면 비용 항목이 있는 항목이 있는지만 간단 체크
             has_expense = any('비용: ' in item.get('label', '') for item in self.mapping) if self.mapping else False
             if not has_expense:
                 self._warning_frame.hide()
-                # 매핑 없음 → 검증 불가 (초기 상태 유지)
                 self._validation_status = None
                 if hasattr(self, 'lbl_badge'):
                     self._update_status_badge()
                 return
 
-        # 비용 항목이 하나라도 있는지 확인
-        has_expense_items = any('비용: ' in item.get('label', '') for item in self.mapping)
+        # NA 항목 제외한 검증용 mapping
+        na_set = self._compute_na_set()
+        def _is_na(item):
+            label = item.get('label', '')
+            if ']' in label:
+                name = label.split(']')[-1].strip()
+            elif ':' in label:
+                name = label.split(':')[-1].strip()
+            else:
+                name = label
+            return name in na_set
+        validation_mapping = [it for it in self.mapping if not _is_na(it)]
+
+        # 비용 항목이 하나라도 있는지 확인 (NA 제외 후)
+        has_expense_items = any('비용: ' in item.get('label', '') for item in validation_mapping)
         if not has_expense_items:
             self._warning_frame.hide()
-            # 비용 항목 없음 → 검증 스킵 (엣지 ①)
             self._validation_status = 'no_items'
             if hasattr(self, 'lbl_badge'):
                 self._update_status_badge()
@@ -3503,7 +3579,8 @@ class GroupCard(GlassFrame):
                     res = {}
                 self.finished.emit(res)
 
-        self._validator_worker = ValidatorWorker(list(self.mapping), self.directory)
+        # NA 항목 제외한 매핑으로 검증 (월납업체/징수형태별)
+        self._validator_worker = ValidatorWorker(list(validation_mapping), self.directory)
 
         def _on_validated(res):
             try:

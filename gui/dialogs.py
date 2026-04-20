@@ -1726,10 +1726,9 @@ class GroupCard(GlassFrame):
                 need_tax_invoice = False
                 need_payment_notice = False
 
-            # 징수형태 배지 정보 저장 (렌더 시 상단에 표시)
-            _LEVY_NAMES = {"11": "자진신고납부", "14": "수시부과", "43": "사후납부"}
+            # 징수형태 배지 정보 저장 (코드만, 이름 생략 — 사용자 요청)
             if levy_type and levy_type != "Unknown":
-                self._levy_badge_info = (levy_type, _LEVY_NAMES.get(levy_type, ""))
+                self._levy_badge_info = (levy_type, "")
 
             required = [
                 {"name": "자금정산서", "found": "자금정산서" in docs or "정산서" in docs},
@@ -1912,10 +1911,8 @@ class GroupCard(GlassFrame):
         na_set = set()
         if not is_export:
             levy_type, has_tax = self._get_levy_info()
-            _LEVY_NAMES = {"11": "자진신고납부", "14": "수시부과", "43": "사후납부"}
             if levy_type and levy_type != "Unknown":
-                self._levy_badge_info = (levy_type, _LEVY_NAMES.get(levy_type, ""))
-            # 필요 여부 판정
+                self._levy_badge_info = (levy_type, "")
             if levy_type == "11":
                 if not has_tax:
                     na_set.add("납부고지서")
@@ -1926,6 +1923,41 @@ class GroupCard(GlassFrame):
             elif levy_type == "43":
                 na_set.add("수입세금계산서")
                 na_set.add("납부고지서")
+
+        # 월납업체 판정 — 카드 company 가 월납업체 리스트에 포함되면
+        # 매출 수수료 관련 항목 전부 not_applicable
+        is_monthly = False
+        try:
+            from core.config import is_monthly_billing_company
+            company = self.data.get('company', '') or ''
+            is_monthly = is_monthly_billing_company(company)
+        except Exception:
+            is_monthly = False
+        self._is_monthly_billing = is_monthly
+        # 매출 수수료 판정 키워드 (통관수수료, 검역수수료, 요건, 취하수수료 등)
+        _FEE_KWS = [
+            "통관수수료", "검역수수료", "식품검역", "식물검역", "동물검역",
+            "요건대행수수료", "요건수수료", "요건면제수수료",
+            "폐기수수료", "폐기 수수료",
+            "취하수수료", "검사수수료", "갈음수수료",
+            "원산지증명서", "CITES", "통관고유부호",
+            "환급수수료", "분증수수료", "기납증수수료",
+            "반입수수료", "반출수수료", "신고전물품확인수수료",
+            "선사선적 핸들링", "선사선적핸들링",
+            "BL분할수수료", "개청비",
+            "구매확인서 수수료", "구매확인서수수료",
+            "검사비지원수수료",
+            "배차핸들링", "배차 핸들링",
+            "HANDLING",
+        ]
+        def _is_fee_item(name: str) -> bool:
+            if not name:
+                return False
+            n = name.replace(" ", "")
+            for kw in _FEE_KWS:
+                if kw.replace(" ", "") in n or n in kw.replace(" ", ""):
+                    return True
+            return False
 
         items = []
         for item in self.mapping:
@@ -1942,6 +1974,9 @@ class GroupCard(GlassFrame):
             if "포함" in label and not filename:
                 sub = "(수수료계산서 포함)"
             not_app = name in na_set
+            # 월납업체: 매출 수수료 항목은 not_applicable
+            if is_monthly and _is_fee_item(name):
+                not_app = True
             items.append({
                 'name': name,
                 'found': is_found,
@@ -1949,7 +1984,6 @@ class GroupCard(GlassFrame):
                 'not_applicable': not_app,
             })
 
-        # 요약은 not_applicable 제외
         applicable_items = [it for it in items if not it.get('not_applicable', False)]
         total = len(applicable_items)
         checked = sum(1 for it in applicable_items if it.get('found', False))
@@ -2114,15 +2148,19 @@ class GroupCard(GlassFrame):
         if not items and summary is None and not getattr(self, '_levy_badge_info', None):
             return
 
-        # 징수형태 배지 (수입 카드에 있을 때만, 체크리스트 상단에 별도 행)
+        # 징수형태 + 월납업체 배지 (수입 카드에 있을 때만, 체크리스트 상단에 별도 행)
         badge = getattr(self, '_levy_badge_info', None)
-        if badge:
+        is_monthly = getattr(self, '_is_monthly_billing', False)
+        if badge or is_monthly:
             badge_row = QWidget()
             badge_row.setStyleSheet("background: transparent;")
             _br_lay = QHBoxLayout(badge_row)
             _br_lay.setContentsMargins(0, 0, 0, 6)
             _br_lay.setSpacing(6)
-            _br_lay.addWidget(self._make_levy_badge(badge[0], badge[1]))
+            if badge:
+                _br_lay.addWidget(self._make_levy_badge(badge[0], badge[1]))
+            if is_monthly:
+                _br_lay.addWidget(self._make_monthly_badge())
             _br_lay.addStretch()
             self._checklist_chips_layout.addWidget(badge_row)
 
@@ -2152,7 +2190,7 @@ class GroupCard(GlassFrame):
         self._checklist_chips_layout.addWidget(flow_wrap)
 
     def _make_levy_badge(self, code: str, name: str):
-        """징수형태 배지 (예: '징수형태 43 · 사후납부')"""
+        """징수형태 배지 (예: '징수형태 14')"""
         from .claude_theme import C as _CT
         w = QLabel()
         txt = f"징수형태 {code}"
@@ -2163,6 +2201,22 @@ class GroupCard(GlassFrame):
             color: {_CT['accent_hi']};
             background-color: {_CT['accent_bg']};
             border: 1px solid {_CT['accent_border']};
+            border-radius: 5px;
+            padding: 3px 10px;
+            font-size: 8.5pt;
+            font-weight: 600;
+            letter-spacing: 0.3px;
+        """)
+        return w
+
+    def _make_monthly_badge(self):
+        """월납업체 배지 (amber 톤)"""
+        from .claude_theme import C as _CT
+        w = QLabel("월납업체")
+        w.setStyleSheet(f"""
+            color: {_CT['amber']};
+            background-color: rgba(233, 171, 43, 36);
+            border: 1px solid rgba(233, 171, 43, 130);
             border-radius: 5px;
             padding: 3px 10px;
             font-size: 8.5pt;

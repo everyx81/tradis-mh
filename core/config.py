@@ -75,6 +75,60 @@ def remove_rename_skip_keyword(keyword: str) -> list:
         set_rename_skip_keywords(kws)
     return kws
 
+
+# ─────────────────────────────────────────────────
+# 월납업체 (매출 수수료 계산서 미발행 업체)
+# ─────────────────────────────────────────────────
+def get_monthly_billing_companies() -> list:
+    """월납업체 리스트 반환."""
+    cfg = CONFIG.get("monthly_billing_companies")
+    if isinstance(cfg, list):
+        return [str(c) for c in cfg if c]
+    return []
+
+
+def set_monthly_billing_companies(companies: list):
+    """월납업체 리스트 저장 (중복 제거, 공백 제거)."""
+    seen = set()
+    cleaned = []
+    for c in companies:
+        c = str(c).strip()
+        if c and c not in seen:
+            seen.add(c)
+            cleaned.append(c)
+    CONFIG["monthly_billing_companies"] = cleaned
+    _save_config(CONFIG)
+    return cleaned
+
+
+def add_monthly_billing_company(company: str) -> list:
+    cs = get_monthly_billing_companies()
+    c = str(company).strip()
+    if c and c not in cs:
+        cs.append(c)
+        set_monthly_billing_companies(cs)
+    return cs
+
+
+def remove_monthly_billing_company(company: str) -> list:
+    cs = get_monthly_billing_companies()
+    if company in cs:
+        cs.remove(company)
+        set_monthly_billing_companies(cs)
+    return cs
+
+
+def is_monthly_billing_company(company: str) -> bool:
+    """업체 이름이 월납업체 리스트에 포함되는지 (공백 제거 부분 매칭, 양방향)."""
+    if not company:
+        return False
+    target = company.replace(" ", "")
+    for c in get_monthly_billing_companies():
+        cc = c.replace(" ", "")
+        if cc and target and (cc in target or target in cc):
+            return True
+    return False
+
 def get_config_path():
     """설정 파일 경로 반환 (data/config.json)"""
     if getattr(sys, 'frozen', False):

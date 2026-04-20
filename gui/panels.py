@@ -858,6 +858,120 @@ class FileManagerWidget(QWidget):
         # 초기 리스트 채우기
         self._refresh_skip_keywords_list()
 
+        # === 월납업체 설정 섹션 ===
+        t4_layout.addSpacing(20)
+        lbl_mb_header = QLabel("월납업체")
+        lbl_mb_header.setMinimumHeight(24)
+        lbl_mb_header.setStyleSheet(
+            f"color: {CT['fg_0']}; font-weight: 600; letter-spacing: 0.2px; "
+            f"background: transparent; border: none;"
+        )
+        t4_layout.addWidget(lbl_mb_header)
+
+        lbl_mb_desc = QLabel(
+            "월납 계약 업체로 등록하면 해당 업체의 카드에서는\n"
+            "통관수수료 / 검역수수료 / 요건대행수수료 등 매출 수수료 항목이\n"
+            "'해당없음' 으로 표시됩니다 (개별 계산서 미발행)."
+        )
+        lbl_mb_desc.setStyleSheet(
+            f"color: {CT['fg_3']}; font-size: 9pt; background: transparent; border: none;"
+        )
+        lbl_mb_desc.setWordWrap(True)
+        lbl_mb_desc.setMinimumHeight(48)
+        t4_layout.addWidget(lbl_mb_desc)
+
+        mb_input_row = QHBoxLayout()
+        mb_input_row.setSpacing(8)
+        self.input_monthly_company = QLineEdit()
+        self.input_monthly_company.setPlaceholderText("예: 메가마트")
+        self.input_monthly_company.setMinimumHeight(34)
+        self.input_monthly_company.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {CT['bg_2']};
+                color: {CT['fg_0']};
+                border: 1px solid {CT['border_soft']};
+                border-radius: 8px;
+                padding: 6px 10px;
+                font-size: 10pt;
+            }}
+            QLineEdit:focus {{ border: 1px solid {CT['accent_border']}; }}
+        """)
+        self.input_monthly_company.returnPressed.connect(self._on_add_monthly_company)
+        mb_input_row.addWidget(self.input_monthly_company, stretch=1)
+
+        self.btn_add_monthly = QPushButton("추가")
+        self.btn_add_monthly.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_add_monthly.setFixedHeight(34)
+        self.btn_add_monthly.setMinimumWidth(60)
+        self.btn_add_monthly.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {CT['accent']};
+                color: #ffffff;
+                border: 1px solid {CT['accent_hi']};
+                border-radius: 8px;
+                padding: 4px 12px;
+                font-size: 9.5pt;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{ background-color: {CT['accent_hi']}; }}
+            QPushButton:pressed {{ background-color: {CT['accent_lo']}; }}
+        """)
+        self.btn_add_monthly.clicked.connect(self._on_add_monthly_company)
+        mb_input_row.addWidget(self.btn_add_monthly)
+        t4_layout.addLayout(mb_input_row)
+
+        self.list_monthly_companies = QListWidget()
+        self.list_monthly_companies.setStyleSheet(f"""
+            QListWidget {{
+                background-color: {CT['bg_2']};
+                color: {CT['fg_1']};
+                border: 1px solid {CT['border_soft']};
+                border-radius: 8px;
+                padding: 4px;
+                outline: 0;
+                font-size: 10pt;
+            }}
+            QListWidget::item {{
+                padding: 6px 10px;
+                border-radius: 6px;
+                margin: 1px 0;
+            }}
+            QListWidget::item:hover {{ background-color: {CT['bg_3']}; }}
+            QListWidget::item:selected {{
+                background-color: {CT['accent_bg']};
+                color: {CT['fg_0']};
+            }}
+        """)
+        self.list_monthly_companies.setMaximumHeight(140)
+        self.list_monthly_companies.setMinimumHeight(80)
+        self.list_monthly_companies.itemDoubleClicked.connect(self._on_remove_monthly_item)
+        _sc_del_m = _QShortcut(_QKeySequence(Qt.Key.Key_Delete), self.list_monthly_companies)
+        _sc_del_m.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        _sc_del_m.activated.connect(self._on_remove_monthly_selected)
+        t4_layout.addWidget(self.list_monthly_companies)
+
+        self.btn_remove_monthly = QPushButton("선택 업체 삭제")
+        self.btn_remove_monthly.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_remove_monthly.setFixedHeight(32)
+        self.btn_remove_monthly.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {CT['red']};
+                border: 1px solid {CT['border_soft']};
+                border-radius: 6px;
+                padding: 4px 10px;
+                font-size: 9pt;
+            }}
+            QPushButton:hover {{
+                background-color: rgba(250, 104, 99, 30);
+                border: 1px solid rgba(250, 104, 99, 120);
+            }}
+        """)
+        self.btn_remove_monthly.clicked.connect(self._on_remove_monthly_selected)
+        t4_layout.addWidget(self.btn_remove_monthly)
+
+        self._refresh_monthly_companies_list()
+
         # === 한비로 메일 설정 섹션 ===
         t4_layout.addSpacing(20)
         lbl_mail_header = QLabel("한비로 메일 설정")
@@ -2884,6 +2998,60 @@ class FileManagerWidget(QWidget):
         except Exception as e:
             self.emit_log(f"[오류] 키워드 삭제 실패: {e}")
         self._refresh_skip_keywords_list()
+
+    # ─────────────────────────────────────────────
+    # 월납업체 관리
+    # ─────────────────────────────────────────────
+    def _refresh_monthly_companies_list(self):
+        try:
+            from core.config import get_monthly_billing_companies
+            cs = get_monthly_billing_companies()
+        except Exception:
+            cs = []
+        self.list_monthly_companies.clear()
+        for c in cs:
+            self.list_monthly_companies.addItem(c)
+
+    def _on_add_monthly_company(self):
+        text = self.input_monthly_company.text().strip()
+        if not text:
+            return
+        try:
+            from core.config import add_monthly_billing_company
+            add_monthly_billing_company(text)
+        except Exception as e:
+            self.emit_log(f"[오류] 월납업체 추가 실패: {e}")
+            return
+        self.input_monthly_company.clear()
+        self._refresh_monthly_companies_list()
+        self.emit_log(f"[설정] 월납업체 추가: '{text}'")
+
+    def _on_remove_monthly_item(self, item):
+        if item is None:
+            return
+        c = item.text()
+        try:
+            from core.config import remove_monthly_billing_company
+            remove_monthly_billing_company(c)
+        except Exception as e:
+            self.emit_log(f"[오류] 월납업체 삭제 실패: {e}")
+            return
+        self._refresh_monthly_companies_list()
+        self.emit_log(f"[설정] 월납업체 삭제: '{c}'")
+
+    def _on_remove_monthly_selected(self):
+        items = self.list_monthly_companies.selectedItems()
+        if not items:
+            return
+        try:
+            from core.config import remove_monthly_billing_company
+            for item in items:
+                c = item.text()
+                remove_monthly_billing_company(c)
+                self.emit_log(f"[설정] 월납업체 삭제: '{c}'")
+        except Exception as e:
+            self.emit_log(f"[오류] 월납업체 삭제 실패: {e}")
+        self._refresh_monthly_companies_list()
 
     def _show_naming_dialog(self):
         """파일 네이밍 설정 다이얼로그 (Frosted Glass 스타일)"""

@@ -5,8 +5,8 @@
 - 호버: 살짝 확대 (scale 1.03)
 - 프레스: 살짝 축소 (scale 0.97)
 """
-from PyQt6.QtCore import Qt, QSize, QRectF, QPropertyAnimation, QEasingCurve, pyqtProperty, pyqtSignal
-from PyQt6.QtGui import QPainter, QColor, QPen, QBrush, QRadialGradient, QPainterPath
+from PyQt6.QtCore import Qt, QSize, QRectF, QPropertyAnimation, QEasingCurve, QTimer, pyqtProperty, pyqtSignal
+from PyQt6.QtGui import QPainter, QColor, QPen, QBrush, QRadialGradient, QPainterPath, QPixmap
 from PyQt6.QtWidgets import QWidget
 
 from .claude_theme import C as CT
@@ -31,44 +31,49 @@ class CircleToggle(QWidget):
         self.setFixedSize(size + 2 * self._glow_margin, size + 2 * self._glow_margin)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
-        # pulse 애니메이션 (2.4초 루프, ON 상태일 때만)
-        self._pulse_anim = QPropertyAnimation(self, b"pulse_progress")
-        self._pulse_anim.setDuration(2400)
-        self._pulse_anim.setStartValue(0.0)
-        self._pulse_anim.setEndValue(1.0)
-        self._pulse_anim.setEasingCurve(QEasingCurve.Type.Linear)
-        self._pulse_anim.setLoopCount(-1)  # 무한 루프
+        # pulse 애니메이션: QTimer 로 저프레임 직접 구동 (QPropertyAnimation 60fps 는 idle CPU 를 크게 쓰므로 회피)
+        # 주기 6초 × 8fps = 48 step/cycle — 느긋한 호흡, 부드러운 전환
+        self._PULSE_DURATION_MS = 6000
+        self._PULSE_INTERVAL_MS = 125  # 8fps
+        self._pulse_elapsed_ms = 0
+        self._pulse_timer = QTimer(self)
+        self._pulse_timer.setInterval(self._PULSE_INTERVAL_MS)
+        self._pulse_timer.timeout.connect(self._tick_pulse)
 
-        # scale 애니메이션 (호버/프레스)
+        # scale 애니메이션 (호버/프레스) — 일회성이라 CPU 영향 없음
         self._scale_anim = QPropertyAnimation(self, b"scale")
         self._scale_anim.setDuration(200)
         self._scale_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+        # paintEvent 캐시: SVG 아이콘과 5겹 glow 를 매 프레임 재생성하지 않도록
+        self._cached_icon = None
+        self._cached_glow = None
 
     # ────────────── 외부 API ──────────────
     def set_monitoring(self, on: bool):
         if self._monitoring == on:
             return
         self._monitoring = on
+        self._cached_icon = None
+        self._cached_glow = None
         if on:
-            self._pulse_anim.start()
-        else:
-            self._pulse_anim.stop()
+            self._pulse_elapsed_ms = 0
             self._pulse_progress = 0.0
+            self._pulse_timer.start()
+        else:
+            self._pulse_timer.stop()
+            self._pulse_progress = 0.0
+        self.update()
+
+    def _tick_pulse(self):
+        self._pulse_elapsed_ms = (self._pulse_elapsed_ms + self._PULSE_INTERVAL_MS) % self._PULSE_DURATION_MS
+        self._pulse_progress = self._pulse_elapsed_ms / self._PULSE_DURATION_MS
         self.update()
 
     def monitoring(self) -> bool:
         return self._monitoring
 
     # ────────────── 애니메이션 속성 ──────────────
-    def _get_pulse(self):
-        return self._pulse_progress
-
-    def _set_pulse(self, v):
-        self._pulse_progress = float(v)
-        self.update()
-
-    pulse_progress = pyqtProperty(float, fget=_get_pulse, fset=_set_pulse)
-
     def _get_scale(self):
         return self._scale
 
@@ -112,6 +117,36 @@ class CircleToggle(QWidget):
         self._scale_anim.start()
 
     # ────────────── 그리기 ──────────────
+    def _build_glow_pixmap(self) -> QPixmap:
+        """5겹 radial gradient 를 pixmap 으로 한 번만 렌더링해 캐싱."""
+        w, h = self.width(), self.height()
+        pm = QPixmap(w, h)
+        pm.fill(Qt.GlobalColor.transparent)
+        gp = QPainter(pm)
+        gp.setRenderHint(QPainter.RenderHint.Antialiasing)
+        cx = w / 2.0
+        cy = h / 2.0
+        outer_r = self._size / 2.0
+        glow_layers = [(28, 10), (22, 18), (16, 28), (10, 45), (5, 70)]
+        gp.setPen(Qt.PenStyle.NoPen)
+        for dr, alpha in glow_layers:
+            r = outer_r + dr
+            grad = QRadialGradient(cx, cy, r)
+            grad.setColorAt(0.0, QColor(89, 200, 134, 0))
+            inner_stop = (outer_r - 2) / r
+            grad.setColorAt(max(0.0, inner_stop), QColor(89, 200, 134, 0))
+            grad.setColorAt(min(1.0, inner_stop + 0.05), QColor(89, 200, 134, alpha))
+            grad.setColorAt(1.0, QColor(89, 200, 134, 0))
+            gp.setBrush(QBrush(grad))
+            gp.drawEllipse(QRectF(cx - r, cy - r, 2 * r, 2 * r))
+        gp.end()
+        return pm
+
+    def _build_icon_pixmap(self):
+        color = "#59c886" if self._monitoring else "#c1c4c9"
+        name = "Stop" if self._monitoring else "Play"
+        return _icpx(name, size=28, color=color, stroke_width=1.5)
+
     def paintEvent(self, event):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -128,36 +163,33 @@ class CircleToggle(QWidget):
         outer_r = self._size / 2.0   # 토글 원 반지름 60
         margin = self._glow_margin   # 32px glow 여백
 
-        # ── on 상태: 다층 radial gradient 로 뿌연 녹색 glow ──
+        # ── on 상태: 캐시된 glow pixmap + 애니메이션 pulse 링 ──
         if self._monitoring:
-            # 여러 겹 겹쳐서 부드러운 blur 효과
-            # 가장 먼 외곽부터 시작 (더 투명)
-            glow_layers = [
-                # (radius_delta, alpha)
-                (28, 10),
-                (22, 18),
-                (16, 28),
-                (10, 45),
-                (5,  70),
-            ]
-            p.setPen(Qt.PenStyle.NoPen)
-            for dr, alpha in glow_layers:
-                r = outer_r + dr
-                grad = QRadialGradient(cx, cy, r)
-                grad.setColorAt(0.0, QColor(89, 200, 134, 0))
-                # 안쪽까지 완전 투명 → 테두리 근처부터 불투명
-                inner_stop = (outer_r - 2) / r
-                grad.setColorAt(max(0.0, inner_stop), QColor(89, 200, 134, 0))
-                grad.setColorAt(min(1.0, inner_stop + 0.05), QColor(89, 200, 134, alpha))
-                grad.setColorAt(1.0, QColor(89, 200, 134, 0))
-                p.setBrush(QBrush(grad))
-                p.drawEllipse(QRectF(cx - r, cy - r, 2 * r, 2 * r))
+            if self._cached_glow is None:
+                self._cached_glow = self._build_glow_pixmap()
 
-            # ── pulse 링 (애니메이션) ──
             t = self._pulse_progress
-            pulse_scale = 0.9 + 0.35 * t
-            pulse_opacity = max(0.0, 0.5 * (1.0 - t))
-            pulse_alpha = int(255 * pulse_opacity * 0.5)
+            # 메인 glow 맥동: 충격 순간(t=0) 밝고 잔향으로 감에 따라 어두워짐
+            # ease-in 커브로 묵직하게 떨어짐
+            glow_breath = 0.70 + 0.30 * ((1.0 - t) ** 1.5)
+            p.setOpacity(glow_breath)
+            p.drawPixmap(0, 0, self._cached_glow)
+            p.setOpacity(1.0)
+
+            # ── pulse 링: 빠른 확장(attack) + 느긋한 잔향(decay) ──
+            if t < 0.22:
+                # attack: ease-out cubic, 밝게 등장
+                a = t / 0.22
+                ae = 1.0 - (1.0 - a) ** 3
+                pulse_scale = 0.82 + 0.38 * ae      # 0.82 → 1.20
+                alpha_factor = ae                     # 0 → 1
+            else:
+                # decay: 완만히 계속 확산, 느긋하게 페이드
+                d = (t - 0.22) / 0.78
+                pulse_scale = 1.20 + 0.50 * d        # 1.20 → 1.70
+                alpha_factor = (1.0 - d) ** 1.3      # 잔향이 오래 남도록 ease-out
+
+            pulse_alpha = int(255 * alpha_factor * 0.55)
             if pulse_alpha > 0:
                 pulse_pen = QPen(QColor(89, 200, 134, pulse_alpha))
                 pulse_pen.setWidth(2)
@@ -197,10 +229,9 @@ class CircleToggle(QWidget):
         p.setPen(inner_pen)
         p.drawEllipse(QRectF(cx - inner_r, cy - inner_r, 2 * inner_r, 2 * inner_r))
 
-        # ── 아이콘 (Play 또는 Stop) ──
-        icon_color = "#59c886" if self._monitoring else "#c1c4c9"
-        icon_name = "Stop" if self._monitoring else "Play"
-        icon_pm = _icpx(icon_name, size=28, color=icon_color, stroke_width=1.5)
-        p.drawPixmap(int(cx - 14), int(cy - 14), icon_pm)
+        # ── 아이콘 (Play 또는 Stop) — 매 프레임 SVG 파싱 방지 위해 캐싱 ──
+        if self._cached_icon is None:
+            self._cached_icon = self._build_icon_pixmap()
+        p.drawPixmap(int(cx - 14), int(cy - 14), self._cached_icon)
 
         p.end()

@@ -1433,7 +1433,46 @@ class GroupCard(GlassFrame):
         self.mapping_widget.setVisible(False)
         body_layout.addWidget(self.mapping_widget)
 
-        # group-sub-actions 바 완전 제거 (사용자 요청)
+        # ── 선적서류 등 수동 첨부용 [파일 추가] 버튼 ──
+        _sub_sep = QFrame()
+        _sub_sep.setFixedHeight(1)
+        _sub_sep.setStyleSheet(f"background-color: {_CT['border_soft']}; border: none;")
+        body_layout.addWidget(_sub_sep)
+
+        _sub_actions = QHBoxLayout()
+        _sub_actions.setContentsMargins(0, 4, 0, 0)
+        _sub_actions.setSpacing(6)
+
+        self.btn_sub_add = QPushButton("  파일 추가")
+        try:
+            self.btn_sub_add.setIcon(_QIcon(_icpx("Plus", size=13, color=_CT['fg_2'])))
+            self.btn_sub_add.setIconSize(_QSize(13, 13))
+        except Exception:
+            pass
+        self.btn_sub_add.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_sub_add.setToolTip("선적서류 등 BL에 직접 매칭되지 않은 파일을 수동 첨부")
+        self.btn_sub_add.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {_CT['fg_2']};
+                border: 1px solid transparent;
+                border-radius: 6px;
+                padding: 5px 10px;
+                font-family: 'Pretendard','Malgun Gothic','Segoe UI',sans-serif;
+                font-size: 8.5pt;
+                font-weight: 500;
+                text-align: center;
+            }}
+            QPushButton:hover {{
+                background-color: {_CT['bg_3']};
+                color: {_CT['fg_0']};
+            }}
+        """)
+        self.btn_sub_add.clicked.connect(self._sub_action_add_file)
+        _sub_actions.addWidget(self.btn_sub_add)
+        _sub_actions.addStretch(1)
+
+        body_layout.addLayout(_sub_actions)
 
         self.layout.addWidget(self.body_widget)
 

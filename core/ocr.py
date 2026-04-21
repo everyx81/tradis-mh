@@ -199,7 +199,14 @@ class GeminiOCR:
         return os.path.join(data_dir, ".analysis_cache.json")
 
     def _get_cached_result(self, fp):
-        """캐시에서 결과 조회"""
+        """캐시에서 결과 조회.
+
+        무효화 규칙:
+        - 파일 크기가 다르면 무효 (내용 변경)
+        - 크기 같으면 유효 (cross-volume 이동으로 mtime 만 바뀐 경우 보호)
+        - size 필드 없는 구 캐시는 mtime fallback
+        - mtime 이 더 최신이면 캐시에 반영 (다음 조회 속도 향상)
+        """
         try:
             cache_path = self._get_cache_path(fp)
             if not os.path.exists(cache_path):
@@ -216,14 +223,28 @@ class GeminiOCR:
             file_mtime = os.path.getmtime(fp)
             file_size = os.path.getsize(fp)
 
-            # 수정시간이 변경됐으면 캐시 무효
-            if file_mtime > entry.get('mtime', 0):
-                return None
-            # 파일 크기가 다르면 캐시 무효 (동명 파일 교체 감지)
-            # 단, 기존 캐시(size 필드 없음)는 하위 호환을 위해 통과
             cached_size = entry.get('size')
-            if cached_size is not None and file_size != cached_size:
-                return None
+            if cached_size is not None:
+                # 크기 기반 검증 (우선)
+                if file_size != cached_size:
+                    return None  # 크기 다름 → 내용 변경 확정 → 무효
+                # 크기 같음 → 내용 동일 → 유효
+                # mtime 이 다르면 캐시에 반영 (서버 이동으로 mtime 만 바뀐 경우 자동 동기화)
+                if file_mtime != entry.get('mtime', 0):
+                    with cache_lock:
+                        try:
+                            with open(cache_path, 'r', encoding='utf-8') as _rf:
+                                _cache = json.load(_rf)
+                            if filename in _cache:
+                                _cache[filename]['mtime'] = file_mtime
+                                with open(cache_path, 'w', encoding='utf-8') as _wf:
+                                    json.dump(_cache, _wf, ensure_ascii=False, separators=(',', ':'))
+                        except Exception:
+                            pass
+            else:
+                # 구 캐시 (size 필드 없음) — mtime 으로만 검증
+                if file_mtime > entry.get('mtime', 0):
+                    return None
 
             result = entry.get('result')
             # 기존 캐시에 정규화되지 않은 doc_type이 있으면 로드 시점에 정규화

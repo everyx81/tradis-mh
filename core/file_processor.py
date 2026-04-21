@@ -388,49 +388,181 @@ class AutoRenamer:
             else:
                 uncl.append(f)
         for k, v in groups.items():
-            cs = v.pop('company_set')
+            cs = v['company_set']  # 매칭에 재사용하기 위해 유지 (pop 대신)
             v['company'] = ", ".join(sorted(list(cs))[:2]) if cs else "Unknown"
 
         # ═══════════════════════════════════════════════
         # 미분류_{doctype}_{company}_{amount}.pdf 파일을
-        # 회사명 매칭으로 해당 BL 그룹의 빈 고정 슬롯에 자동 할당
+        # 회사명 (+ 비용계산서는 금액도) 매칭으로 BL 그룹에 자동 할당
+        #
+        # 분류 전략 (v1.1.8):
+        #  - 고정 슬롯 (FIXED_SLOT): 1 BL 당 1개씩만 있는 문서
+        #    → 회사명 매칭만으로 충분 (신고필증/정산서/수입세금계산서/납부고지서)
+        #  - 비용 계산서 (COST_DOCTYPES): 창고료/운송료/항공운임/보험료 등
+        #    → 회사명 + 금액이 정산서의 billing_items 에 포함되어야 매칭
+        #      (같은 회사가 여러 BL 있을 때 엉뚱한 BL 로 가는 것 방지)
+        #  - 정규화 비대칭 수정: 파일 측에도 cleanup_company_name 적용
+        #  - company_set 전체 순회 ([:2] 축약본 대신)
+        #  - placeholder (Unknown/알수없는상호) 는 매칭 제외
         # ═══════════════════════════════════════════════
         import re as _re
-        _FIXED_MATCHABLE = ["수입세금계산서", "납부고지서", "자금정산서", "정산서",
-                             "수입신고필증", "수출신고필증", "반송신고필증"]
+        from core.validator import parse_amount as _parse_amount, build_search_kws as _build_search_kws
+        _GENERIC_COMPANIES = {"Unknown", "알수없는상호", "알수없는", "미상", ""}
+        _FIXED_SLOT = {"수입세금계산서", "납부고지서", "자금정산서", "정산서",
+                        "수입신고필증", "수출신고필증", "반송신고필증"}
+        _SETTLEMENT_KEYS = ("자금정산서", "정산서")
         _uncl_moved = []
+
+        def _find_settlement_cached(bl_data):
+            """BL 의 정산서 OCR 캐시 + items 리스트 반환. 없으면 (None, None, [])."""
+            for sk in _SETTLEMENT_KEYS:
+                if sk in bl_data.get('docs', {}):
+                    settlement_fn = bl_data['docs'][sk]
+                    try:
+                        cached = gemini_ocr._get_cached_result(os.path.join(dr, settlement_fn))
+                    except Exception:
+                        cached = None
+                    # 정산서는 비용 항목을 merge_info.expense_items 에 저장 (billing_items 가 아님).
+                    # 하위호환 위해 billing_items 도 fallback 으로 확인.
+                    items = []
+                    if cached:
+                        ei = cached.get('merge_info', {}).get('expense_items', [])
+                        bi = cached.get('billing_items', [])
+                        items = ei if ei else bi
+                    return settlement_fn, cached, items
+            return None, None, []
+
+        def _is_requirement_doc(doctype):
+            """요건 증빙서류 여부 (식물검역/식품검역/동물검역/적합성평가/CITES)."""
+            return any(kw in doctype for kw in REQUIREMENT_DOC_KEYWORDS)
+
+        def _company_match(bl_data, file_company):
+            for bc in bl_data.get('company_set', set()):
+                bc_clean = cleanup_company_name(bc)
+                if not bc_clean or bc_clean in _GENERIC_COMPANIES:
+                    continue
+                if file_company in bc_clean or bc_clean in file_company:
+                    return True
+            return False
+
         for f in list(uncl):
             if not f.startswith("미분류_"):
                 continue
-            # 미분류_{doctype}_{company}_{amount}.pdf 또는 미분류_{doctype}_{company}_확인필요.pdf
-            m = _re.match(r'^미분류_([^_]+)_(.+?)_(?:\d+|확인필요|[^_]+)\.pdf$', f, _re.IGNORECASE)
+            m = _re.match(r'^미분류_([^_]+)_(.+?)_(\d+|확인필요|[^_]+)\.pdf$', f, _re.IGNORECASE)
             if not m:
                 continue
             file_doctype = m.group(1).strip()
-            file_company = m.group(2).strip()
-            if file_doctype not in _FIXED_MATCHABLE:
+            file_company_raw = m.group(2).strip()
+            file_suffix = m.group(3).strip()
+            if not file_company_raw:
                 continue
-            if not file_company:
+            file_company = cleanup_company_name(file_company_raw)
+            if not file_company or file_company in _GENERIC_COMPANIES:
                 continue
+            try:
+                file_amount = int(file_suffix)
+            except (TypeError, ValueError):
+                file_amount = 0
 
-            # 회사명이 일치하면서 해당 doc_type 슬롯이 비어 있는 BL 그룹 찾기
-            candidates = []
+            is_fixed = file_doctype in _FIXED_SLOT
+            is_req = _is_requirement_doc(file_doctype)
+            category = "FIXED" if is_fixed else ("REQ" if is_req else "COST")
+
+            # 카테고리별 후보 수집
+            # Tier1: 엄격 (회사+데이터 검증 통과)
+            # Tier2: 차선 (회사만 OK 인데 정산서 데이터 부족)
+            # Tier3: 금액-only (회사명은 안 맞지만 금액+항목이 유일하게 매칭)
+            tier1 = []  # strict
+            tier2 = []  # loose (settlement data missing)
+            tier3 = []  # amount-only fallback (company inconsistent)
+
             for bl_id, bl_data in groups.items():
                 if file_doctype in bl_data.get('docs', {}):
-                    continue  # 이미 슬롯 채워짐
-                group_company = bl_data.get('company', '') or ''
-                # 회사명 부분 매칭 (양방향, 공백 제거)
-                gc_clean = group_company.replace(" ", "")
-                fc_clean = file_company.replace(" ", "")
-                if fc_clean and gc_clean and (fc_clean in gc_clean or gc_clean in fc_clean):
-                    candidates.append(bl_id)
+                    continue
+                comp_ok = _company_match(bl_data, file_company)
 
-            # 후보가 정확히 1개일 때만 자동 할당 (여러 그룹이면 애매 → 사용자 판단)
-            if len(candidates) == 1:
-                target_bl = candidates[0]
-                groups[target_bl].setdefault('docs', {})[file_doctype] = f
+                # FIXED: 회사명만
+                if is_fixed:
+                    if comp_ok:
+                        tier1.append(bl_id)
+                    continue
+
+                # REQ: 회사명 + 정산서 items 에 doctype 키워드 존재
+                if is_req:
+                    if not comp_ok:
+                        continue
+                    settlement_fn, cached, items = _find_settlement_cached(bl_data)
+                    if not cached:
+                        tier2.append(bl_id)
+                        continue
+                    if not items:
+                        tier2.append(bl_id)
+                        continue
+                    # doctype 에 포함된 요건 키워드가 정산서 항목명에 존재?
+                    req_kws_in_doc = [k for k in REQUIREMENT_DOC_KEYWORDS if k in file_doctype]
+                    found_kw = False
+                    for bi in items:
+                        bi_name = bi.get('name', '')
+                        if any(k in bi_name for k in req_kws_in_doc):
+                            found_kw = True
+                            break
+                    if found_kw:
+                        tier1.append(bl_id)
+                    continue
+
+                # COST: 회사명 + 대응 항목 금액 일치
+                settlement_fn, cached, items = _find_settlement_cached(bl_data)
+                if not cached:
+                    if comp_ok:
+                        tier2.append(bl_id)
+                    continue
+                search_kws = _build_search_kws(file_doctype)
+
+                # 해당 doctype 항목들의 금액
+                matching_amts = []
+                for bi in items:
+                    bi_name = bi.get('name', '').upper().replace(' ', '')
+                    if not bi_name:
+                        continue
+                    if any(kw and (kw in bi_name or bi_name in kw) for kw in search_kws):
+                        matching_amts.append(_parse_amount(bi.get('amount', 0)))
+
+                if not items:
+                    # 정산서 항목이 비어있음 (OCR 데이터 이슈) — 회사 일치하면 tier2
+                    if comp_ok:
+                        tier2.append(bl_id)
+                    continue
+
+                if comp_ok and file_amount > 0 and file_amount in matching_amts:
+                    tier1.append(bl_id)
+                    continue
+
+                # 회사 불일치지만 금액이 일치하면 tier3 (영문/한글 이명 케이스 커버)
+                if not comp_ok and file_amount > 0 and file_amount in matching_amts:
+                    tier3.append(bl_id)
+                    continue
+
+                # 회사는 맞지만 금액이 안 맞음 → 매칭 안 함 (tier 에 포함 X)
+
+            # Tier 선택: 1 > 2 > 3, 각 tier 에서 정확히 1개일 때만
+            chosen = None
+            chosen_tier = None
+            if len(tier1) == 1:
+                chosen, chosen_tier = tier1[0], "tier1"
+            elif len(tier1) == 0 and len(tier2) == 1:
+                chosen, chosen_tier = tier2[0], "tier2"
+            elif len(tier1) == 0 and len(tier2) == 0 and len(tier3) == 1:
+                chosen, chosen_tier = tier3[0], "tier3"
+
+
+            if chosen:
+                groups[chosen].setdefault('docs', {})[file_doctype] = f
                 _uncl_moved.append(f)
-                self.log(f" -> [자동 매칭] 미분류 → {target_bl} / {file_doctype}: {f}")
+                self.log(f" -> [자동 매칭/{chosen_tier}] 미분류 → {chosen} / {file_doctype}: {f}")
+
+        # 매칭이 끝나면 company_set 정리 (UI 기대 스키마 유지)
+        for k, v in groups.items():
+            v.pop('company_set', None)
 
         # 매칭된 파일은 uncl에서 제거
         for f in _uncl_moved:

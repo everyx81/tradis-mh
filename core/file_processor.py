@@ -537,6 +537,16 @@ class AutoRenamer:
                     tier1.append(bl_id)
                     continue
 
+                # 회사 OK + doctype 이름 매칭 안 됨 + 금액이 정산서 항목 중 정확히 1개와 일치
+                # → generic doctype (전자세금계산서/세금계산서/계산서) 케이스 보완
+                #   AI 가 카테고리에 없는 영수증을 그대로 "전자세금계산서" 로 반환할 때,
+                #   회사 일치 + 금액 유일성으로 안전하게 매칭
+                if comp_ok and file_amount > 0:
+                    all_amts = [_parse_amount(bi.get('amount', 0)) for bi in items]
+                    if all_amts.count(file_amount) == 1:
+                        tier1.append(bl_id)
+                        continue
+
                 # 회사 불일치지만 금액이 일치하면 tier3 (영문/한글 이명 케이스 커버)
                 if not comp_ok and file_amount > 0 and file_amount in matching_amts:
                     tier3.append(bl_id)

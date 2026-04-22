@@ -156,8 +156,9 @@ class GeminiOCR:
         try:
             from google.genai import types
 
-            with open(fp, 'rb') as f:
-                pdf_bytes = f.read()
+            # 토큰 절약: 다중 페이지 PDF 는 1페이지만 추출해 전송
+            # (페이지당 ~258 토큰 절감, 5페이지 → 1페이지 시 ~1,000 토큰 절약)
+            pdf_bytes = self._extract_first_page_bytes(fp)
 
             if not pdf_bytes:
                 return {"company_name": "Unknown", "identifier": "Unknown", "id_type": "Unknown", "doc_type": "Unknown"}
@@ -189,6 +190,36 @@ class GeminiOCR:
         except Exception as e:
             print(f"AI 분석 오류: {e}")
             return {"company_name": "Unknown", "identifier": "Unknown", "id_type": "Unknown", "doc_type": "Unknown"}
+
+    def _extract_first_page_bytes(self, fp):
+        """1페이지 PDF 바이트 반환. 단일 페이지 PDF 는 원본 바이트 그대로.
+        토큰 비용 절감 목적 (Gemini PDF 페이지당 ~258 토큰).
+        실패 시 원본 PDF 바이트 fallback."""
+        try:
+            import pypdfium2 as pdfium
+            import io as _io
+            src = pdfium.PdfDocument(fp)
+            try:
+                if len(src) <= 1:
+                    with open(fp, 'rb') as f:
+                        return f.read()
+                dst = pdfium.PdfDocument.new()
+                try:
+                    dst.import_pages(src, [0])
+                    buf = _io.BytesIO()
+                    dst.save(buf)
+                    return buf.getvalue()
+                finally:
+                    dst.close()
+            finally:
+                src.close()
+        except Exception as e:
+            print(f"[OCR] 1페이지 추출 실패, 원본 사용: {e}")
+            try:
+                with open(fp, 'rb') as f:
+                    return f.read()
+            except Exception:
+                return None
 
     def _get_cache_path(self, fp):
         """캐시 파일 경로 반환"""

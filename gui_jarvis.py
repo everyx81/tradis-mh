@@ -2428,6 +2428,10 @@ class JarvisGUI(QMainWindow):
                 self._refresh_filter_counts()
                 return
 
+            # 1차 패스: 카드로 만들 그룹 / 미분류로 합산할 그룹 분리.
+            # (단일 루프에서 unclassified 를 mutate 하면서 카드 생성하면 먼저 만들어진
+            #  카드가 이후 추가된 미분류 파일을 못 봄 → 행추가 콤보에서 누락. 2-패스 처리)
+            cardable_groups = {}
             for text_id, data in groups.items():
                 docs = data.get('docs', {})
                 has_statement = '자금정산서' in docs or '정산서' in docs
@@ -2435,11 +2439,14 @@ class JarvisGUI(QMainWindow):
                 is_import = any('수입신고필증' in v for v in docs.values())
                 if not has_statement and not is_export and not is_import:
                     self.emit_log(f"[건너뜀] {text_id}: 자금정산서/신고필증 없음 — 미분류로 이동")
-                    # 카드로 표시되지 않는 그룹의 파일들을 미분류에 추가 (사용자 요청)
                     for _fn in docs.values():
                         if _fn and _fn not in unclassified:
                             unclassified.append(_fn)
                     continue
+                cardable_groups[text_id] = data
+
+            # 2차 패스: 최종 unclassified 가 확정된 후 카드 생성
+            for text_id, data in cardable_groups.items():
                 try:
                     card = GroupCard(self, self.renamer, directory, text_id, data, unclassified)
                     self.merge_layout.addWidget(card)

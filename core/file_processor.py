@@ -216,6 +216,37 @@ class AutoRenamer:
                 if dt != "Unknown" or cn != "Unknown":
                     self.log(f" -> [OCR 재시도 성공] {dt} / {cn} / {iden}")
 
+            # [NEW] BL 만 Unknown 인 경우 1회 재시도 (AI 비결정성 대응)
+            # 자금청구서/정산서 등 일부 문서에서 BL 필드 인식이 간헐적으로 실패 → 재OCR 시 성공하는 케이스
+            elif iden == "Unknown" and dt != "Unknown" and cn != "Unknown":
+                self.log(f" -> [OCR 재시도] BL 만 Unknown - 재분석: {fn}")
+                time.sleep(2)
+                cache_path = gemini_ocr._get_cache_path(fp)
+                if os.path.exists(cache_path):
+                    try:
+                        import json as _json
+                        with open(cache_path, 'r', encoding='utf-8') as _cf:
+                            _cache = _json.load(_cf)
+                        _keys = [k for k in _cache if os.path.basename(fp) in k]
+                        for _k in _keys:
+                            del _cache[_k]
+                        with open(cache_path, 'w', encoding='utf-8') as _cf:
+                            _json.dump(_cache, _cf, ensure_ascii=False)
+                    except Exception:
+                        pass
+                res2 = extract_document_info_ai(fp)
+                new_iden = res2.get("identifier", "Unknown")
+                if new_iden != "Unknown":
+                    iden = new_iden
+                    # doctype/company 도 새 결과로 업데이트 (일관성 유지)
+                    new_dt = res2.get("doc_type", "Unknown")
+                    new_cn = res2.get("company_name", "Unknown")
+                    if new_dt != "Unknown":
+                        dt = new_dt
+                    if new_cn != "Unknown":
+                        cn = new_cn
+                    self.log(f" -> [OCR 재시도 성공] BL 확보: {new_iden}")
+
             # 수입자명이 전체 영문인지 판단 (한글이 포함되지 않음)
             # cn이 "Unknown"이면 무시하고 판별
             import re

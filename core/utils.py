@@ -158,6 +158,19 @@ def is_similar_id(id1: str, id2: str, threshold: float = 0.75) -> bool:
     u1, u2 = id1.replace(" ", "").upper(), id2.replace(" ", "").upper()
     if u1 == u2:
         return True
+
+    # 하이픈 구분 ID (예: B260424-1, INVOICE-001 등) — 각 세그먼트 정확 일치 필수
+    # prefix 유사도 매칭에 현혹되어 다른 날짜 BL 이 같은 그룹에 묶이는 문제 방지
+    # (예: B260420-1 vs B260424-1 은 prefix 87.5% 유사하지만 다른 건)
+    if '-' in u1 or '-' in u2:
+        n1_hy = normalize_id(id1)
+        n2_hy = normalize_id(id2)
+        parts1 = n1_hy.split('-')
+        parts2 = n2_hy.split('-')
+        if len(parts1) != len(parts2):
+            return False
+        return all(p1 == p2 for p1, p2 in zip(parts1, parts2))
+
     # 한쪽이 순수 숫자이고, 다른 쪽이 영문+숫자이며 숫자 부분이 일치하면 같은 BL
     if u1.isdigit() or u2.isdigit():
         num_only, full = (u1, u2) if u1.isdigit() else (u2, u1)

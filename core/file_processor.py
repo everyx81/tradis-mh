@@ -519,8 +519,9 @@ class AutoRenamer:
             tier3 = []  # amount-only fallback (company inconsistent)
 
             for bl_id, bl_data in groups.items():
-                if file_doctype in bl_data.get('docs', {}):
-                    continue
+                # [Plan B] 슬롯 이미 채워짐 체크 제거 —
+                # AI 가 doctype 을 잘못 분류한 경우에도 회사+금액 유일성으로 매칭 시도 가능.
+                # 매칭 확정 시 counter 키 (예: 통관수수료계산서(1)) 로 저장.
                 comp_ok = _company_match(bl_data, file_company)
 
                 # FIXED: 회사명만
@@ -606,11 +607,18 @@ class AutoRenamer:
             elif len(tier1) == 0 and len(tier2) == 0 and len(tier3) == 1:
                 chosen, chosen_tier = tier3[0], "tier3"
 
-
             if chosen:
-                groups[chosen].setdefault('docs', {})[file_doctype] = f
+                # [Plan B] 슬롯 이미 채워졌으면 counter 키로 저장
+                #   예: 첫 파일 → "통관수수료계산서", 둘째 → "통관수수료계산서(1)"
+                docs = groups[chosen].setdefault('docs', {})
+                doc_key = file_doctype
+                counter = 1
+                while doc_key in docs:
+                    doc_key = f"{file_doctype}({counter})"
+                    counter += 1
+                docs[doc_key] = f
                 _uncl_moved.append(f)
-                self.log(f" -> [자동 매칭/{chosen_tier}] 미분류 → {chosen} / {file_doctype}: {f}")
+                self.log(f" -> [자동 매칭/{chosen_tier}] 미분류 → {chosen} / {doc_key}: {f}")
 
         # 매칭이 끝나면 company_set 정리 (UI 기대 스키마 유지)
         for k, v in groups.items():

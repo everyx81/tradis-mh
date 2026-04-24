@@ -2363,13 +2363,13 @@ class JarvisGUI(QMainWindow):
             self.lbl_log_count.setText(str(self.log_area.document().blockCount()))
 
         # Claude Design handoff_2: 메시지 내용 파싱해서 통계 카운트 증가
-        # - 처리: [성공] (이름 변경 성공)
+        # - 처리: [성공] / [미분류 처리] (이름 변경 완료)
         # - 대기: [AI 분석 대기/시작] (분석 시작했지만 아직 결과 없음)
         # - 오류: [오류] / [실패]
         if hasattr(self, '_today_stats'):
             try:
-                if "[성공]" in msg:
-                    # 이름 변경 성공 → 처리됨 증가, 대기중 감소
+                if "[성공]" in msg or "[미분류 처리]" in msg:
+                    # 이름 변경 완료 (정상 또는 미분류) → 처리됨 증가, 대기중 감소
                     self._today_stats["processed"] = self._today_stats.get("processed", 0) + 1
                     if self._today_stats.get("pending", 0) > 0:
                         self._today_stats["pending"] -= 1

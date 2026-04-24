@@ -1970,7 +1970,8 @@ class GroupCard(GlassFrame):
                     # 같은 키워드의 파일 사용 횟수 추적 (N:N 매칭 지원)
                     from core.constants import EXPENSE_SYNONYMS, FEE_INVOICE_ITEMS, FIXED_SLOT_KEYS
                     from core.validator import parse_amount, build_search_kws
-                    used_files = []  # 이미 매칭에 사용된 파일 추적
+                    used_files = []  # 파일명 키워드 매칭에 사용된 파일 추적
+                    used_bi_map = {}  # {filename: set(used_billing_item_indices)} — 한 파일의 billing_items 를 복수 아이템이 나눠쓰는 케이스 지원
 
                     for item_data in expense_list:
                         if not item_data:
@@ -2015,23 +2016,31 @@ class GroupCard(GlassFrame):
 
                         # billing_items 기반 콘텐츠 매칭 (파일명 키워드 실패 시)
                         # 조건: 키워드 + 금액 동시 일치해야 매칭 (오판 방지)
+                        # used_files 대신 billing_item 인덱스 단위로 사용 추적 →
+                        # 한 파일에 다른 카테고리 billing_item 이 여러 개 있어도 각각 매칭 가능
+                        # (예: 창고료계산서 안에 창고료 + 운송료 billing_item 이 있으면 둘 다 매칭)
                         if not found:
                             item_amt_for_bi = parse_amount(item_data.get("amount", 0) if isinstance(item_data, dict) else 0)
                             fixed_keys = {"자금정산서", "정산서", "수입신고필증", "수출신고필증", "반송신고필증", "납부고지서", "수입세금계산서"}
                             for doc_key, v in docs.items():
-                                if v in used_files or doc_key in fixed_keys:
+                                if doc_key in fixed_keys:
                                     continue
                                 fp = os.path.join(self.directory, v)
                                 f_cached = gemini_ocr._get_cached_result(fp)
                                 if f_cached:
-                                    for bi in f_cached.get('billing_items', []):
+                                    used_idx = used_bi_map.setdefault(v, set())
+                                    for bi_idx, bi in enumerate(f_cached.get('billing_items', [])):
+                                        if bi_idx in used_idx:
+                                            continue  # 이미 다른 아이템이 사용한 billing_item
                                         bi_upper = bi.get('name', '').upper().replace(' ', '')
                                         bi_amt = parse_amount(bi.get('amount', 0))
                                         kw_match = any(kw in bi_upper or bi_upper in kw for kw in search_kws)
                                         amt_match = (item_amt_for_bi > 0 and bi_amt > 0 and item_amt_for_bi == bi_amt)
                                         if kw_match and amt_match:
                                             found = True
-                                            used_files.append(v)
+                                            used_idx.add(bi_idx)
+                                            if v not in used_files:
+                                                used_files.append(v)
                                             break
                                 if found:
                                     break

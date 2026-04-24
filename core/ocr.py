@@ -10,9 +10,26 @@ import io
 import json
 import time
 import threading
+import hashlib
 
 from .config import get_client
 from .utils import pdf_lock, cache_lock
+
+
+def _compute_file_hash(fp):
+    """파일 내용 해시 반환 (md5, 16진수 문자열).
+    PDF 수정(금액 변경 등) 시 size 가 같아도 해시는 달라지므로 정확한 내용 비교 가능."""
+    try:
+        h = hashlib.md5()
+        with open(fp, 'rb') as f:
+            while True:
+                chunk = f.read(65536)
+                if not chunk:
+                    break
+                h.update(chunk)
+        return h.hexdigest()
+    except Exception:
+        return None
 
 
 class GeminiOCR:
@@ -249,11 +266,11 @@ class GeminiOCR:
     def _get_cached_result(self, fp):
         """캐시에서 결과 조회.
 
-        무효화 규칙:
-        - 파일 크기가 다르면 무효 (내용 변경)
-        - 크기 같으면 유효 (cross-volume 이동으로 mtime 만 바뀐 경우 보호)
-        - size 필드 없는 구 캐시는 mtime fallback
-        - mtime 이 더 최신이면 캐시에 반영 (다음 조회 속도 향상)
+        무효화 규칙 (우선순위):
+        1. hash 필드 있으면: 파일 내용 해시 비교 (내용 변경 100% 감지, cross-volume 이동 보호)
+        2. hash 없고 size 있으면: 크기 비교 (v1.1.8~ 구 캐시 하위호환)
+        3. hash/size 모두 없으면: mtime 비교 (최초기 캐시 하위호환)
+        hash 미존재 엔트리는 다음 OCR 시 자동으로 해시 포함 버전으로 교체됨.
         """
         try:
             cache_path = self._get_cache_path(fp)
@@ -271,13 +288,30 @@ class GeminiOCR:
             file_mtime = os.path.getmtime(fp)
             file_size = os.path.getsize(fp)
 
+            cached_hash = entry.get('hash')
             cached_size = entry.get('size')
-            if cached_size is not None:
-                # 크기 기반 검증 (우선)
+
+            if cached_hash is not None:
+                # 해시 기반 검증 (가장 정확)
+                file_hash = _compute_file_hash(fp)
+                if file_hash is None or file_hash != cached_hash:
+                    return None  # 내용 변경 또는 해시 계산 실패 → 무효
+                # 내용 동일 → 유효. mtime 이 다르면 비동기 반영 (서버 이동 등)
+                if file_mtime != entry.get('mtime', 0):
+                    with cache_lock:
+                        try:
+                            with open(cache_path, 'r', encoding='utf-8') as _rf:
+                                _cache = json.load(_rf)
+                            if filename in _cache:
+                                _cache[filename]['mtime'] = file_mtime
+                                with open(cache_path, 'w', encoding='utf-8') as _wf:
+                                    json.dump(_cache, _wf, ensure_ascii=False, separators=(',', ':'))
+                        except Exception:
+                            pass
+            elif cached_size is not None:
+                # 구 캐시 (hash 없음) — 크기로 검증 + 다음 OCR 시 자동 해시화
                 if file_size != cached_size:
-                    return None  # 크기 다름 → 내용 변경 확정 → 무효
-                # 크기 같음 → 내용 동일 → 유효
-                # mtime 이 다르면 캐시에 반영 (서버 이동으로 mtime 만 바뀐 경우 자동 동기화)
+                    return None
                 if file_mtime != entry.get('mtime', 0):
                     with cache_lock:
                         try:
@@ -290,7 +324,7 @@ class GeminiOCR:
                         except Exception:
                             pass
             else:
-                # 구 캐시 (size 필드 없음) — mtime 으로만 검증
+                # 최초기 캐시 (size 도 없음) — mtime 으로만 검증
                 if file_mtime > entry.get('mtime', 0):
                     return None
 
@@ -325,13 +359,17 @@ class GeminiOCR:
                 filename = os.path.basename(fp)
                 file_mtime = os.path.getmtime(fp)
                 file_size = os.path.getsize(fp)
+                file_hash = _compute_file_hash(fp)
 
-                cache[filename] = {
+                entry = {
                     'mtime': file_mtime,
                     'size': file_size,
                     'cached_at': time.time(),
-                    'result': result
+                    'result': result,
                 }
+                if file_hash is not None:
+                    entry['hash'] = file_hash
+                cache[filename] = entry
 
                 if len(cache) > MAX_CACHE_SIZE:
                     # O(n) 방식으로 가장 오래된 항목 제거

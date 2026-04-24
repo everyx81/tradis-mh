@@ -173,6 +173,17 @@ class AutoRenamer:
 
             c, i, d, s = parse_renamed_filename(fn)
             if i:
+                # BL 이 이미 파일명에 있음 — 이름 변경 불필요
+                # 하지만 OCR 캐시가 없으면 billing_items 기반 매칭이 작동 안 하므로
+                # 캐시만 채우고 종료 (rename X, OCR O)
+                try:
+                    if gemini_ocr._get_cached_result(fp) is None:
+                        self.log(f"[재분석] BL 있지만 캐시 없음 - OCR 실행: {fn}")
+                        extract_document_info_ai(fp)  # _save_to_cache 자동 호출
+                        if self.rename_complete_callback:
+                            self.rename_complete_callback()
+                except Exception as e:
+                    self.log(f"[재분석 실패] {fn}: {e}")
                 return
 
             self.log(f"\n[AI 분석 대기/시작] {fn}")

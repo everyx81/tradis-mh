@@ -2031,7 +2031,7 @@ class GroupCard(GlassFrame):
                                     used_idx = used_bi_map.setdefault(v, set())
                                     for bi_idx, bi in enumerate(f_cached.get('billing_items', [])):
                                         if bi_idx in used_idx:
-                                            continue  # 이미 다른 아이템이 사용한 billing_item
+                                            continue
                                         bi_upper = bi.get('name', '').upper().replace(' ', '')
                                         bi_amt = parse_amount(bi.get('amount', 0))
                                         kw_match = any(kw in bi_upper or bi_upper in kw for kw in search_kws)
@@ -3403,7 +3403,8 @@ class GroupCard(GlassFrame):
             export_docs_root = getattr(parent.archiver, 'export_docs_root', '') if hasattr(parent, 'archiver') else ''
             success = self.renamer.execute_merge_task(_target_dir, output_name, archive_files,
                                            export_docs_root=export_docs_root, marked_files=marked,
-                                           merge_verify_callback=_merge_verify_cb)
+                                           merge_verify_callback=_merge_verify_cb,
+                                           archive_only=True)
             parent.merge_complete_signal.emit()
             # 첨부 파일 이동 실패 알림
             failed_attached = getattr(self.renamer, 'last_failed_attached', [])

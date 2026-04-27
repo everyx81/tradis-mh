@@ -1019,11 +1019,12 @@ class AutoRenamer:
         return m
 
     def execute_merge_task(self, dr, of, fo, export_docs_root=None, marked_files=None,
-                          merge_verify_callback=None):
+                          merge_verify_callback=None, archive_only=False):
         """병합 수행 후 파일 정리
 
         Args:
             merge_verify_callback: 검증 실패 시 호출. (failed_files, total, success) → "retry"|"ignore"|"cancel"
+            archive_only: True 면 병합 없이 모든 파일을 폴더로 이동만 수행 (정산서 없는 수출/수입건)
         Returns:
             True: 병합 성공, False: 취소됨
         실패 첨부 파일 목록은 self.last_failed_attached 속성에 저장됨 (호출자 조회).
@@ -1050,7 +1051,7 @@ class AutoRenamer:
         os.makedirs(archive_dir, exist_ok=True)
 
         try:
-            if len(fo) >= 2:
+            if not archive_only and len(fo) >= 2:
                 import fitz
                 from core.config import get_custom_naming
                 _naming = get_custom_naming()
@@ -1182,13 +1183,15 @@ class AutoRenamer:
                                 except Exception:
                                     pass
             else:
-                # 1개 (수출신고필증만): 병합 없이 원본을 폴더로 이동
+                # archive_only=True 또는 1개 파일: 병합 없이 원본을 폴더로 이동
                 for f in fo:
                     if f:
                         src = os.path.join(dr, f)
                         dst = os.path.join(archive_dir, f)
                         if os.path.exists(src) and not os.path.exists(dst):
                             shutil.move(src, dst)
+                if archive_only:
+                    self.log(f" -> [아카이브] {len(fo)}개 파일을 병합 없이 폴더로 이동")
 
             # ──── 마킹된 파일 이동 (관련 파일 수집보다 먼저 실행) ────
             moved_marked = set()  # 이미 이동된 파일명 추적

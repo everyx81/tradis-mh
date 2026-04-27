@@ -774,9 +774,13 @@ class IndependentCard(GlassFrame):
             self._delete_file(item)
 
     def _show_rename_dialog(self, old_name):
-        """Frosted Glass 스타일 이름 변경 다이얼로그"""
+        """Frosted Glass 스타일 이름 변경 다이얼로그 (확장자 자동 보존)"""
         from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QWidget, QGraphicsDropShadowEffect
         from PyQt6.QtGui import QFont
+
+        # 확장자 분리: 입력란에는 확장자 제외, 저장 시 자동으로 다시 붙임
+        base_name, ext = os.path.splitext(old_name)
+        display_name = base_name if ext else old_name
 
         dlg = QDialog(self)
         dlg.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
@@ -813,7 +817,7 @@ class IndependentCard(GlassFrame):
         lbl.setStyleSheet("color: #ffffff; background: transparent;")
         layout.addWidget(lbl)
 
-        input_name = QLineEdit(old_name)
+        input_name = QLineEdit(display_name)
         input_name.setFont(QFont("Segoe UI", 10))
         input_name.setStyleSheet(
             "background: rgba(20,25,35,200); color: #fff; border: 1px solid #555; "
@@ -853,7 +857,11 @@ class IndependentCard(GlassFrame):
 
         layout.addLayout(btn_row)
         dlg.exec()
-        return input_name.text().strip(), result["ok"]
+        # 확장자 자동 복원
+        new_text = input_name.text().strip()
+        if new_text and ext:
+            return new_text + ext, result["ok"]
+        return new_text, result["ok"]
 
     def _rename_file(self, item):
         """파일 이름 변경"""
@@ -926,6 +934,38 @@ class IndependentCard(GlassFrame):
             except Exception as e:
                 JarvisMessageBox.warning(self, "삭제 실패", str(e))
 
+def _cleanup_empty_marked_folders(parent, folders):
+    """폴더 정리 후 마킹된 원본 폴더가 비어 있으면 삭제.
+
+    - folders: GroupCard.marked_folders_to_cleanup 의 스냅샷 리스트
+    - 빈 폴더만 삭제 (남은 파일이 있으면 보존, 로그만 출력)
+    - parent: log 출력용 (emit_log 메서드 보유 객체)
+    """
+    if not folders:
+        return
+    import shutil as _shutil
+    for folder in folders:
+        try:
+            if not os.path.exists(folder):
+                continue
+            # 폴더 안에 남은 파일이 있는지 (재귀)
+            has_files = False
+            for _, _, files in os.walk(folder):
+                if files:
+                    has_files = True
+                    break
+            if not has_files:
+                _shutil.rmtree(folder)
+                if hasattr(parent, 'emit_log'):
+                    parent.emit_log(f"[폴더 정리] 빈 폴더 삭제: {os.path.basename(folder)}")
+            else:
+                if hasattr(parent, 'emit_log'):
+                    parent.emit_log(f"[폴더 정리 보류] {os.path.basename(folder)} (남은 파일 있음)")
+        except Exception as e:
+            if hasattr(parent, 'emit_log'):
+                parent.emit_log(f"[폴더 정리 실패] {os.path.basename(folder)}: {e}")
+
+
 class GroupCard(GlassFrame):
     # 상태 변경 시그널 (필터 카운트 갱신용)
     status_changed = pyqtSignal()
@@ -950,6 +990,7 @@ class GroupCard(GlassFrame):
         self.parent_widget = parent_widget
         self.mapping = []
         self.marked_files = []  # 마킹된 관련 파일 목록
+        self.marked_folders_to_cleanup = []  # 폴더 정리 후 삭제할 원본 폴더 목록
         self.is_collapsed = True  # 기본 접힘 (밀도 우선)
         self._status = 'gray'
         # 검증 상태 (문자열 파싱 대신 변수로 관리):
@@ -1443,7 +1484,7 @@ class GroupCard(GlassFrame):
         _sub_actions.setContentsMargins(0, 4, 0, 0)
         _sub_actions.setSpacing(6)
 
-        self.btn_sub_add = QPushButton("  파일 추가")
+        self.btn_sub_add = QPushButton("  파일/폴더 추가")
         try:
             self.btn_sub_add.setIcon(_QIcon(_icpx("Plus", size=13, color=_CT['fg_2'])))
             self.btn_sub_add.setIconSize(_QSize(13, 13))
@@ -3093,9 +3134,13 @@ class GroupCard(GlassFrame):
         self.parent_widget.emit_log(f"[클립보드 복사] {os.path.basename(path)}")
 
     def _show_rename_dialog(self, old_name):
-        """Frosted Glass 스타일 이름 변경 다이얼로그"""
+        """Frosted Glass 스타일 이름 변경 다이얼로그 (확장자 자동 보존)"""
         from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QWidget, QGraphicsDropShadowEffect
         from PyQt6.QtGui import QFont
+
+        # 확장자 분리: 입력란에는 확장자 제외, 저장 시 자동으로 다시 붙임
+        base_name, ext = os.path.splitext(old_name)
+        display_name = base_name if ext else old_name
 
         dlg = QDialog(self)
         dlg.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
@@ -3132,7 +3177,7 @@ class GroupCard(GlassFrame):
         lbl.setStyleSheet("color: #ffffff; background: transparent;")
         layout.addWidget(lbl)
 
-        input_name = QLineEdit(old_name)
+        input_name = QLineEdit(display_name)
         input_name.setFont(QFont("Segoe UI", 10))
         input_name.setStyleSheet(
             "background: rgba(20,25,35,200); color: #fff; border: 1px solid #555; "
@@ -3176,7 +3221,11 @@ class GroupCard(GlassFrame):
         layout.addLayout(btn_row)
         dlg.exec()
 
-        return input_name.text().strip(), result["ok"]
+        # 확장자 자동 복원
+        new_text = input_name.text().strip()
+        if new_text and ext:
+            return new_text + ext, result["ok"]
+        return new_text, result["ok"]
 
     def _fl_rename_by_path(self, old_path, old_name):
         """파일 이름 변경 + 카드 재스캔"""
@@ -3254,37 +3303,75 @@ class GroupCard(GlassFrame):
             row_widget.setStyleSheet("background: transparent;")
             self.marking_layout.addWidget(row_widget)
         
-        # 파일 추가 버튼 (NeonButton 통일)
-        btn_add = NeonButton("📁  파일 추가", color="cyan")
-        btn_add.setFixedWidth(120)
-        btn_add.clicked.connect(self._add_marking_files)
-        self.marking_layout.addWidget(btn_add)
+        # 파일/폴더 추가 버튼은 바깥쪽 btn_sub_add 가 항상 보이므로 여기서는 제거
+        # (중복 버튼 방지)
     
     def _add_marking_files(self):
-        """파일 대화상자로 마킹 파일 추가"""
-        from PyQt6.QtWidgets import QFileDialog
-        
+        """파일/폴더 다중 선택 다이얼로그로 마킹 추가"""
         export_docs_root = ''
         if hasattr(self.parent_widget, 'archiver'):
             export_docs_root = getattr(self.parent_widget.archiver, 'export_docs_root', '')
-        
+
         start_dir = export_docs_root if export_docs_root and os.path.exists(export_docs_root) else ""
-        
-        files, _ = QFileDialog.getOpenFileNames(
-            self, "추가할 파일 선택", start_dir,
-            "All Files (*.*);;PDF (*.pdf);;Excel (*.xlsx *.xls);;Images (*.jpg *.png *.bmp)"
-        )
-        
-        if files:
-            from core.open_file_detector import get_file_type_icon
-            for f in files:
-                name = os.path.basename(f)
-                # 중복 확인
+
+        dlg = FileFolderPickerDialog(self, start_dir=start_dir)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        paths = dlg.selected_paths()
+        if not paths:
+            return
+
+        self._process_added_paths(paths)
+
+    def _process_added_paths(self, paths):
+        """파일/폴더 경로 리스트를 마킹 목록에 처리.
+
+        - 파일: marked_files 에 직접 추가
+        - 폴더: 내부의 모든 파일을 재귀적으로 marked_files 에 추가하고,
+                폴더 자체는 marked_folders_to_cleanup 에 등록 (폴더 정리 후 빈 폴더 삭제)
+        """
+        from core.open_file_detector import get_file_type_icon
+
+        added_count = 0
+        for path in paths:
+            if not path or not os.path.exists(path):
+                continue
+
+            if os.path.isfile(path):
+                name = os.path.basename(path)
+                # 중복 확인 (이름 기준)
                 if any(mf['name'] == name for mf in self.marked_files):
                     continue
-                self.marked_files.append({'name': name, 'path': f, 'icon': get_file_type_icon(name)})
+                self.marked_files.append({
+                    'name': name, 'path': path, 'icon': get_file_type_icon(name),
+                })
+                added_count += 1
+            elif os.path.isdir(path):
+                # 폴더 내부의 모든 파일을 재귀적으로 추가
+                folder_added = 0
+                for root, dirs, files in os.walk(path):
+                    for f in files:
+                        full_path = os.path.join(root, f)
+                        if any(mf['name'] == f for mf in self.marked_files):
+                            continue
+                        self.marked_files.append({
+                            'name': f, 'path': full_path, 'icon': get_file_type_icon(f),
+                        })
+                        folder_added += 1
+                added_count += folder_added
+                # 폴더 정리 후 삭제할 대상으로 등록
+                if path not in self.marked_folders_to_cleanup:
+                    self.marked_folders_to_cleanup.append(path)
+                if hasattr(self.parent_widget, 'emit_log'):
+                    self.parent_widget.emit_log(
+                        f"[폴더 마킹] {os.path.basename(path)} ({folder_added}개 파일 추가)"
+                    )
+
+        if added_count:
             self._refresh_marking_display()
             self._run_amount_validation()
+
     
     def _remove_marking_file(self, index):
         """마킹 파일 제거"""
@@ -3399,6 +3486,9 @@ class GroupCard(GlassFrame):
             event.wait()
             return result['action']
 
+        # 빈 폴더 삭제용 — run_archive 시작 시점의 폴더 목록 캡처
+        _folders_to_cleanup = list(self.marked_folders_to_cleanup)
+
         def run_archive():
             export_docs_root = getattr(parent.archiver, 'export_docs_root', '') if hasattr(parent, 'archiver') else ''
             success = self.renamer.execute_merge_task(_target_dir, output_name, archive_files,
@@ -3411,6 +3501,8 @@ class GroupCard(GlassFrame):
             if failed_attached and hasattr(parent, 'move_failed_signal'):
                 parent.move_failed_signal.emit(failed_attached)
             if success:
+                # 폴더로 마킹 추가했던 원본 폴더 빈 상태이면 삭제
+                _cleanup_empty_marked_folders(parent, _folders_to_cleanup)
                 bl_folders = [d for d in os.listdir(_target_dir) if os.path.isdir(os.path.join(_target_dir, d)) and _bl_id in d]
                 if bl_folders and hasattr(parent, 'shipping_search_signal'):
                     target_folder = os.path.join(_target_dir, bl_folders[0])
@@ -3656,6 +3748,9 @@ class GroupCard(GlassFrame):
             event.wait()  # 메인 스레드 팝업 결과 대기
             return result['action']
 
+        # 빈 폴더 삭제용 — run_merge 시작 시점의 폴더 목록 캡처
+        _folders_to_cleanup = list(self.marked_folders_to_cleanup)
+
         def run_merge():
             export_docs_root = getattr(parent.archiver, 'export_docs_root', '') if hasattr(parent, 'archiver') else ''
             success = self.renamer.execute_merge_task(_target_dir, output_name, final_files,
@@ -3668,6 +3763,8 @@ class GroupCard(GlassFrame):
                 parent.move_failed_signal.emit(failed_attached)
             # 병합 성공 시에만 선적서류 검색
             if success:
+                # 폴더로 마킹 추가했던 원본 폴더 빈 상태이면 삭제
+                _cleanup_empty_marked_folders(parent, _folders_to_cleanup)
                 bl_folders = [d for d in os.listdir(_target_dir) if os.path.isdir(os.path.join(_target_dir, d)) and _bl_id in d]
                 if bl_folders and hasattr(parent, 'shipping_search_signal'):
                     target_folder = os.path.join(_target_dir, bl_folders[0])
@@ -3859,6 +3956,187 @@ class GroupCard(GlassFrame):
         self._validator_worker.start()
 
 
+class FileFolderPickerDialog(QDialog):
+    """파일과 폴더를 단일 다이얼로그에서 다중 선택하는 커스텀 피커 (Frosted Glass)"""
+
+    def __init__(self, parent=None, start_dir=""):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setMinimumSize(720, 520)
+        self.start_dir = start_dir if start_dir and os.path.isdir(start_dir) else os.path.expanduser("~")
+        self._drag_pos = None  # 창 이동용 드래그 시작 좌표
+        self._init_ui()
+
+    # ── 프레임리스 다이얼로그 마우스 드래그 이동 ──
+    def mousePressEvent(self, event):
+        """타이틀 영역 (상단 60px) 클릭 시 드래그 시작"""
+        if event.button() == Qt.MouseButton.LeftButton:
+            if event.position().y() < 60:
+                self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+                event.accept()
+                return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if (event.buttons() & Qt.MouseButton.LeftButton) and self._drag_pos is not None:
+            self.move(event.globalPosition().toPoint() - self._drag_pos)
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        self._drag_pos = None
+        super().mouseReleaseEvent(event)
+
+    def _init_ui(self):
+        from PyQt6.QtWidgets import (QGraphicsDropShadowEffect, QTreeView,
+                                     QAbstractItemView, QHeaderView)
+        from PyQt6.QtGui import QFont, QFileSystemModel
+
+        # 컨테이너 (Frosted Glass)
+        container = QWidget(self)
+        container.setObjectName("ff_picker_dlg")
+        container.setStyleSheet("""
+            #ff_picker_dlg {
+                background-color: rgba(45, 50, 60, 235);
+                border: 1px solid rgba(100, 110, 120, 0.5);
+                border-radius: 16px;
+            }
+        """)
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(25)
+        shadow.setXOffset(0)
+        shadow.setYOffset(4)
+        shadow.setColor(Qt.GlobalColor.black)
+        container.setGraphicsEffect(shadow)
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(8, 8, 8, 8)
+        outer.addWidget(container)
+
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
+
+        # 타이틀
+        lbl_title = QLabel("추가할 파일 또는 폴더 선택  (Ctrl/Shift 다중 선택 가능)")
+        lbl_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl_title.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
+        lbl_title.setStyleSheet("color: #ffffff; background: transparent;")
+        layout.addWidget(lbl_title)
+
+        # 현재 경로 표시 + 상위 폴더 버튼
+        path_row = QHBoxLayout()
+        path_row.setSpacing(6)
+        self.btn_up = QPushButton("⬆ 상위 폴더")
+        self.btn_up.setFixedHeight(28)
+        self.btn_up.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_up.setStyleSheet("""
+            QPushButton { background-color: rgba(70,75,85,180); border: 1px solid rgba(120,125,135,0.4);
+                border-radius: 6px; color: #fff; padding: 4px 10px; font-size: 9pt; }
+            QPushButton:hover { background-color: rgba(90,95,105,200); }
+        """)
+        self.btn_up.clicked.connect(self._go_up)
+        path_row.addWidget(self.btn_up)
+
+        self.lbl_path = QLabel(self.start_dir)
+        self.lbl_path.setFont(QFont("Segoe UI", 9))
+        self.lbl_path.setStyleSheet("color: rgba(255,255,255,0.6); background: transparent; padding: 4px 8px;")
+        path_row.addWidget(self.lbl_path, stretch=1)
+        layout.addLayout(path_row)
+
+        # 트리뷰 + QFileSystemModel
+        self.model = QFileSystemModel()
+        self.model.setRootPath(self.start_dir)
+
+        self.tree = QTreeView()
+        self.tree.setModel(self.model)
+        self.tree.setRootIndex(self.model.index(self.start_dir))
+        self.tree.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.tree.setStyleSheet("""
+            QTreeView {
+                background-color: rgba(20, 25, 35, 220);
+                color: #fff;
+                border: 1px solid #555;
+                border-radius: 8px;
+                font-size: 9.5pt;
+            }
+            QTreeView::item { padding: 3px; }
+            QTreeView::item:hover { background-color: rgba(0, 212, 255, 30); }
+            QTreeView::item:selected { background-color: rgba(0, 212, 255, 80); color: #fff; }
+            QHeaderView::section { background-color: rgba(40,45,55,200); color: #ccc; padding: 4px;
+                border: none; border-right: 1px solid rgba(100,100,100,0.3); }
+        """)
+        # 불필요 칼럼 숨김 (Size, Type, Date)
+        for col in (1, 2, 3):
+            self.tree.setColumnHidden(col, True)
+        # 더블클릭으로 폴더 진입
+        self.tree.doubleClicked.connect(self._on_double_click)
+        layout.addWidget(self.tree, 1)
+
+        # 버튼 영역
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+
+        btn_cancel = QPushButton("취소")
+        btn_cancel.setFixedSize(100, 36)
+        btn_cancel.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_cancel.setStyleSheet("""
+            QPushButton { background-color: rgba(100,105,115,180); border: 1px solid rgba(150,155,165,0.5);
+                border-radius: 8px; color: #fff; padding: 6px 16px; font-size: 10pt; }
+            QPushButton:hover { background-color: rgba(120,125,135,200); }
+        """)
+        btn_cancel.clicked.connect(self.reject)
+        btn_row.addWidget(btn_cancel)
+
+        btn_ok = QPushButton("선택")
+        btn_ok.setFixedSize(100, 36)
+        btn_ok.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_ok.setStyleSheet("""
+            QPushButton { background-color: rgba(30,35,45,200); border: 2px solid #00d4ff;
+                border-radius: 8px; color: #00d4ff; padding: 6px 16px; font-size: 10pt; font-weight: 500; }
+            QPushButton:hover { background-color: rgba(0,212,255,40); border-color: #00ffff; color: #00ffff; }
+        """)
+        btn_ok.setDefault(True)
+        btn_ok.setAutoDefault(True)
+        btn_ok.clicked.connect(self.accept)
+        btn_row.addWidget(btn_ok)
+
+        layout.addLayout(btn_row)
+
+    def _on_double_click(self, index):
+        """폴더 더블클릭 시 진입, 파일 더블클릭은 무시"""
+        path = self.model.filePath(index)
+        if os.path.isdir(path):
+            self.tree.setRootIndex(index)
+            self.lbl_path.setText(path)
+
+    def _go_up(self):
+        """상위 폴더로 이동"""
+        current_idx = self.tree.rootIndex()
+        current_path = self.model.filePath(current_idx)
+        parent_path = os.path.dirname(current_path)
+        if parent_path and parent_path != current_path and os.path.isdir(parent_path):
+            self.tree.setRootIndex(self.model.index(parent_path))
+            self.lbl_path.setText(parent_path)
+
+    def selected_paths(self):
+        """선택된 모든 파일/폴더 경로 반환"""
+        sel = self.tree.selectionModel().selectedIndexes()
+        # 같은 행이 여러 칼럼으로 selectedIndexes 에 들어가므로 중복 제거 (column 0만)
+        seen = set()
+        paths = []
+        for idx in sel:
+            if idx.column() != 0:
+                continue
+            p = self.model.filePath(idx)
+            if p not in seen:
+                seen.add(p)
+                paths.append(p)
+        return paths
+
+
 class JarvisMessageBox(QDialog):
     """iOS 스타일 커스텀 메시지 박스 (Frosted Glass)"""
     
@@ -3995,11 +4273,16 @@ class JarvisMessageBox(QDialog):
         
         if role == "accept":
             btn.clicked.connect(self.accept)
+            # Enter 키로 OK 버튼 클릭 가능하도록 default 버튼 지정
+            btn.setDefault(True)
+            btn.setAutoDefault(True)
         elif role == "reject":
             btn.clicked.connect(self.reject)
+            btn.setAutoDefault(False)
         else:
             btn.clicked.connect(lambda: self._set_result_and_close(role))
-        
+            btn.setAutoDefault(False)
+
         self.btn_layout.addWidget(btn)
         self.buttons.append(btn)
         return btn

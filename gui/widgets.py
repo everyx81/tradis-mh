@@ -351,9 +351,16 @@ class DropListWidget(QListWidget):
             event.acceptProposedAction()
 
     def _rename_item(self, item, path):
-        """아이템 이름 변경"""
-        new_name, ok = QInputDialog.getText(self, "이름 변경", "새 이름을 입력하세요:", text=os.path.basename(path))
-        if ok and new_name:
+        """아이템 이름 변경 (파일은 확장자 자동 보존)"""
+        old_name = os.path.basename(path)
+        # 파일이면 확장자 분리, 폴더면 그대로
+        if os.path.isfile(path):
+            base_name, ext = os.path.splitext(old_name)
+        else:
+            base_name, ext = old_name, ""
+        new_base, ok = QInputDialog.getText(self, "이름 변경", "새 이름을 입력하세요:", text=base_name)
+        if ok and new_base:
+            new_name = new_base + ext
             new_path = os.path.join(os.path.dirname(path), new_name)
             try:
                 os.rename(path, new_path)
@@ -713,11 +720,18 @@ class DraggableTreeView(QTreeView):
             subprocess.run(['explorer', path], creationflags=subprocess.CREATE_NO_WINDOW)
 
     def _rename_item(self, item):
+        """아이템 이름 변경 (파일은 확장자 자동 보존)"""
         path = item.data(Qt.ItemDataRole.UserRole)
         basename = os.path.basename(path)
-        text, ok = QInputDialog.getText(self, "이름 변경", "새 이름:", text=basename)
-        if ok and text:
-            new_path = os.path.join(os.path.dirname(path), text)
+        # 파일이면 확장자 분리, 폴더면 그대로
+        if os.path.isfile(path):
+            base_name, ext = os.path.splitext(basename)
+        else:
+            base_name, ext = basename, ""
+        new_base, ok = QInputDialog.getText(self, "이름 변경", "새 이름:", text=base_name)
+        if ok and new_base:
+            new_name = new_base + ext
+            new_path = os.path.join(os.path.dirname(path), new_name)
             try:
                 os.rename(path, new_path)
                 self.refresh_needed.emit()

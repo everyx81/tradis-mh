@@ -425,30 +425,41 @@ class DropListWidget(QListWidget):
         self.setStyleSheet(DROP_LIST_STYLESHEET)
 
 class TargetListWidget(QListWidget):
-    """MOVE TARGET 폴더 리스트를 위한 커스텀 위젯 (단축키 지원)"""
-    delete_requested = pyqtSignal(str)
+    """MOVE TARGET 폴더 리스트를 위한 커스텀 위젯 (단축키 + 다중 선택 지원)"""
+    delete_requested = pyqtSignal(list)  # 다중 선택 지원: 폴더 이름 리스트
     rename_requested = pyqtSignal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
-    
+        # 다중 선택 활성화 (Ctrl/Shift 클릭으로 여러 폴더 동시 선택 가능)
+        self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+
     def keyPressEvent(self, event):
-        item = self.currentItem()
-        if not item:
-            super().keyPressEvent(event)
-            return
-            
-        folder_name = item.data(Qt.ItemDataRole.UserRole)
-        if not folder_name or folder_name == "(No Folders)":
-            super().keyPressEvent(event)
+        if event.key() == Qt.Key.Key_Delete:
+            # 선택된 모든 항목의 폴더 이름 수집
+            folder_names = []
+            for item in self.selectedItems():
+                fn = item.data(Qt.ItemDataRole.UserRole)
+                if fn and fn != "(No Folders)":
+                    folder_names.append(fn)
+            if folder_names:
+                self.delete_requested.emit(folder_names)
             return
 
-        if event.key() == Qt.Key.Key_Delete:
-            self.delete_requested.emit(folder_name)
-        elif event.key() == Qt.Key.Key_F2:
+        if event.key() == Qt.Key.Key_F2:
+            # 이름 변경은 단일 항목만 허용
+            item = self.currentItem()
+            if not item:
+                super().keyPressEvent(event)
+                return
+            folder_name = item.data(Qt.ItemDataRole.UserRole)
+            if not folder_name or folder_name == "(No Folders)":
+                super().keyPressEvent(event)
+                return
             self.rename_requested.emit(folder_name)
-        else:
-            super().keyPressEvent(event)
+            return
+
+        super().keyPressEvent(event)
 
 
 # ... (중간 생략: DropListWidget의 나머지 메서드들) ...
@@ -1022,10 +1033,19 @@ class DraggableTreeView(QTreeView):
             return
         
         elif key == Qt.Key.Key_Delete:
-            current_index = self.currentIndex()
-            if current_index.isValid():
-                path = self.file_model.filePath(current_index)
-                self._delete_item(path)
+            # 선택된 모든 항목 수집 (다중 선택 지원)
+            selected_indexes = self.selectionModel().selectedIndexes()
+            paths = []
+            seen = set()
+            for idx in selected_indexes:
+                if idx.column() != 0:
+                    continue
+                p = self.file_model.filePath(idx)
+                if p and p not in seen:
+                    seen.add(p)
+                    paths.append(p)
+            if paths:
+                self._delete_paths(paths)
             event.accept()
             return
         
@@ -1237,15 +1257,43 @@ class DraggableTreeView(QTreeView):
             self.navigate_to(path)
     
     def _delete_item(self, path):
-        name = os.path.basename(path)
-        if _get_jarvis_msgbox().question(self, "삭제 확인", f"'{name}'을(를) 삭제하시겠습니까?\n\n이 작업은 되돌릴 수 없습니다."):
+        """단일 경로 삭제 (컨텍스트 메뉴용)"""
+        self._delete_paths([path])
+
+    def _delete_paths(self, paths):
+        """여러 파일/폴더 동시 삭제"""
+        if not paths:
+            return
+        msg_box = _get_jarvis_msgbox()
+
+        if len(paths) == 1:
+            name = os.path.basename(paths[0])
+            confirm_msg = f"'{name}'을(를) 삭제하시겠습니까?\n\n이 작업은 되돌릴 수 없습니다."
+        else:
+            preview = "\n".join(f"  • {os.path.basename(p)}" for p in paths[:5])
+            if len(paths) > 5:
+                preview += f"\n  ... 외 {len(paths) - 5}개"
+            confirm_msg = (f"선택한 {len(paths)}개 항목을 삭제하시겠습니까?\n\n"
+                          f"{preview}\n\n이 작업은 되돌릴 수 없습니다.")
+
+        if not msg_box.question(self, "삭제 확인", confirm_msg):
+            return
+
+        failed = []
+        for path in paths:
             try:
                 if os.path.isfile(path):
                     os.remove(path)
                 else:
                     shutil.rmtree(path)
             except Exception as e:
-                _get_jarvis_msgbox().warning(self, "오류", f"삭제할 수 없습니다:\n{e}")
+                failed.append((os.path.basename(path), str(e)))
+
+        if failed:
+            msg = f"일부 삭제 실패 ({len(failed)}개):\n"
+            for name, err in failed[:5]:
+                msg += f"  • {name}: {err}\n"
+            msg_box.warning(self, "오류", msg)
     
     def _open_in_explorer(self, path):
         try:

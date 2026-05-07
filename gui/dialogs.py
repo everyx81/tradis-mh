@@ -887,10 +887,42 @@ class IndependentCard(GlassFrame):
             self._rename_file(item)
 
     def _delete_selected(self):
-        """Delete 키로 선택된 파일 삭제"""
-        item = self.list_widget.currentItem()
-        if item:
-            self._delete_file(item)
+        """Delete 키로 선택된 파일 삭제 (다중 선택 지원)"""
+        items = self.list_widget.selectedItems()
+        if not items:
+            return
+        if len(items) == 1:
+            self._delete_file(items[0])
+            return
+        # 다중 선택 — 한 번의 확인 후 일괄 삭제
+        from .dialogs import JarvisMessageBox
+        names = [os.path.basename(it.data(Qt.ItemDataRole.UserRole)) for it in items]
+        preview = "\n".join(f"  • {n}" for n in names[:5])
+        if len(names) > 5:
+            preview += f"\n  ... 외 {len(names) - 5}개"
+        if not JarvisMessageBox.question(
+            self, "삭제 확인",
+            f"선택한 {len(items)}개 파일을 삭제할까요?\n\n{preview}"
+        ):
+            return
+        failed = []
+        for item in list(items):
+            path = item.data(Qt.ItemDataRole.UserRole)
+            name = os.path.basename(path)
+            try:
+                os.remove(path)
+                row = self.list_widget.row(item)
+                self.list_widget.takeItem(row)
+                self.parent_widget.emit_log(f"[독립문서] 삭제: {name}")
+            except Exception as e:
+                failed.append((name, str(e)))
+        self._dirty = True
+        self._update_title_count()
+        if failed:
+            msg = f"일부 삭제 실패 ({len(failed)}개):\n"
+            for n, e in failed[:5]:
+                msg += f"  • {n}: {e}\n"
+            JarvisMessageBox.warning(self, "삭제 실패", msg)
 
     def _open_item_file(self, item):
         """더블클릭 → OS 기본 프로그램으로 파일 열기."""
@@ -2014,6 +2046,76 @@ class GroupCard(GlassFrame):
                     used_files = []  # 파일명 키워드 매칭에 사용된 파일 추적
                     used_bi_map = {}  # {filename: set(used_billing_item_indices)} — 한 파일의 billing_items 를 복수 아이템이 나눠쓰는 케이스 지원
 
+                    # ── Step 0: 분리형 파일 사전 분류 + split 매칭 ──
+                    # 파일 안 항목들이 정산서의 서로 다른 expense 와 2개 이상 정확히
+                    # 매칭되면 "분리형" 으로 보고 각 항목을 해당 expense 와 직접 매칭.
+                    # (예: 운송료계산서 안에 보세운송료+운송료 → 둘 다 expense 와 매칭)
+                    #
+                    # 묶음형 파일 (예: 선박운임계산서 안에 기본운임+BAF+컨테이너세) 은
+                    # 정산서의 expense 항목 (선박운임) 과 안 항목 이름이 안 맞아 매칭 0건
+                    # → 분리형 판정 안 됨 → 기존 Step 1 (파일명) 으로 처리됨
+                    fixed_keys = {"자금정산서", "정산서", "수입신고필증", "수출신고필증",
+                                  "반송신고필증", "납부고지서", "수입세금계산서"}
+                    pre_matched_expense_names = set()  # Step 0 에서 이미 매칭된 expense 이름
+
+                    def _norm_name(s):
+                        """이름 정규화 (공백 제거 + 대문자)"""
+                        return (s or "").upper().replace(" ", "")
+
+                    # 정산서 expense 목록을 [(이름정규화, 금액, 원본data), ...] 으로 준비
+                    _exp_index = []
+                    for _e in expense_list:
+                        if not _e:
+                            continue
+                        if isinstance(_e, str):
+                            _en, _ea = _e, 0
+                        else:
+                            _en = _e.get("name", "")
+                            _ea = parse_amount(_e.get("amount", 0))
+                        if not _en or any(k in _en for k in ["관세", "부가세"]):
+                            continue
+                        _exp_index.append((_norm_name(_en), _ea, _en))
+
+                    # 각 파일 분류
+                    for doc_key, v in list(docs.items()):
+                        if doc_key in fixed_keys:
+                            continue
+                        fp = os.path.join(self.directory, v)
+                        f_cached = gemini_ocr._get_cached_result(fp)
+                        if not f_cached:
+                            continue
+                        bi_list = f_cached.get('billing_items', []) or []
+                        if len(bi_list) < 2:
+                            continue  # 안 항목 1개 이하면 분리형 판정 불가
+
+                        # 파일 안 항목과 정산서 expense 의 정확 매칭 시도
+                        candidate_matches = []  # [(bi_idx, exp_name)]
+                        used_exp_in_this_file = set()
+                        for bi_idx, bi in enumerate(bi_list):
+                            bi_name_n = _norm_name(bi.get('name', ''))
+                            bi_amt = parse_amount(bi.get('amount', 0))
+                            if not bi_name_n:
+                                continue
+                            for exp_name_n, exp_amt, exp_orig_name in _exp_index:
+                                if exp_orig_name in used_exp_in_this_file:
+                                    continue  # 한 expense 는 한 번만
+                                # 이름 정확 일치 + 금액 일치 (양쪽 다 0 보다 큰 경우)
+                                if bi_name_n == exp_name_n:
+                                    if bi_amt > 0 and exp_amt > 0 and bi_amt == exp_amt:
+                                        candidate_matches.append((bi_idx, exp_orig_name))
+                                        used_exp_in_this_file.add(exp_orig_name)
+                                        break
+
+                        # 서로 다른 expense 가 2개 이상 매칭됐으면 분리형 → split 처리
+                        if len(candidate_matches) >= 2:
+                            for bi_idx, exp_name in candidate_matches:
+                                pre_matched_expense_names.add(exp_name)
+                                used_idx = used_bi_map.setdefault(v, set())
+                                used_idx.add(bi_idx)
+                            # 파일도 used_files 에 추가 (다른 expense 가 또 먹지 않도록)
+                            if v not in used_files:
+                                used_files.append(v)
+
                     for item_data in expense_list:
                         if not item_data:
                             continue
@@ -2038,6 +2140,15 @@ class GroupCard(GlassFrame):
                                 for v in docs.values()
                             )
                             required.append({'name': item_name, 'found': found})
+                            continue
+
+                        # ── Step 0 결과 체크: 분리형 split 매칭에서 이미 매칭된 expense ──
+                        if item_name in pre_matched_expense_names:
+                            required.append({
+                                'name': item_name,
+                                'found': True,
+                                'matched_by_amount': False,
+                            })
                             continue
 
                         # 동의어 사전으로 검색 키워드 확장 (양방향)
@@ -2134,6 +2245,34 @@ class GroupCard(GlassFrame):
                                     found = True
                                     matched_by_amount = True
                                     used_files.append(matching_files[0])
+
+                        # ── Step 4 (Fallback): 이미 사용된 파일의 안 항목 이름 매칭 ──
+                        # OCR 가 안 항목을 일부만 뽑은 경우라도, 같은 파일 안에 이름이
+                        # 일치하는 항목이 있다면 공유 매칭으로 인정.
+                        # (예: 운송료계산서 안에 보세운송료+운송료, 첫 항목이 파일을
+                        #  먹은 후 두 번째 항목이 같은 파일의 안 항목으로 매칭)
+                        if not found:
+                            for v in used_files:
+                                fp = os.path.join(self.directory, v)
+                                f_cached = gemini_ocr._get_cached_result(fp)
+                                if not f_cached:
+                                    # 캐시 없으면 파일명으로라도 매칭 시도
+                                    v_upper = v.upper().replace(" ", "")
+                                    if any(kw in v_upper for kw in search_kws):
+                                        found = True
+                                        break
+                                    continue
+                                used_idx = used_bi_map.setdefault(v, set())
+                                for bi_idx, bi in enumerate(f_cached.get('billing_items', [])):
+                                    if bi_idx in used_idx:
+                                        continue
+                                    bi_upper = bi.get('name', '').upper().replace(' ', '')
+                                    if any(kw in bi_upper or bi_upper in kw for kw in search_kws):
+                                        found = True
+                                        used_idx.add(bi_idx)
+                                        break
+                                if found:
+                                    break
 
                         required.append({
                             'name': item_name,
@@ -3049,10 +3188,39 @@ class GroupCard(GlassFrame):
             self._fl_rename_by_path(path, os.path.basename(path))
 
     def _fl_delete_selected(self):
-        item = self.file_list.currentItem()
-        if item:
-            path = item.data(Qt.ItemDataRole.UserRole)
+        """Delete 키로 선택된 파일 삭제 (다중 선택 지원)"""
+        items = self.file_list.selectedItems()
+        if not items:
+            return
+        if len(items) == 1:
+            path = items[0].data(Qt.ItemDataRole.UserRole)
             self._fl_delete_by_path(path, os.path.basename(path))
+            return
+        # 다중 선택 — 한 번의 확인 후 일괄 삭제
+        names = [os.path.basename(it.data(Qt.ItemDataRole.UserRole)) for it in items]
+        preview = "\n".join(f"  • {n}" for n in names[:5])
+        if len(names) > 5:
+            preview += f"\n  ... 외 {len(names) - 5}개"
+        if not JarvisMessageBox.question(
+            self, "삭제 확인",
+            f"선택한 {len(items)}개 파일을 삭제할까요?\n\n{preview}"
+        ):
+            return
+        failed = []
+        for item in list(items):
+            path = item.data(Qt.ItemDataRole.UserRole)
+            name = os.path.basename(path)
+            try:
+                os.remove(path)
+                self.parent_widget.emit_log(f"[파일 삭제] {name}")
+            except Exception as e:
+                failed.append((name, str(e)))
+        self.parent_widget.rename_trigger_signal.emit()
+        if failed:
+            msg = f"일부 삭제 실패 ({len(failed)}개):\n"
+            for n, e in failed[:5]:
+                msg += f"  • {n}: {e}\n"
+            JarvisMessageBox.warning(self, "삭제 실패", msg)
 
     def _fl_open_file_item(self, item):
         """파일 리스트 아이템 더블클릭 → OS 기본 프로그램으로 열기."""

@@ -2895,47 +2895,86 @@ class FileManagerWidget(QWidget):
                 self.emit_log(f"[오류] 이름 변경 실패: {e}")
                 JarvisMessageBox.critical(self, "오류", f"이름 변경 실패: {e}")
     
-    def _delete_target_folder(self, folder_name: str):
-        """MOVE TARGET 폴더 삭제"""
+    def _delete_target_folder(self, folder_name):
+        """MOVE TARGET 폴더 삭제 (단일 또는 다중)
+        folder_name: str (단일) 또는 list[str] (다중)
+        """
+        # 호환성: 문자열이면 리스트로 변환
+        if isinstance(folder_name, str):
+            folder_names = [folder_name]
+        else:
+            folder_names = list(folder_name) if folder_name else []
+
+        if not folder_names:
+            return
+
         base_path = self.path_callback() if self.path_callback else ""
         if not base_path:
             JarvisMessageBox.warning(self, "오류", "기본 경로가 설정되지 않았습니다.")
             return
-        
-        folder_path = os.path.join(base_path, folder_name)
-        
-        if not os.path.exists(folder_path):
-            JarvisMessageBox.warning(self, "오류", f"폴더가 존재하지 않습니다:\n{folder_path}")
+
+        # 유효한 폴더만 선별
+        valid = []
+        for fn in folder_names:
+            fp = os.path.join(base_path, fn)
+            if os.path.exists(fp):
+                valid.append((fn, fp))
+
+        if not valid:
+            JarvisMessageBox.warning(self, "오류", "삭제할 폴더가 없습니다.")
             return
-        
-        # 폴더 내 파일 수 확인
-        try:
-            file_count = sum(len(files) for _, _, files in os.walk(folder_path))
-            subfolder_count = sum(len(dirs) for _, dirs, _ in os.walk(folder_path))
-        except OSError:
-            file_count = 0
-            subfolder_count = 0
-        
-        # 확인 대화상자
-        warning_msg = f"'{folder_name}' 폴더를 삭제하시겠습니까?"
-        if file_count > 0 or subfolder_count > 0:
-            warning_msg += f"\n\n⚠️ 이 폴더에는 {file_count}개 파일, {subfolder_count}개 하위폴더가 있습니다.\n모두 삭제됩니다!"
-        
+
+        # 확인 다이얼로그
+        if len(valid) == 1:
+            fn, fp = valid[0]
+            try:
+                file_count = sum(len(files) for _, _, files in os.walk(fp))
+                subfolder_count = sum(len(dirs) for _, dirs, _ in os.walk(fp))
+            except OSError:
+                file_count = 0
+                subfolder_count = 0
+            warning_msg = f"'{fn}' 폴더를 삭제하시겠습니까?"
+            if file_count > 0 or subfolder_count > 0:
+                warning_msg += f"\n\n⚠️ 이 폴더에는 {file_count}개 파일, {subfolder_count}개 하위폴더가 있습니다.\n모두 삭제됩니다!"
+        else:
+            preview = "\n".join(f"  • {n}" for n, _ in valid[:5])
+            if len(valid) > 5:
+                preview += f"\n  ... 외 {len(valid) - 5}개"
+            warning_msg = (f"다음 {len(valid)}개 폴더를 삭제하시겠습니까?\n\n"
+                          f"{preview}\n\n⚠️ 이 작업은 되돌릴 수 없습니다.")
+
         if not JarvisMessageBox.question(self, "폴더 삭제 확인", warning_msg):
             return
-        
+
+        # 삭제 실행
+        import shutil
+        success_names = []
+        failed = []  # [(name, error)]
+        for fn, fp in valid:
+            try:
+                shutil.rmtree(fp)
+                success_names.append(fn)
+                self.emit_log(f"[삭제 완료] 폴더 삭제됨: {fn}")
+            except Exception as e:
+                failed.append((fn, str(e)))
+                self.emit_log(f"[삭제 실패] {fn}: {e}")
+
+        # 결과 알림
+        if failed:
+            msg = f"성공: {len(success_names)}개\n실패: {len(failed)}개\n\n"
+            for fn, err in failed[:5]:
+                msg += f"  • {fn}: {err}\n"
+            JarvisMessageBox.warning(self, "일부 실패", msg)
+        elif len(success_names) == 1:
+            JarvisMessageBox.information(self, "완료", f"'{success_names[0]}' 폴더가 삭제되었습니다.")
+        else:
+            JarvisMessageBox.information(self, "완료", f"{len(success_names)}개 폴더가 삭제되었습니다.")
+
+        # 목록 갱신
         try:
-            import shutil
-            shutil.rmtree(folder_path)
-            self.emit_log(f"[삭제 완료] 폴더 삭제됨: {folder_name}")
-            JarvisMessageBox.information(self, "완료", f"'{folder_name}' 폴더가 삭제되었습니다.")
-            
-            # 목록 갱신
             self.refresh_targets()
-            
         except Exception as e:
-            self.emit_log(f"[오류] 폴더 삭제 실패: {e}")
-            JarvisMessageBox.critical(self, "삭제 실패", f"폴더 삭제 중 오류 발생:\n{str(e)}")
+            self.emit_log(f"[오류] 목록 갱신 실패: {e}")
 
     def _request_startup_guide(self):
         """시작 가이드 재표시 요청"""

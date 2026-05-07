@@ -786,6 +786,54 @@ class AutoRenamer:
                         return _parse_item_amount(bi.get('amount', 0))
             return _get_file_amount(filename)
 
+        # ── Step 0: 분리형 파일 사전 분류 + split 매칭 ──
+        # 한 파일의 billing_items 가 정산서의 서로 다른 expense 와 2개 이상
+        # 정확 매칭 (이름 + 금액) 되면 "분리형" 으로 보고, 각 항목을 해당 expense
+        # 와 직접 매칭 (한 파일을 여러 expense 가 공유).
+        # 묶음형 (예: 선박운임계산서 안에 기본운임/BAF 등이 있고 정산서에는 선박운임만)
+        # 은 안 항목 이름 매칭이 0개라 분리형 판정 안 됨 → 기존 로직대로 진행.
+        def _norm_name(s):
+            return (s or "").upper().replace(" ", "")
+
+        _exp_index = []
+        for _e in expense_list:
+            if not _e:
+                continue
+            if isinstance(_e, str):
+                _en, _ea = _e, 0
+            else:
+                _en = _e.get("name", "")
+                _ea = _parse_item_amount(_e.get("amount", 0))
+            if not _en or any(k in _en for k in ["관세", "부가세"]):
+                continue
+            _exp_index.append((_norm_name(_en), _ea, _en))
+
+        # 분리형 사전 매칭 결과: {expense_name: pdf}
+        # 순서는 2-1단계 expense_list 반복 순서에서 결정 (먼저 등장한 expense 가 parent)
+        pre_split_matches = {}
+        for pdf, bi_list in file_billing_map.items():
+            if len(bi_list) < 2:
+                continue
+            candidate = []  # [exp_orig_name]
+            used_exp = set()
+            for bi_idx, bi in enumerate(bi_list):
+                bi_name_n = _norm_name(bi.get('name', ''))
+                bi_amt = _parse_item_amount(bi.get('amount', 0))
+                if not bi_name_n:
+                    continue
+                for exp_n, exp_a, exp_o in _exp_index:
+                    if exp_o in used_exp:
+                        continue
+                    if bi_name_n == exp_n and bi_amt > 0 and exp_a > 0 and bi_amt == exp_a:
+                        candidate.append(exp_o)
+                        used_exp.add(exp_o)
+                        break
+            if len(candidate) >= 2:
+                for exp_name in candidate:
+                    pre_split_matches[exp_name] = pdf
+        # 분리형 파일별 parent (첫 매칭) 추적용 — 2-1단계 반복 시 채워짐
+        _split_parent_assigned = {}  # {pdf: parent_expense_name}
+
         # ── 2-1단계: 금액 우선 1:1 매칭 ──
         fee_invoice_added = False
         matched_kws = []  # 매칭된 항목의 키워드 기록 (2-2단계용)
@@ -818,6 +866,23 @@ class AutoRenamer:
                         m.append({'label': f'비용: {item_name} (수수료계산서 포함)', 'filename': '', 'item_amount': item_amount})
                 else:
                     m.append({'label': f'비용: {item_name}', 'filename': '', 'item_amount': item_amount})
+                continue
+
+            # ── Step 0 결과 체크: 분리형 split 매칭 ──
+            if item_name in pre_split_matches:
+                _split_pdf = pre_split_matches[item_name]
+                if _split_pdf not in _split_parent_assigned:
+                    # expense_list 에서 이 파일을 처음 만나는 expense → parent (파일 할당)
+                    m.append({'label': f'비용: {item_name}', 'filename': _split_pdf, 'item_amount': item_amount})
+                    if _split_pdf not in af:
+                        af.append(_split_pdf)
+                    matched_kws.append(_build_search_kws(item_name))
+                    _split_parent_assigned[_split_pdf] = item_name
+                else:
+                    # 두 번째 이상 → "(parent expense 계산서 포함)" 라벨
+                    parent_name = _split_parent_assigned[_split_pdf]
+                    m.append({'label': f'비용: {item_name} ({parent_name}계산서 포함)',
+                              'filename': '', 'item_amount': item_amount})
                 continue
 
             search_kws = _build_search_kws(item_name)

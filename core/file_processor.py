@@ -1032,6 +1032,46 @@ class AutoRenamer:
                         m[idx]['matched_by_amount'] = True
                         af.append(matching_files[0])
 
+        # ── 3-1단계: 이미 사용된 파일과 공유 매칭 (Fallback) ──
+        # OCR billing_items 가 부정확하거나 금액 불일치(부가세 차이 등)로 2-1.5단계가
+        # 매칭 실패한 경우, 같은 파일 안에 expense 이름 키워드가 있다면 "(...계산서 포함)"
+        # 으로 공유 매칭 처리.
+        # (예: 운송료계산서 안에 보세운송료+운송료, 첫 항목이 파일 먹은 후
+        #      두 번째 항목이 같은 파일의 안 항목으로 매칭)
+        still_unmatched = [idx for idx, x in enumerate(m)
+                          if x['filename'] == '' and '비용: ' in x['label']
+                          and '포함' not in x['label'] and '(추가)' not in x['label']]
+        for idx in still_unmatched:
+            item_name = m[idx]['label'].replace('비용: ', '').split(' (')[0]
+            search_kws = _build_search_kws(item_name)
+            matched_share = False
+            for assigned_pdf in list(af):
+                # 우선 파일 안 billing_items 안 이름 매칭 (정확)
+                if assigned_pdf in file_billing_map:
+                    for bi in file_billing_map[assigned_pdf]:
+                        bi_name_u = bi.get('name', '').upper().replace(' ', '')
+                        if not bi_name_u:
+                            continue
+                        if any(kw in bi_name_u or bi_name_u in kw for kw in search_kws):
+                            matched_share = True
+                            break
+                # 안 항목 매칭 실패해도 파일명 키워드 일치하면 fallback
+                if not matched_share:
+                    pdf_upper = assigned_pdf.upper().replace(' ', '')
+                    if any(kw in pdf_upper for kw in search_kws):
+                        matched_share = True
+                if matched_share:
+                    parent_label = next(
+                        (x['label'] for x in m if x.get('filename') == assigned_pdf), ''
+                    )
+                    parent_short = parent_label.replace('비용: ', '').split(' (')[0]
+                    if parent_short:
+                        m[idx] = {
+                            'label': f'비용: {item_name} ({parent_short}계산서 포함)',
+                            'filename': '', 'item_amount': m[idx].get('item_amount', 0)
+                        }
+                    break
+
         # ── 4단계: 나머지 미분류 서류 ──
         for pdf in allp:
             if pdf not in af:

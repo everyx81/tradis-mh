@@ -786,12 +786,15 @@ class AutoRenamer:
                         return _parse_item_amount(bi.get('amount', 0))
             return _get_file_amount(filename)
 
-        # ── Step 0: 분리형 파일 사전 분류 + split 매칭 ──
-        # 한 파일의 billing_items 가 정산서의 서로 다른 expense 와 2개 이상
-        # 정확 매칭 (이름 + 금액) 되면 "분리형" 으로 보고, 각 항목을 해당 expense
-        # 와 직접 매칭 (한 파일을 여러 expense 가 공유).
-        # 묶음형 (예: 선박운임계산서 안에 기본운임/BAF 등이 있고 정산서에는 선박운임만)
-        # 은 안 항목 이름 매칭이 0개라 분리형 판정 안 됨 → 기존 로직대로 진행.
+        # ── Step 0: 분리형/묶음형 파일 사전 분류 ──
+        # 분리형: 파일의 billing_items 이름이 정산서 expense 이름과 2개 이상 정확 일치
+        #         → 한 파일을 여러 expense 가 공유 (예: 운송료계산서 안에 보세운송료+운송료)
+        # 묶음형: 안 항목 이름이 정산서 expense 이름과 매칭 0~1개
+        #         → 한 expense 와만 매칭 (예: 선박운임계산서 안 OCEAN FREIGHT/BAF/TRUCKING CHARGE
+        #            등은 정산서 "선박운임" 한 항목으로 통합)
+        # ★ 금액 검증 없음 — 정산서(부가세 포함) vs 계산서(공급가액) 차이 흡수
+        # ★ 이름 정확 일치만 — substring 매칭은 "TRUCKING CHARGE"가 "운송료" 동의어 "TRUCKING"
+        #    와 잘못 매칭되는 false positive 야기
         def _norm_name(s):
             return (s or "").upper().replace(" ", "")
 
@@ -809,7 +812,6 @@ class AutoRenamer:
             _exp_index.append((_norm_name(_en), _ea, _en))
 
         # 분리형 사전 매칭 결과: {expense_name: pdf}
-        # 순서는 2-1단계 expense_list 반복 순서에서 결정 (먼저 등장한 expense 가 parent)
         pre_split_matches = {}
         for pdf, bi_list in file_billing_map.items():
             if len(bi_list) < 2:
@@ -818,13 +820,13 @@ class AutoRenamer:
             used_exp = set()
             for bi_idx, bi in enumerate(bi_list):
                 bi_name_n = _norm_name(bi.get('name', ''))
-                bi_amt = _parse_item_amount(bi.get('amount', 0))
                 if not bi_name_n:
                     continue
                 for exp_n, exp_a, exp_o in _exp_index:
                     if exp_o in used_exp:
                         continue
-                    if bi_name_n == exp_n and bi_amt > 0 and exp_a > 0 and bi_amt == exp_a:
+                    # 이름 정확 일치만 — 금액 검증 안 함
+                    if bi_name_n == exp_n:
                         candidate.append(exp_o)
                         used_exp.add(exp_o)
                         break
@@ -1031,46 +1033,6 @@ class AutoRenamer:
                         m[idx]['filename'] = matching_files[0]
                         m[idx]['matched_by_amount'] = True
                         af.append(matching_files[0])
-
-        # ── 3-1단계: 이미 사용된 파일과 공유 매칭 (Fallback) ──
-        # OCR billing_items 가 부정확하거나 금액 불일치(부가세 차이 등)로 2-1.5단계가
-        # 매칭 실패한 경우, 같은 파일 안에 expense 이름 키워드가 있다면 "(...계산서 포함)"
-        # 으로 공유 매칭 처리.
-        # (예: 운송료계산서 안에 보세운송료+운송료, 첫 항목이 파일 먹은 후
-        #      두 번째 항목이 같은 파일의 안 항목으로 매칭)
-        still_unmatched = [idx for idx, x in enumerate(m)
-                          if x['filename'] == '' and '비용: ' in x['label']
-                          and '포함' not in x['label'] and '(추가)' not in x['label']]
-        for idx in still_unmatched:
-            item_name = m[idx]['label'].replace('비용: ', '').split(' (')[0]
-            search_kws = _build_search_kws(item_name)
-            matched_share = False
-            for assigned_pdf in list(af):
-                # 우선 파일 안 billing_items 안 이름 매칭 (정확)
-                if assigned_pdf in file_billing_map:
-                    for bi in file_billing_map[assigned_pdf]:
-                        bi_name_u = bi.get('name', '').upper().replace(' ', '')
-                        if not bi_name_u:
-                            continue
-                        if any(kw in bi_name_u or bi_name_u in kw for kw in search_kws):
-                            matched_share = True
-                            break
-                # 안 항목 매칭 실패해도 파일명 키워드 일치하면 fallback
-                if not matched_share:
-                    pdf_upper = assigned_pdf.upper().replace(' ', '')
-                    if any(kw in pdf_upper for kw in search_kws):
-                        matched_share = True
-                if matched_share:
-                    parent_label = next(
-                        (x['label'] for x in m if x.get('filename') == assigned_pdf), ''
-                    )
-                    parent_short = parent_label.replace('비용: ', '').split(' (')[0]
-                    if parent_short:
-                        m[idx] = {
-                            'label': f'비용: {item_name} ({parent_short}계산서 포함)',
-                            'filename': '', 'item_amount': m[idx].get('item_amount', 0)
-                        }
-                    break
 
         # ── 4단계: 나머지 미분류 서류 ──
         for pdf in allp:

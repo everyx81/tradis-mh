@@ -2089,22 +2089,20 @@ class GroupCard(GlassFrame):
                             continue  # 안 항목 1개 이하면 분리형 판정 불가
 
                         # 파일 안 항목과 정산서 expense 의 정확 매칭 시도
+                        # ★ 이름 정확 일치만 — 금액 검증 안 함 (부가세 차이 흡수)
                         candidate_matches = []  # [(bi_idx, exp_name)]
                         used_exp_in_this_file = set()
                         for bi_idx, bi in enumerate(bi_list):
                             bi_name_n = _norm_name(bi.get('name', ''))
-                            bi_amt = parse_amount(bi.get('amount', 0))
                             if not bi_name_n:
                                 continue
                             for exp_name_n, exp_amt, exp_orig_name in _exp_index:
                                 if exp_orig_name in used_exp_in_this_file:
                                     continue  # 한 expense 는 한 번만
-                                # 이름 정확 일치 + 금액 일치 (양쪽 다 0 보다 큰 경우)
                                 if bi_name_n == exp_name_n:
-                                    if bi_amt > 0 and exp_amt > 0 and bi_amt == exp_amt:
-                                        candidate_matches.append((bi_idx, exp_orig_name))
-                                        used_exp_in_this_file.add(exp_orig_name)
-                                        break
+                                    candidate_matches.append((bi_idx, exp_orig_name))
+                                    used_exp_in_this_file.add(exp_orig_name)
+                                    break
 
                         # 서로 다른 expense 가 2개 이상 매칭됐으면 분리형 → split 처리
                         if len(candidate_matches) >= 2:
@@ -2245,34 +2243,6 @@ class GroupCard(GlassFrame):
                                     found = True
                                     matched_by_amount = True
                                     used_files.append(matching_files[0])
-
-                        # ── Step 4 (Fallback): 이미 사용된 파일의 안 항목 이름 매칭 ──
-                        # OCR 가 안 항목을 일부만 뽑은 경우라도, 같은 파일 안에 이름이
-                        # 일치하는 항목이 있다면 공유 매칭으로 인정.
-                        # (예: 운송료계산서 안에 보세운송료+운송료, 첫 항목이 파일을
-                        #  먹은 후 두 번째 항목이 같은 파일의 안 항목으로 매칭)
-                        if not found:
-                            for v in used_files:
-                                fp = os.path.join(self.directory, v)
-                                f_cached = gemini_ocr._get_cached_result(fp)
-                                if not f_cached:
-                                    # 캐시 없으면 파일명으로라도 매칭 시도
-                                    v_upper = v.upper().replace(" ", "")
-                                    if any(kw in v_upper for kw in search_kws):
-                                        found = True
-                                        break
-                                    continue
-                                used_idx = used_bi_map.setdefault(v, set())
-                                for bi_idx, bi in enumerate(f_cached.get('billing_items', [])):
-                                    if bi_idx in used_idx:
-                                        continue
-                                    bi_upper = bi.get('name', '').upper().replace(' ', '')
-                                    if any(kw in bi_upper or bi_upper in kw for kw in search_kws):
-                                        found = True
-                                        used_idx.add(bi_idx)
-                                        break
-                                if found:
-                                    break
 
                         required.append({
                             'name': item_name,

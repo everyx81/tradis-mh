@@ -564,6 +564,32 @@ class IndependentCard(GlassFrame):
         anim.start()
         self._hover_anim = anim
 
+    def cleanup(self):
+        """카드 삭제 직전 호출 — 애니메이션/그래픽효과 안전 해제."""
+        try:
+            anim = getattr(self, '_hover_anim', None)
+            if anim is not None:
+                try:
+                    anim.valueChanged.disconnect()
+                except (TypeError, RuntimeError):
+                    pass
+                try:
+                    anim.stop()
+                except RuntimeError:
+                    pass
+                self._hover_anim = None
+        except Exception:
+            pass
+        try:
+            if hasattr(self, '_hover_shadow') and self._hover_shadow is not None:
+                try:
+                    self.setGraphicsEffect(None)
+                except RuntimeError:
+                    pass
+                self._hover_shadow = None
+        except Exception:
+            pass
+
     def _apply_card_bg(self, value):
         """Claude Design warm dark (IndependentCard도 GroupCard와 동일 톤)."""
         self._hover_progress = float(value)
@@ -1099,6 +1125,40 @@ class GroupCard(GlassFrame):
         anim.valueChanged.connect(self._apply_card_bg)
         anim.start()
         self._hover_anim = anim
+
+    def cleanup(self):
+        """카드 삭제 직전 호출 — 애니메이션/시그널/그래픽효과 안전 해제.
+        BL 카드가 많을 때 deleteLater() 만 호출하면 살아있는 애니메이션이
+        valueChanged 시그널로 deleted 객체의 _apply_card_bg 를 호출해 크래시.
+        이 함수가 그것을 방지함."""
+        try:
+            anim = getattr(self, '_hover_anim', None)
+            if anim is not None:
+                try:
+                    anim.valueChanged.disconnect()
+                except (TypeError, RuntimeError):
+                    pass
+                try:
+                    anim.stop()
+                except RuntimeError:
+                    pass
+                self._hover_anim = None
+        except Exception:
+            pass
+        try:
+            if hasattr(self, '_hover_shadow') and self._hover_shadow is not None:
+                try:
+                    self.setGraphicsEffect(None)
+                except RuntimeError:
+                    pass
+                self._hover_shadow = None
+        except Exception:
+            pass
+        try:
+            # status_changed 시그널 전체 해제 (외부 receiver 가 deleted card 에 접근 방지)
+            self.status_changed.disconnect()
+        except (TypeError, RuntimeError):
+            pass
 
     def _set_btn_toggle(self, text: str):
         """btn_toggle 텍스트 + 아이콘을 한 번에 갱신 (Claude Design)."""
@@ -3651,6 +3711,10 @@ class GroupCard(GlassFrame):
         # 마킹 데이터 정리
         if hasattr(parent, 'marked_data') and self.text_id in parent.marked_data:
             del parent.marked_data[self.text_id]
+        try:
+            self.cleanup()
+        except Exception:
+            pass
         self.deleteLater()
 
     def _show_missing_files_dialog(self, missing_files, export_docs_root=""):
@@ -3914,6 +3978,10 @@ class GroupCard(GlassFrame):
         # 마킹 데이터 정리
         if marked and hasattr(parent, 'marked_data') and self.text_id in parent.marked_data:
             del parent.marked_data[self.text_id]
+        try:
+            self.cleanup()
+        except Exception:
+            pass
         self.deleteLater()
 
     def _compute_na_set(self):

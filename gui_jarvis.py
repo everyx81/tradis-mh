@@ -2407,9 +2407,19 @@ class JarvisGUI(QMainWindow):
         try:
             if hasattr(self, 'file_manager'):
                 self.file_manager.refresh_targets()
+            # 기존 카드들을 안전하게 삭제 — cleanup() 으로 애니메이션/시그널 먼저 해제
+            # (BL 많을 때 deleteLater() 만 호출하면 살아있는 애니메이션이 deleted 객체에
+            #  접근해 RuntimeError → 앱 다운 발생)
             while self.merge_layout.count():
                 child = self.merge_layout.takeAt(0)
-                if child.widget(): child.widget().deleteLater()
+                w = child.widget()
+                if w:
+                    try:
+                        if hasattr(w, 'cleanup'):
+                            w.cleanup()
+                    except Exception:
+                        pass
+                    w.deleteLater()
 
             # 카드 필터 대상 리스트 초기화
             self.group_cards = []

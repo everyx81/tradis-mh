@@ -36,7 +36,7 @@ class GeminiOCR:
     """Gemini AI 기반 PDF OCR 분석기"""
     
     def __init__(self):
-        self.model_id = 'gemini-3.1-flash-lite-preview'
+        self.model_id = 'gemini-3.1-flash-lite'
         self.base_prompt = """
 당신은 최고의 전문 관세사 사무원입니다. PDF 문서의 이미지를 분석하여 다음 정보를 JSON 형식으로만 응답하세요.
 

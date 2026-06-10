@@ -17,3 +17,7 @@ cli.c
 
 # 업무 문서 (미추적)
 일일보고/
+
+# 고객 거래 자료 — 절대 커밋 금지
+export_attachments/
+schedules.json

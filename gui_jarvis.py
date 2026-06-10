@@ -3310,54 +3310,14 @@ class JarvisGUI(QMainWindow):
         self.license_tier = "admin"
         self._save_license_tier("admin")
 
-        # navbar에 버튼 추가 (SETTINGS 앞에 삽입)
-        admin_tabs = [
-            ("일정", "일\n정", "#00ff88"),
-            ("통관", "통\n관", "#ffa500"),
-            ("REPORT", "보\n고", "#ff88ff"),
-        ]
-        navbar_layout = self.navbar.layout()
-        navbar_layout.takeAt(navbar_layout.count() - 1)  # stretch 제거
-        settings_item = navbar_layout.takeAt(navbar_layout.count() - 1)
-        settings_btn = settings_item.widget()
-
-        for tab_name, label, color in admin_tabs:
-            if tab_name in self.nav_buttons:
-                continue
-            btn = QPushButton(label)
-            btn.setFixedSize(30, 45)
-            btn.setCheckable(True)
-            btn.setAutoExclusive(True)
-            btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setProperty("tab_name", tab_name)
-            btn.setStyleSheet(f"""
-                QPushButton {{
-                    background-color: rgba(5, 20, 35, 120);
-                    border: 1px solid rgba(0, 255, 255, 80);
-                    border-radius: 6px;
-                    color: rgba(255, 255, 255, 200);
-                    text-align: center;
-                    padding-top: 2px;
-                }}
-                QPushButton:hover {{
-                    background-color: rgba(0, 255, 255, 30);
-                    border: 1px solid {color};
-                    color: #ffffff;
-                }}
-                QPushButton:checked {{
-                    background-color: rgba(0, 255, 255, 50);
-                    border: 1px solid {color};
-                    border-left: 3px solid {color};
-                    color: {color};
-                    font-weight: bold;
-                }}
-            """)
-            btn.clicked.connect(lambda checked, name=tab_name: self._on_navbar_clicked(name))
-            navbar_layout.addWidget(btn)
-            self.nav_buttons[tab_name] = btn
-
-        navbar_layout.addWidget(settings_btn)
-        navbar_layout.addStretch()
+        # navbar 재생성 — admin 등급이므로 일정/통관/보고 탭이 포함된 전체 메뉴가 만들어진다
+        current_tab = self.current_nav_tab
+        old_navbar = self.navbar
+        self.main_layout.removeWidget(old_navbar)
+        old_navbar.deleteLater()
+        self._create_vertical_navbar()
+        # _create_vertical_navbar()가 활성 탭을 정산으로 초기화하므로 원래 보던 탭 복원
+        self._on_navbar_clicked(current_tab)
         self.emit_log("[관리자] 일정/통관/보고 탭이 활성화되었습니다.")
 
     def _save_license_tier(self, tier):

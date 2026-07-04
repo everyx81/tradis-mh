@@ -938,6 +938,10 @@ class JarvisGUI(QMainWindow):
             if hasattr(self, 'schedule_manager'):
                 self.schedule_manager.stop_reminder_loop()
             self.save_settings()
+            # 보내기 트레이 정리 (위치 저장 포함)
+            if getattr(self, 'send_tray', None):
+                self.send_tray.hide_tray()
+                self.send_tray.close()
             # 글로벌 단축키 해제
             self._remove_snippet_hook()
             # [PERF] 잔류 토스트 위젯 강제 정리
@@ -956,7 +960,7 @@ class JarvisGUI(QMainWindow):
         """글로벌 단축키 초기화"""
         self.hotkey_settings = self._load_hotkey_settings()
         self._register_hotkeys()
-        self.emit_log(f"Global Hotkeys Initialized: Memo={self.hotkey_settings.get('memo_hotkey', 'ctrl+shift+m')}")
+        self.emit_log(f"Global Hotkeys Initialized: Memo={self.hotkey_settings.get('memo_hotkey', 'ctrl+shift+m')}, Tray={self.hotkey_settings.get('tray_hotkey', 'ctrl+t')}")
     
     def _load_hotkey_settings(self):
         """단축키 설정 로드"""
@@ -1034,6 +1038,22 @@ class JarvisGUI(QMainWindow):
         
         self.emit_log("📝 메모장 활성화됨")
     
+    def _activate_send_tray(self):
+        """보내기 트레이 토글 (훅 스레드에서 호출됨)"""
+        QTimer.singleShot(0, self._toggle_send_tray)
+
+    def _toggle_send_tray(self):
+        """보내기 트레이 표시/숨김 (메인 스레드)"""
+        try:
+            if not getattr(self, 'send_tray', None):
+                from gui.send_tray import SendTrayWindow
+                self.send_tray = SendTrayWindow(path_callback=lambda: self.line_path.text())
+            self.send_tray.toggle()
+            if self.send_tray.isVisible():
+                self.emit_log("📤 보내기 트레이 열림")
+        except Exception as e:
+            print(f"보내기 트레이 오류: {e}")
+
     def _paste_snippet(self, text):
         """텍스트 스니펫 붙여넣기 (다른 스레드에서 호출됨)"""
         def do_paste():
@@ -1072,6 +1092,10 @@ class JarvisGUI(QMainWindow):
         memo_key = self.hotkey_settings.get("memo_hotkey", "ctrl+shift+m")
         self._memo_vk_combo = self._parse_hotkey_combo(memo_key)
 
+        # --- 보내기 트레이 단축키 파싱 (기본: Ctrl+T) ---
+        tray_key = self.hotkey_settings.get("tray_hotkey", "ctrl+t")
+        self._tray_vk_combo = self._parse_hotkey_combo(tray_key)
+
         # --- VK 코드 → 스니펫 텍스트 맵 구축 ---
         self._vk_snippet_map = {}
         for snippet in self.hotkey_settings.get("snippets", []):
@@ -1086,15 +1110,17 @@ class JarvisGUI(QMainWindow):
                         if vk is not None:
                             self._vk_snippet_map[vk] = text
 
-        if not self._vk_snippet_map and not self._memo_vk_combo:
+        if not self._vk_snippet_map and not self._memo_vk_combo and not self._tray_vk_combo:
             self._snippet_hook_handle = None
             self._snippet_hook_thread = None
             return
 
         vk_map = self._vk_snippet_map
         memo_combo = self._memo_vk_combo
+        tray_combo = self._tray_vk_combo
         paste_fn = self._paste_snippet
         activate_memo_fn = self._activate_memo
+        activate_tray_fn = self._activate_send_tray
         self._hook_thread_id = None
 
         def hook_thread_func():
@@ -1152,6 +1178,13 @@ class JarvisGUI(QMainWindow):
                                 activate_memo_fn()
                                 return 1
 
+                        # 보내기 트레이 단축키 체크 (예: Ctrl+T)
+                        if tray_combo and ctrl_down:
+                            need_shift, trigger_vk = tray_combo
+                            if kb.vkCode == trigger_vk and shift_down == need_shift:
+                                activate_tray_fn()
+                                return 1
+
                         # 스니펫 단축키 체크 (예: Ctrl+1~9)
                         if ctrl_down and not shift_down and kb.vkCode in vk_map:
                             text = vk_map[kb.vkCode]
@@ -1172,7 +1205,7 @@ class JarvisGUI(QMainWindow):
             # 이 스레드의 ID 저장 (종료 시 WM_QUIT 전송용)
             self._hook_thread_id = ctypes.windll.kernel32.GetCurrentThreadId()
 
-            total = len(vk_map) + (1 if memo_combo else 0)
+            total = len(vk_map) + (1 if memo_combo else 0) + (1 if tray_combo else 0)
             if hook_handle:
                 print(f"✅ 통합 키보드 훅 설치 완료 (단축키 {total}개, 전용 스레드)")
             else:
@@ -2139,6 +2172,33 @@ class JarvisGUI(QMainWindow):
         title_row.addWidget(lbl_title_en)
         title_row.addStretch()
 
+        # ── 중앙 뷰 전환: [그룹] 카드 / [파일] 브라우저 ──
+        seg = QFrame()
+        seg.setStyleSheet(f"QFrame {{ background-color: {CT['bg_2']}; border: 1px solid {CT['border_soft']}; border-radius: 9px; }}")
+        seg_layout = QHBoxLayout(seg)
+        seg_layout.setContentsMargins(3, 3, 3, 3)
+        seg_layout.setSpacing(3)
+        seg_css = f"""
+            QPushButton {{
+                background: transparent; border: none; border-radius: 6px;
+                color: {CT['fg_2']}; font-size: 9pt; font-weight: 600;
+                padding: 5px 16px;
+            }}
+            QPushButton:hover {{ color: {CT['fg_0']}; }}
+            QPushButton:checked {{ background-color: {CT['bg_4']}; color: {CT['fg_0']}; }}
+        """
+        self.btn_view_groups = QPushButton("그룹")
+        self.btn_view_files = QPushButton("파일")
+        for _b in (self.btn_view_groups, self.btn_view_files):
+            _b.setCheckable(True)
+            _b.setCursor(Qt.CursorShape.PointingHandCursor)
+            _b.setStyleSheet(seg_css)
+            seg_layout.addWidget(_b)
+        self.btn_view_groups.setChecked(True)
+        self.btn_view_groups.clicked.connect(lambda: self._set_center_view('groups'))
+        self.btn_view_files.clicked.connect(lambda: self._set_center_view('files'))
+        title_row.addWidget(seg)
+
         from gui.claude_icons import pixmap as _icpx
         from PyQt6.QtCore import QSize as _QSize
         btn_rescan = QPushButton("  폴더 재스캔")
@@ -2244,10 +2304,10 @@ class JarvisGUI(QMainWindow):
 
         # ── filter-row 와 카드 목록 사이 구분선 (Claude Design .filter-row border-bottom) ──
         layout.addSpacing(10)
-        _filter_sep = QFrame()
-        _filter_sep.setFixedHeight(1)
-        _filter_sep.setStyleSheet(f"background-color: {CT['border_soft']}; border: none;")
-        layout.addWidget(_filter_sep)
+        self._filter_sep = QFrame()
+        self._filter_sep.setFixedHeight(1)
+        self._filter_sep.setStyleSheet(f"background-color: {CT['border_soft']}; border: none;")
+        layout.addWidget(self._filter_sep)
 
         # ── 5) GROUP CARD SCROLL ──
         layout.addSpacing(14)
@@ -2266,12 +2326,32 @@ class JarvisGUI(QMainWindow):
         self.merge_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         self.merge_scroll.setWidget(self.merge_container)
-        layout.addWidget(self.merge_scroll, stretch=1)
+
+        # ── 중앙 스택: 0=그룹 카드 스크롤, 1=파일 브라우저 ──
+        from gui.file_browser import FileBrowserWidget
+        self.center_file_browser = FileBrowserWidget(path_callback=lambda: self.line_path.text())
+        self.center_stack = QStackedWidget()
+        self.center_stack.addWidget(self.merge_scroll)
+        self.center_stack.addWidget(self.center_file_browser)
+        layout.addWidget(self.center_stack, stretch=1)
 
         self.lbl_hint = QLabel("분석을 기다리는 중...")
         self.lbl_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lbl_hint.setStyleSheet(f"color: {CT['fg_3']}; font-size: 11pt; padding: 40px;")
         self.merge_layout.addWidget(self.lbl_hint)
+
+    def _set_center_view(self, mode):
+        """중앙 패널 뷰 전환: 'groups'=그룹 카드, 'files'=파일 브라우저"""
+        is_files = (mode == 'files')
+        self.btn_view_groups.setChecked(not is_files)
+        self.btn_view_files.setChecked(is_files)
+        # 필터 칩은 그룹 카드 전용 → 파일 뷰에서는 숨김
+        self.filter_bar.setVisible(not is_files)
+        self._filter_sep.setVisible(not is_files)
+        self.center_stack.setCurrentIndex(1 if is_files else 0)
+        if is_files:
+            # 열 때마다 지정 폴더 기준 최신 상태로
+            self.center_file_browser.go_home()
 
     def _chip_css(self, dot_color=None):
         """필터 chip 스타일 (색 dot + 텍스트) — 완전 둥근 pill."""

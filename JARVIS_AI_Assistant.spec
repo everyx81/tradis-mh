@@ -88,6 +88,8 @@ hidden_imports = [
     'gui.mk3_widgets',
     'gui.report_panel',
     'gui.jarvis_toast',
+    'gui.file_browser',  # 보내기 트레이·정산 [파일] 뷰 공용 (lazy import)
+    'gui.send_tray',     # 보내기 트레이 (gui_jarvis에서 lazy import)
     'calendar_manager',
     'auto_rename',
     'version',

@@ -2546,30 +2546,8 @@ class JarvisGUI(QMainWindow):
                         card.status_changed.connect(self._refresh_filter_counts)
                 except Exception as e: self.emit_log(f"Error creating card for {text_id}: {e}")
 
-            # 독립 문서 카드 (이체증 등)
-            independent = report.get('independent', {})
-            for doc_type, file_list in independent.items():
-                try:
-                    from gui.dialogs import IndependentCard
-                    card = IndependentCard(self, directory, doc_type, file_list)
-                    self.merge_layout.addWidget(card)
-                    self.group_cards.append(card)
-                    if hasattr(card, 'status_changed'):
-                        card.status_changed.connect(self._refresh_filter_counts)
-                except Exception as e:
-                    self.emit_log(f"Error creating independent card for {doc_type}: {e}")
-
-            if unclassified:
-                try:
-                    # 미분류도 IndependentCard로 표시 (이름변경/삭제 우클릭 메뉴 지원)
-                    from gui.dialogs import IndependentCard
-                    unclass_card = IndependentCard(self, directory, "미분류", unclassified)
-                    self.merge_layout.addWidget(unclass_card)
-                    self.group_cards.append(unclass_card)
-                    if hasattr(unclass_card, 'status_changed'):
-                        unclass_card.status_changed.connect(self._refresh_filter_counts)
-                except Exception as e:
-                    self.emit_log(f"Error creating unclassified card: {e}")
+            # 이체증(독립)·미분류 카드는 표시하지 않음 (2026-07 사용자 요청)
+            # — 해당 파일들은 [파일] 뷰와 보내기 트레이(Ctrl+T)에서 직접 다룰 수 있음
             self.merge_layout.addStretch()
 
             # 필터 초기화 후 카운트 갱신

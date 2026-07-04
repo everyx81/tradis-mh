@@ -297,6 +297,28 @@ class FileBrowserWidget(QWidget):
                 padding: 4px;
                 outline: none;
             }}
+            QScrollBar:vertical {{
+                background: transparent;
+                width: 8px;
+                margin: 4px 2px 4px 0;
+            }}
+            QScrollBar::handle:vertical {{
+                background: {CT["border_strong"]};
+                border-radius: 4px;
+                min-height: 30px;
+            }}
+            QScrollBar::handle:vertical:hover {{
+                background: {CT["fg_3"]};
+            }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+                height: 0; background: none; border: none;
+            }}
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
+                background: transparent;
+            }}
+            QScrollBar:horizontal {{
+                height: 0;
+            }}
         """)
         self.list.refresh_needed.connect(self._schedule_refresh)
         layout.addWidget(self.list, 1)

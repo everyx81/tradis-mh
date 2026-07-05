@@ -4122,6 +4122,13 @@ class GroupCard(GlassFrame):
 
         def _on_validated(res):
             try:
+                # 검증 스레드가 오류로 빈 결과를 반환한 경우 — 조용히 숨기지 않고 표시
+                if not res:
+                    self._set_warning("neutral", "금액 검증 불가 — 내부 오류 (카드를 다시 열면 재시도)")
+                    self._validation_status = None
+                    self._update_status_badge()
+                    return
+
                 item_all = res.get('item_all_matched', True)
                 sum_matched = res.get('sum_matched', True)
                 details = res.get('item_details', [])
@@ -4129,7 +4136,15 @@ class GroupCard(GlassFrame):
                 sum_files = res.get('sum_files', 0)
 
                 if item_all and sum_matched:
-                    self._set_warning("green", "항목별/합산 금액 검증 완료")
+                    # 부가세/오차 기준으로 맞춘 항목이 있으면 함께 표시
+                    kinds = {d.get('kind') for d in details if d.get('kind')}
+                    kinds.add(res.get('sum_kind'))
+                    if 'vat' in kinds:
+                        self._set_warning("green", "금액 검증 완료 (일부 부가세 포함 기준 일치)")
+                    elif 'tolerance' in kinds:
+                        self._set_warning("green", "금액 검증 완료 (허용 오차 이내)")
+                    else:
+                        self._set_warning("green", "항목별/합산 금액 검증 완료")
                     self._validation_status = 'green'
                 elif not item_all and sum_matched:
                     # 항목별 불일치이나 합산은 맞음 → OCR 오류 가능성
@@ -4142,7 +4157,10 @@ class GroupCard(GlassFrame):
                     self._validation_status = 'yellow'
                 elif item_all and not sum_matched:
                     diff = abs(sum_items - sum_files)
-                    self._set_warning("yellow", f"합산 불일치 (차이: {diff:,}원)")
+                    hint = ""
+                    if sum_items > 0 and abs(diff - round(sum_items * 0.1)) <= 100:
+                        hint = " · 부가세 포함/미포함 혼용 가능성"
+                    self._set_warning("yellow", f"합산 불일치 (차이: {diff:,}원){hint}")
                     self._validation_status = 'yellow'
                 else:
                     mismatched = [d for d in details if not d.get('matched') and not d.get('no_file')]

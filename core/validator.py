@@ -4,6 +4,41 @@ import os
 from .constants import EXPENSE_SYNONYMS
 
 
+def get_amount_tolerance():
+    """금액 비교 허용 오차(원). config.json의 validation_tolerance 키, 기본 10원."""
+    try:
+        import json
+        from .config import get_config_path
+        p = get_config_path()
+        if os.path.exists(p):
+            with open(p, 'r', encoding='utf-8') as f:
+                return max(0, int(json.load(f).get('validation_tolerance', 10)))
+    except Exception:
+        pass
+    return 10
+
+
+def classify_amount_pair(item_amt, file_amt, tolerance=10):
+    """두 금액의 일치 종류를 판정.
+
+    Returns:
+        'exact'     정확히 일치
+        'vat'       한쪽이 다른 쪽의 부가세(10%) 포함 금액 (반올림 ±1원)
+        'tolerance' 허용 오차 이내
+        None        불일치
+    """
+    if item_amt <= 0 or file_amt <= 0:
+        return 'exact' if item_amt == file_amt else None
+    if item_amt == file_amt:
+        return 'exact'
+    if (abs(round(item_amt * 1.1) - file_amt) <= 1
+            or abs(round(file_amt * 1.1) - item_amt) <= 1):
+        return 'vat'
+    if abs(item_amt - file_amt) <= tolerance:
+        return 'tolerance'
+    return None
+
+
 def validate_mapping_amounts(mapping, directory):
     """
     매핑 리스트의 각 비용 항목 금액과 매칭된 파일의 OCR 금액을 1:1 비교하고,
@@ -31,7 +66,10 @@ def validate_mapping_amounts(mapping, directory):
         'sum_items': 0,
         'sum_files': 0,
         'sum_matched': False,
+        'sum_kind': None,
     }
+
+    tolerance = get_amount_tolerance()
 
     _summed_files = set()          # 파일별 sum_files 중복 합산 방지
     _used_bi_indices = {}          # {filename: set(idx)} - billing_item 사용 추적
@@ -165,19 +203,31 @@ def validate_mapping_amounts(mapping, directory):
         # 4) 파일 총액 단독
         비교용_파일금액 = file_amt + 추가파일_합계
         matched = False
+        match_kind = None
         if item_amt > 0:
+            # 정확 일치 > 부가세 차이 > 허용 오차 순으로 가장 좋은 일치를 선택
+            _prio = {'exact': 0, 'vat': 1, 'tolerance': 2}
+            best = None
             for 후보금액 in [
                 file_amt + 추가파일_합계,    # 청구항목 금액 + 추가파일
                 파일_총액 + 추가파일_합계,    # 파일 총액 + 추가파일
                 file_amt,                    # 청구항목 금액 단독
                 파일_총액,                    # 파일 총액 단독
             ]:
-                if 후보금액 > 0 and item_amt == 후보금액:
-                    matched = True
-                    비교용_파일금액 = 후보금액
-                    break
+                if 후보금액 <= 0:
+                    continue
+                kind = classify_amount_pair(item_amt, 후보금액, tolerance)
+                if kind and (best is None or _prio[kind] < best[0]):
+                    best = (_prio[kind], 후보금액, kind)
+                    if kind == 'exact':
+                        break
+            if best:
+                matched = True
+                비교용_파일금액 = best[1]
+                match_kind = best[2]
         elif item_amt == 0 and file_amt == 0:
             matched = True  # 양쪽 다 0이면 검증 불필요
+            match_kind = 'exact'
 
         if not matched:
             result['item_all_matched'] = False
@@ -185,11 +235,14 @@ def validate_mapping_amounts(mapping, directory):
         result['item_details'].append({
             'label': label, 'item_amount': item_amt,
             'file_amount': 비교용_파일금액, 'matched': matched,
+            'kind': match_kind,
             'filename': filename
         })
 
-    # 합산 비교 (오차 10원 이내 허용)
-    result['sum_matched'] = abs(result['sum_items'] - result['sum_files']) < 10
+    # 합산 비교 — 정확 일치 / 부가세 차이 / 허용 오차 모두 일치로 인정하되 종류를 남김
+    result['sum_kind'] = classify_amount_pair(
+        result['sum_items'], result['sum_files'], tolerance)
+    result['sum_matched'] = result['sum_kind'] is not None
 
     return result
 

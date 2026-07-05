@@ -1085,6 +1085,58 @@ class AutoRenamer:
 
         return m
 
+    # ──── 병합 안전장치: 원본 보관함 + 병합 이력 ────
+
+    BACKUP_KEEP_DAYS = 30
+
+    def _data_dir(self):
+        from core.config import get_config_path
+        return os.path.dirname(get_config_path())
+
+    def _backup_root(self):
+        return os.path.join(self._data_dir(), 'merge_backup')
+
+    def _backup_file(self, src_path):
+        """병합 후 원본을 삭제하는 대신 보관함(data/merge_backup/날짜/)으로 이동.
+        30일 뒤 자동 삭제되며, 그 전에는 복구 가능. 이동 실패 시 원본 유지."""
+        try:
+            import datetime
+            day_dir = os.path.join(self._backup_root(), datetime.date.today().isoformat())
+            os.makedirs(day_dir, exist_ok=True)
+            dst = get_unique_filename(os.path.join(day_dir, os.path.basename(src_path)))
+            shutil.move(src_path, dst)
+            return dst
+        except Exception as e:
+            self.log(f" -> [보관 실패] {os.path.basename(src_path)}: {e} (원본 유지)")
+            return None
+
+    def _cleanup_old_backups(self):
+        """보관함에서 보관 기간(30일)이 지난 날짜 폴더 삭제"""
+        import datetime
+        root = self._backup_root()
+        if not os.path.isdir(root):
+            return
+        cutoff = datetime.date.today() - datetime.timedelta(days=self.BACKUP_KEEP_DAYS)
+        for name in os.listdir(root):
+            try:
+                if datetime.date.fromisoformat(name) < cutoff:
+                    shutil.rmtree(os.path.join(root, name))
+                    self.log(f" -> [보관함 정리] {name} (30일 경과)")
+            except (ValueError, OSError):
+                continue
+
+    def _log_merge_history(self, record):
+        """병합 1건당 이력 1줄을 data/merge_history.jsonl에 기록 (감사용)"""
+        try:
+            import json
+            import datetime
+            record['time'] = datetime.datetime.now().isoformat(timespec='seconds')
+            path = os.path.join(self._data_dir(), 'merge_history.jsonl')
+            with open(path, 'a', encoding='utf-8') as f:
+                f.write(json.dumps(record, ensure_ascii=False) + '\n')
+        except Exception as e:
+            print(f"병합 이력 기록 오류: {e}")
+
     def execute_merge_task(self, dr, of, fo, export_docs_root=None, marked_files=None,
                           merge_verify_callback=None, archive_only=False):
         """병합 수행 후 파일 정리
@@ -1226,10 +1278,8 @@ class AutoRenamer:
                         except Exception:
                             pass
                     else:
-                        try:
-                            os.remove(src_path)
-                        except Exception:
-                            pass
+                        # 삭제 대신 보관함으로 이동 (30일 후 자동 삭제, 그 전엔 복구 가능)
+                        self._backup_file(src_path)
 
                 # 같은 ID의 남은 PDF 추가 정리 (기존 안전망)
                 if target_id:
@@ -1245,10 +1295,8 @@ class AutoRenamer:
                                 except Exception:
                                     pass
                             else:
-                                try:
-                                    os.remove(os.path.join(dr, f))
-                                except Exception:
-                                    pass
+                                # 삭제 대신 보관함으로 이동
+                                self._backup_file(os.path.join(dr, f))
             else:
                 # archive_only=True 또는 1개 파일: 병합 없이 원본을 폴더로 이동
                 for f in fo:
@@ -1360,6 +1408,16 @@ class AutoRenamer:
             # 관련 파일/폴더 자동 수집 (merge 대상 폴더 - 이름변경 폴더에서만)
             # 마킹으로 이미 이동된 파일은 제외
             self._collect_related_items(dr, archive_dir, target_id, exclude_names=moved_marked)
+
+            # 병합 이력 기록 + 보관함 자동 청소
+            self._log_merge_history({
+                'mode': 'archive' if (archive_only or len(fo) < 2) else 'merge',
+                'company': final_company,
+                'bl': target_id,
+                'files': [f for f in fo if f],
+                'archive_dir': archive_dir,
+            })
+            self._cleanup_old_backups()
 
             self.log(f" -> [완료] 폴더 정리 완료: {folder_name}")
             return True

@@ -1,11 +1,11 @@
-# 보내기 트레이 — Ctrl+T 전역 단축키로 여는 항상-위 미니 파일 창
+# 보내기 트레이 — Alt+T 전역 단축키로 여는 항상-위 미니 파일 창
 """
 지정 폴더(target_path)의 파일을 카카오톡·네이트온·메일 창으로 바로
 드래그해서 보낼 수 있는 소형 always-on-top 창.
 
 파일 목록 기능은 gui/file_browser.py의 FileBrowserWidget을 사용
 (정산 패널 [파일] 뷰와 공용). 이 파일은 창 틀(항상 위, 위치 기억,
-Ctrl+T 토글)만 담당한다.
+Alt+T 토글)만 담당한다.
 """
 
 import os

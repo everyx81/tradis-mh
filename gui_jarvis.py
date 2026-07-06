@@ -960,7 +960,7 @@ class JarvisGUI(QMainWindow):
         """글로벌 단축키 초기화"""
         self.hotkey_settings = self._load_hotkey_settings()
         self._register_hotkeys()
-        self.emit_log(f"Global Hotkeys Initialized: Memo={self.hotkey_settings.get('memo_hotkey', 'ctrl+shift+m')}, Tray={self.hotkey_settings.get('tray_hotkey', 'ctrl+t')}")
+        self.emit_log(f"Global Hotkeys Initialized: Memo={self.hotkey_settings.get('memo_hotkey', 'ctrl+shift+m')}, Tray={self.hotkey_settings.get('tray_hotkey', 'alt+t')}")
     
     def _load_hotkey_settings(self):
         """단축키 설정 로드"""
@@ -1092,8 +1092,8 @@ class JarvisGUI(QMainWindow):
         memo_key = self.hotkey_settings.get("memo_hotkey", "ctrl+shift+m")
         self._memo_vk_combo = self._parse_hotkey_combo(memo_key)
 
-        # --- 보내기 트레이 단축키 파싱 (기본: Ctrl+T) ---
-        tray_key = self.hotkey_settings.get("tray_hotkey", "ctrl+t")
+        # --- 보내기 트레이 단축키 파싱 (기본: Alt+T) ---
+        tray_key = self.hotkey_settings.get("tray_hotkey", "alt+t")
         self._tray_vk_combo = self._parse_hotkey_combo(tray_key)
 
         # --- VK 코드 → 스니펫 텍스트 맵 구축 ---
@@ -1148,6 +1148,7 @@ class JarvisGUI(QMainWindow):
             WM_QUIT = 0x0012
             VK_CONTROL = 0x11
             VK_SHIFT = 0x10
+            VK_MENU = 0x12  # Alt
 
             HOOKPROC = ctypes.CFUNCTYPE(
                 ctypes.wintypes.LPARAM, ctypes.c_int,
@@ -1170,18 +1171,20 @@ class JarvisGUI(QMainWindow):
                         kb = ctypes.cast(lParam, ctypes.POINTER(KBDLLHOOKSTRUCT)).contents
                         ctrl_down = bool(user32.GetAsyncKeyState(VK_CONTROL) & 0x8000)
                         shift_down = bool(user32.GetAsyncKeyState(VK_SHIFT) & 0x8000)
+                        alt_down = bool(user32.GetAsyncKeyState(VK_MENU) & 0x8000)
+                        mods = (ctrl_down, alt_down, shift_down)
 
-                        # 메모 단축키 체크 (예: Ctrl+Shift+M)
-                        if memo_combo and ctrl_down:
-                            need_shift, trigger_vk = memo_combo
-                            if kb.vkCode == trigger_vk and shift_down == need_shift:
+                        # 메모 단축키 체크 (예: Ctrl+Shift+M, F11)
+                        if memo_combo:
+                            need_ctrl, need_alt, need_shift, trigger_vk = memo_combo
+                            if kb.vkCode == trigger_vk and mods == (need_ctrl, need_alt, need_shift):
                                 activate_memo_fn()
                                 return 1
 
-                        # 보내기 트레이 단축키 체크 (예: Ctrl+T)
-                        if tray_combo and ctrl_down:
-                            need_shift, trigger_vk = tray_combo
-                            if kb.vkCode == trigger_vk and shift_down == need_shift:
+                        # 보내기 트레이 단축키 체크 (예: Alt+T)
+                        if tray_combo:
+                            need_ctrl, need_alt, need_shift, trigger_vk = tray_combo
+                            if kb.vkCode == trigger_vk and mods == (need_ctrl, need_alt, need_shift):
                                 activate_tray_fn()
                                 return 1
 
@@ -1232,12 +1235,16 @@ class JarvisGUI(QMainWindow):
         self._snippet_hook_thread.start()
 
     def _parse_hotkey_combo(self, hotkey_str):
-        """단축키 문자열 → (need_shift, trigger_vk) 튜플로 파싱"""
+        """단축키 문자열 → (need_ctrl, need_alt, need_shift, trigger_vk) 튜플로 파싱
+
+        문자/숫자 키는 Ctrl 또는 Alt가 반드시 포함되어야 함
+        (Shift+문자 단독은 일반 타이핑을 가로채므로 거부). F키는 단독 허용.
+        """
         if not hotkey_str:
             return None
         parts = [p.strip().lower() for p in hotkey_str.split("+")]
-        if "ctrl" not in parts:
-            return None
+        need_ctrl = "ctrl" in parts
+        need_alt = "alt" in parts
         need_shift = "shift" in parts
         trigger_parts = [p for p in parts if p not in ("ctrl", "shift", "alt")]
         if not trigger_parts:
@@ -1245,7 +1252,10 @@ class JarvisGUI(QMainWindow):
         vk = self._key_to_vk(trigger_parts[0])
         if vk is None:
             return None
-        return (need_shift, vk)
+        is_fkey = 0x70 <= vk <= 0x87  # VK_F1~F24
+        if not is_fkey and not (need_ctrl or need_alt):
+            return None
+        return (need_ctrl, need_alt, need_shift, vk)
 
     def _remove_snippet_hook(self):
         """키보드 훅 제거 — WM_QUIT로 스레드 안전 종료"""
@@ -1267,6 +1277,10 @@ class JarvisGUI(QMainWindow):
                 return 0x30 + int(key)  # VK_0(0x30) ~ VK_9(0x39)
             elif key.isalpha():
                 return ord(key.upper())  # VK_A(0x41) ~ VK_Z(0x5A)
+        elif key.startswith("f") and key[1:].isdigit():
+            n = int(key[1:])
+            if 1 <= n <= 24:
+                return 0x70 + n - 1  # VK_F1(0x70) ~ VK_F24(0x87)
         return None
     
     def show_hotkey_settings(self):
@@ -2547,7 +2561,7 @@ class JarvisGUI(QMainWindow):
                 except Exception as e: self.emit_log(f"Error creating card for {text_id}: {e}")
 
             # 이체증(독립)·미분류 카드는 표시하지 않음 (2026-07 사용자 요청)
-            # — 해당 파일들은 [파일] 뷰와 보내기 트레이(Ctrl+T)에서 직접 다룰 수 있음
+            # — 해당 파일들은 [파일] 뷰와 보내기 트레이(Alt+T)에서 직접 다룰 수 있음
             self.merge_layout.addStretch()
 
             # 필터 초기화 후 카운트 갱신

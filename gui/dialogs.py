@@ -2605,12 +2605,23 @@ class GroupCard(GlassFrame):
             if child.widget():
                 child.widget().deleteLater()
 
-        if not items and summary is None and not getattr(self, '_levy_badge_info', None):
+        badge = getattr(self, '_levy_badge_info', None)
+        is_monthly = getattr(self, '_is_monthly_billing', False)
+
+        # 발견된 서류는 아래 파일 목록에 이미 보이므로 칩 생략 — 누락/해당없음만 표시 (중복 제거)
+        def _is_problem(it):
+            if isinstance(it, dict):
+                return (not it.get('found', False)) or it.get('not_applicable', False)
+            return not it[1]
+        problem_items = [it for it in items if _is_problem(it)]
+
+        has_content = bool(problem_items) or summary is not None or bool(badge) or is_monthly
+        if hasattr(self, '_checklist_container'):
+            self._checklist_container.setVisible(has_content)
+        if not has_content:
             return
 
         # 징수형태 + 월납업체 배지 (수입 카드에 있을 때만, 체크리스트 상단에 별도 행)
-        badge = getattr(self, '_levy_badge_info', None)
-        is_monthly = getattr(self, '_is_monthly_billing', False)
         if badge or is_monthly:
             badge_row = QWidget()
             badge_row.setStyleSheet("background: transparent;")
@@ -2630,7 +2641,7 @@ class GroupCard(GlassFrame):
         flow = FlowLayout(flow_wrap, h_spacing=14, v_spacing=6)
         flow.setContentsMargins(0, 0, 0, 0)
 
-        for it in items:
+        for it in problem_items:
             if isinstance(it, dict):
                 name = it.get('name', '')
                 is_found = it.get('found', False)
@@ -2728,57 +2739,95 @@ class GroupCard(GlassFrame):
         # 파일 매핑 리스트 (▲/▼ 버튼으로 파일 교환)
         self.combo_list = []  # 콤보박스 참조 저장
         
-        arrow_btn_style = """
-            QPushButton {
-                background: rgba(20, 35, 55, 150);
-                border: 1px solid rgba(100, 160, 200, 45);
-                border-radius: 8px;
-                color: #8aa5c0; font-size: 10px; font-weight: 600;
-            }
-            QPushButton:hover {
-                background: rgba(40, 65, 95, 200);
-                border: 1px solid rgba(100, 200, 240, 130);
-                color: #ffffff;
-            }
-            QPushButton:disabled { color: #333c48; border: 1px solid rgba(80, 100, 120, 30); }
+        from .claude_theme import C as _CT
+        from .claude_icons import pixmap as _icpx
+        from PyQt6.QtGui import QIcon as _QIcon
+        from PyQt6.QtCore import QSize as _QSize
+        arrow_btn_style = f"""
+            QPushButton {{
+                background: transparent;
+                border: 1px solid transparent;
+                border-radius: 6px;
+            }}
+            QPushButton:hover {{
+                background: {_CT['bg_3']};
+            }}
+            QPushButton:disabled {{
+                background: transparent;
+            }}
         """
 
         for idx, item in enumerate(self.mapping):
             row_widget = QWidget()
             row_widget.setObjectName("MappingRow")
-            row_widget.setMinimumHeight(40)
-            row_widget.setStyleSheet("""
-                QWidget#MappingRow {
-                    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                        stop:0 rgba(18, 28, 42, 150),
-                        stop:1 rgba(14, 24, 38, 130));
-                    border: 1px solid rgba(100, 180, 240, 35);
-                    border-radius: 10px;
-                }
-                QWidget#MappingRow:hover {
-                    border: 1px solid rgba(100, 200, 240, 90);
-                }
+            row_widget.setMinimumHeight(38)
+            row_widget.setStyleSheet(f"""
+                QWidget#MappingRow {{
+                    background: {_CT['bg_2']};
+                    border: 1px solid {_CT['border_soft']};
+                    border-radius: 8px;
+                }}
+                QWidget#MappingRow:hover {{
+                    border: 1px solid {_CT['border']};
+                }}
             """)
             row_layout = QHBoxLayout(row_widget)
             row_layout.setContentsMargins(10, 6, 10, 6)
             row_layout.setSpacing(8)
 
-            # ▲/▼ 버튼
-            btn_up = QPushButton("▲")
-            btn_up.setFixedSize(24, 24)
-            btn_up.setStyleSheet(arrow_btn_style)
-            btn_up.setToolTip("파일을 위로 이동")
-            btn_up.setEnabled(idx > 0)
-            btn_up.clicked.connect(lambda _, i=idx: self._swap_files(i, i - 1))
-            row_layout.addWidget(btn_up)
+            # 해당없음 여부 (징수형태 / 월납업체 / 사용자 override)
+            try:
+                _na_set = self._compute_na_set()
+            except Exception:
+                _na_set = set()
+            _label_raw = item.get('label', '')
+            if ']' in _label_raw:
+                _item_name = _label_raw.split(']')[-1].strip()
+            elif ':' in _label_raw:
+                _item_name = _label_raw.split(':')[-1].strip()
+            else:
+                _item_name = _label_raw
+            _is_na = _item_name in _na_set
+            has_file = bool(item.get('filename', ''))
+            is_included = '포함' in item['label']
 
-            btn_down = QPushButton("▼")
-            btn_down.setFixedSize(24, 24)
-            btn_down.setStyleSheet(arrow_btn_style)
-            btn_down.setToolTip("파일을 아래로 이동")
-            btn_down.setEnabled(idx < len(self.mapping) - 1)
-            btn_down.clicked.connect(lambda _, i=idx: self._swap_files(i, i + 1))
-            row_layout.addWidget(btn_down)
+            # 순번 배지 — 상태 색 (녹색=파일 있음 / 빨강=누락 / 회색=해당없음)
+            _badge = QLabel(str(idx + 1))
+            _badge.setFixedSize(20, 20)
+            _badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            if _is_na:
+                _b_bg, _b_bd, _b_fg = _CT['bg_3'], _CT['border_soft'], _CT['fg_3']
+            elif has_file:
+                _b_bg, _b_bd, _b_fg = "rgba(89, 200, 134, 36)", "rgba(89, 200, 134, 120)", _CT['green']
+            else:
+                _b_bg, _b_bd, _b_fg = "rgba(250, 104, 99, 36)", "rgba(250, 104, 99, 120)", _CT['red']
+            _badge.setStyleSheet(f"""
+                background-color: {_b_bg};
+                border: 1px solid {_b_bd};
+                border-radius: 6px;
+                color: {_b_fg};
+                font-family: 'JetBrains Mono','Consolas',monospace;
+                font-size: 8.5pt;
+                font-weight: 600;
+            """)
+            row_layout.addWidget(_badge)
+
+            # 서류 라벨
+            lbl = QLabel(item['label'])
+            if _is_na:
+                lbl.setText(f"{item['label']}  (해당없음)")
+                lbl.setStyleSheet(f"color: {_CT['fg_3']}; background: transparent; font-size: 9.5pt;")
+                lbl.setToolTip("해당없음 항목 — 금액 검증/파일 요구 안 함")
+            elif item.get('matched_by_amount', False):
+                lbl.setStyleSheet(f"color: {_CT['accent_hi']}; background: transparent; font-weight: 600; font-size: 9.5pt;")
+                lbl.setToolTip("총금액 비교로 매칭되었습니다.")
+            elif not has_file and not is_included:
+                lbl.setStyleSheet(f"color: {_CT['red']}; background: transparent; font-weight: 600; font-size: 9.5pt;")
+                lbl.setToolTip("계산서 매칭 안 됨")
+            else:
+                lbl.setStyleSheet(f"color: {_CT['fg_1']}; background: transparent; font-size: 9.5pt;")
+            lbl.setMinimumWidth(120)
+            row_layout.addWidget(lbl)
             
             # 콤보박스 (파일 선택)
             combo = QComboBox()
@@ -2800,110 +2849,121 @@ class GroupCard(GlassFrame):
             combo.setToolTip(combo.currentText())
             combo.currentIndexChanged.connect(lambda _, i=idx, c=combo: self.update_mapping(i, c))
             combo.currentTextChanged.connect(lambda text, c=combo: c.setToolTip(text))
-            combo.setStyleSheet("""
-                QComboBox {
-                    background: rgba(12, 22, 35, 180);
-                    color: #c0d5ea;
-                    border: 1px solid rgba(100, 180, 240, 45);
-                    border-radius: 8px;
-                    padding: 5px 10px;
+            combo.setStyleSheet(f"""
+                QComboBox {{
+                    background: {_CT['bg_3']};
+                    color: {_CT['fg_0']};
+                    border: 1px solid {_CT['border_soft']};
+                    border-radius: 7px;
+                    padding: 4px 10px;
                     min-width: 180px;
-                    font-size: 10pt;
-                }
-                QComboBox:hover {
-                    border: 1px solid rgba(100, 200, 240, 100);
-                }
-                QComboBox::drop-down {
+                    font-size: 9.5pt;
+                }}
+                QComboBox:hover {{
+                    border: 1px solid {_CT['border']};
+                }}
+                QComboBox::drop-down {{
                     border: none;
                     width: 20px;
-                }
-                QComboBox::down-arrow {
+                }}
+                QComboBox::down-arrow {{
                     image: none;
                     border-left: 4px solid transparent;
                     border-right: 4px solid transparent;
-                    border-top: 5px solid #8aa5c0;
+                    border-top: 5px solid {_CT['fg_2']};
                     margin-right: 8px;
-                }
-                QComboBox QAbstractItemView {
-                    background: rgba(15, 25, 38, 250);
-                    color: #c0d5ea;
-                    selection-background-color: rgba(100, 200, 240, 60);
-                    selection-color: #ffffff;
-                    border: 1px solid rgba(100, 180, 240, 80);
+                }}
+                QComboBox QAbstractItemView {{
+                    background: {_CT['bg_3']};
+                    color: {_CT['fg_0']};
+                    selection-background-color: {_CT['accent_bg']};
+                    selection-color: {_CT['fg_0']};
+                    border: 1px solid {_CT['border']};
                     border-radius: 6px;
                     padding: 4px;
-                }
+                }}
             """)
             row_layout.addWidget(combo, stretch=1)
             self.combo_list.append(combo)
 
-            btn_preview = QPushButton("🔍")
-            btn_preview.setFixedSize(28, 28)
-            btn_preview.setStyleSheet("""
-                QPushButton {
-                    background: rgba(20, 35, 55, 150);
-                    border: 1px solid rgba(100, 160, 200, 45);
-                    border-radius: 8px;
-                }
-                QPushButton:hover {
-                    background: rgba(40, 65, 95, 200);
-                    border: 1px solid rgba(100, 200, 240, 130);
-                }
-            """)
-            btn_preview.setToolTip("📄 파일 미리보기")
+            btn_preview = QPushButton()
+            btn_preview.setIcon(_QIcon(_icpx("Search", size=14, color=_CT['fg_2'])))
+            btn_preview.setIconSize(_QSize(14, 14))
+            btn_preview.setFixedSize(26, 26)
+            btn_preview.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn_preview.setStyleSheet(arrow_btn_style)
+            btn_preview.setToolTip("파일 미리보기")
             btn_preview.clicked.connect(lambda _, c=combo: self._show_thumbnail_popup(c.currentText()))
             row_layout.addWidget(btn_preview)
-            
-            # not_applicable 여부 계산 (징수형태 / 월납업체 / 사용자 override)
-            try:
-                _na_set = self._compute_na_set()
-            except Exception:
-                _na_set = set()
-            _label_raw = item.get('label', '')
-            if ']' in _label_raw:
-                _item_name = _label_raw.split(']')[-1].strip()
-            elif ':' in _label_raw:
-                _item_name = _label_raw.split(':')[-1].strip()
-            else:
-                _item_name = _label_raw
-            _is_na = _item_name in _na_set
 
-            lbl = QLabel(f"➡ {item['label']}")
+            # 순서 이동 버튼 (위/아래)
+            btn_up = QPushButton()
+            btn_up.setIcon(_QIcon(_icpx("ChevronUp", size=13, color=_CT['fg_2'])))
+            btn_up.setIconSize(_QSize(13, 13))
+            btn_up.setFixedSize(22, 26)
+            btn_up.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn_up.setStyleSheet(arrow_btn_style)
+            btn_up.setToolTip("파일을 위로 이동")
+            btn_up.setEnabled(idx > 0)
+            btn_up.clicked.connect(lambda _, i=idx: self._swap_files(i, i - 1))
+            row_layout.addWidget(btn_up)
 
-            # 매칭 상태에 따른 라벨 색상 (모던·차분 톤)
-            has_file = bool(item.get('filename', ''))
-            is_included = '포함' in item['label']
-            if _is_na:
-                # 해당없음 — 회색 + 해당없음 접미사
-                lbl.setText(f"➡ {item['label']}  (해당없음)")
-                lbl.setStyleSheet("color: #6a6e76; background: transparent; font-size: 10pt;")
-                lbl.setToolTip("해당없음 항목 — 금액 검증/파일 요구 안 함")
-            elif item.get('matched_by_amount', False):
-                lbl.setStyleSheet("color: #64b5ef; background: transparent; font-weight: 600; font-size: 10pt;")
-                lbl.setToolTip("총금액 비교로 매칭되었습니다.")
-            elif not has_file and not is_included:
-                lbl.setStyleSheet("color: #ff7e7e; background: transparent; font-weight: 600; font-size: 10pt;")
-                lbl.setToolTip("계산서 매칭 안 됨")
-            elif is_included:
-                lbl.setStyleSheet("color: #8aa5c0; background: transparent; font-size: 10pt;")
-            else:
-                lbl.setStyleSheet("color: #a8c5e0; background: transparent; font-size: 10pt;")
-
-            lbl.setMinimumWidth(120)
-            row_layout.addWidget(lbl)
+            btn_down = QPushButton()
+            btn_down.setIcon(_QIcon(_icpx("ChevronDown", size=13, color=_CT['fg_2'])))
+            btn_down.setIconSize(_QSize(13, 13))
+            btn_down.setFixedSize(22, 26)
+            btn_down.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn_down.setStyleSheet(arrow_btn_style)
+            btn_down.setToolTip("파일을 아래로 이동")
+            btn_down.setEnabled(idx < len(self.mapping) - 1)
+            btn_down.clicked.connect(lambda _, i=idx: self._swap_files(i, i + 1))
+            row_layout.addWidget(btn_down)
             
             self.mapping_layout.addWidget(row_widget)
         
-        self.mapping_layout.setSpacing(2)
+        self.mapping_layout.setSpacing(4)
         self.mapping_layout.setContentsMargins(0, 0, 0, 0)
-        
+
         btn_row = QHBoxLayout()
         btn_row.setSpacing(8)
-        btn_add_row = NeonButton("＋  행 추가", color="cyan")
+        btn_add_row = QPushButton("  행 추가")
+        btn_add_row.setIcon(_QIcon(_icpx("Plus", size=13, color=_CT['fg_2'])))
+        btn_add_row.setIconSize(_QSize(13, 13))
+        btn_add_row.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_add_row.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {_CT['bg_2']};
+                color: {_CT['fg_1']};
+                border: 1px solid {_CT['border_soft']};
+                border-radius: 8px;
+                padding: 6px 12px;
+                font-size: 9.5pt;
+                font-weight: 500;
+            }}
+            QPushButton:hover {{
+                background-color: {_CT['bg_3']};
+                color: {_CT['fg_0']};
+            }}
+        """)
         btn_add_row.clicked.connect(self.add_unclassified_row)
         btn_row.addWidget(btn_add_row)
+        btn_row.addStretch()
 
-        btn_exec = NeonButton("합치기 실행", color="cyan", is_primary=True)
+        btn_exec = QPushButton("합치기 실행")
+        btn_exec.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_exec.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {_CT['accent']};
+                color: #ffffff;
+                border: 1px solid {_CT['accent_hi']};
+                border-radius: 8px;
+                padding: 6px 16px;
+                font-size: 9.5pt;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{ background-color: {_CT['accent_hi']}; }}
+            QPushButton:pressed {{ background-color: {_CT['accent_lo']}; }}
+        """)
         btn_exec.clicked.connect(self.execute_merge)
         btn_row.addWidget(btn_exec)
         self.mapping_layout.addLayout(btn_row)

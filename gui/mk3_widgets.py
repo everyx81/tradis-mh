@@ -9,15 +9,16 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushBut
                               QLineEdit, QComboBox, QListWidget, QListWidgetItem,
                               QTextEdit, QFrame, QSpinBox, QMenu, QDialog, QCheckBox,
                               QTabWidget, QCalendarWidget)
-from PyQt6.QtCore import Qt, QTimer, QDate, QTime, pyqtSignal
-from PyQt6.QtGui import QFont, QColor, QBrush
+from PyQt6.QtCore import Qt, QTimer, QDate, QTime, QSize, pyqtSignal
+from PyQt6.QtGui import QFont, QColor, QBrush, QIcon, QTransform
 
 import sys
 import os
 # 상위 디렉토리 추가 (gui 폴더에서 실행 시 calendar_manager 찾기 위함)
 from calendar_manager import LocalScheduleManager, WindowsNotifier
 from core.holidays import is_holiday
-from .widgets import NeonButton
+from .claude_theme import C as CT
+from .claude_icons import pixmap
 
 class HUDStyleCalendar(QCalendarWidget):
     """JARVIS HUD 스타일 테마가 적용되고 일정이 있는 날짜에 뱃지를 그려주는 커스텀 달력"""
@@ -52,103 +53,109 @@ class HUDStyleCalendar(QCalendarWidget):
         self.currentPageChanged.connect(_on_page_changed)
         
     def init_style(self):
-        # 애플 스타일 다크 모드 캘린더 테마 적용
-        self.setStyleSheet("""
-            /* 전체 달력 배경 (다크 그레이) 및 테두리 제거 */
-            QCalendarWidget QWidget { 
-                alternate-background-color: transparent; 
-                background-color: transparent; 
-            }
-            
+        # Claude Design warm dark 캘린더 테마 적용
+        self.setStyleSheet(f"""
+            /* 전체 달력 배경 및 테두리 제거 */
+            QCalendarWidget QWidget {{
+                alternate-background-color: transparent;
+                background-color: transparent;
+            }}
+
             /* 상단 네비게이션 바 (월/년도, 화살표) 영역 */
-            QCalendarWidget QWidget#qt_calendar_navigationbar {
-                background-color: #1a1a1c;
+            QCalendarWidget QWidget#qt_calendar_navigationbar {{
+                background-color: {CT['bg_1']};
                 border: none;
                 padding: 10px 5px;
-            }
-            
+            }}
+
             /* 이전/다음 달 이동 화살표 버튼 */
-            QCalendarWidget QToolButton {
-                color: #8e8e93; /* 애플 스타일 회색 */
+            QCalendarWidget QToolButton {{
+                color: {CT['fg_2']};
                 font-weight: bold;
                 font-size: 14pt;
                 background-color: transparent;
                 border: none;
                 padding: 4px;
-            }
-            QCalendarWidget QToolButton:hover {
-                color: #ffffff;
-            }
-            
+            }}
+            QCalendarWidget QToolButton:hover {{
+                color: {CT['fg_0']};
+            }}
+
             /* 월/년도 선택 구역 정렬 및 폰트 */
-            QCalendarWidget QToolButton#qt_calendar_monthbutton {
-                color: #ffffff;
+            QCalendarWidget QToolButton#qt_calendar_monthbutton {{
+                color: {CT['fg_0']};
                 background-color: transparent;
                 font-size: 15pt;
-                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+                font-family: 'Segoe UI', sans-serif;
                 font-weight: bold;
-            }
-            QCalendarWidget QToolButton#qt_calendar_yearbutton {
-                color: #ffffff;
+            }}
+            QCalendarWidget QToolButton#qt_calendar_yearbutton {{
+                color: {CT['fg_0']};
                 background-color: transparent;
                 font-size: 15pt;
-                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+                font-family: 'Segoe UI', sans-serif;
                 font-weight: bold;
-            }
-            
+            }}
+
             /* 날짜 셀 뷰 영역 */
-            QCalendarWidget QTableView {
-                background-color: #1a1a1c;
+            QCalendarWidget QTableView {{
+                background-color: {CT['bg_1']};
                 selection-background-color: transparent;
                 selection-color: transparent;
                 outline: none;
                 border: none;
                 gridline-color: transparent;
-            }
-            
+            }}
+
             /* 포커스 아웃라인 제거 */
-            QCalendarWidget QAbstractItemView:enabled {
-                color: #ffffff;
+            QCalendarWidget QAbstractItemView:enabled {{
+                color: {CT['fg_0']};
                 outline: none;
                 border: none;
-            }
-            
+            }}
+
             /* 요일 헤더 폰트 공통 설정 (색상은 setWeekdayTextFormat 사용) */
-            QTableView QHeaderView::section {
+            QTableView QHeaderView::section {{
                 background-color: transparent;
                 border: none;
-                font-family: -apple-system;
+                font-family: 'Segoe UI', sans-serif;
                 font-size: 9pt;
-            }
-            
+            }}
+
             /* 메뉴 박스 레이아웃 조정 (년/월 선택용 팝업) */
-            QCalendarWidget QMenu {
-                background-color: #2c2c2e;
-                color: #ffffff;
+            QCalendarWidget QMenu {{
+                background-color: {CT['bg_2']};
+                color: {CT['fg_0']};
+                border: 1px solid {CT['border']};
                 border-radius: 8px;
-            }
-            QCalendarWidget QSpinBox {
-                background-color: #2c2c2e;
-                color: #ffffff;
-                selection-background-color: #3a3a3c;
+            }}
+            QCalendarWidget QMenu::item:selected {{
+                background-color: {CT['accent_bg']};
+                color: {CT['accent_hi']};
+            }}
+            QCalendarWidget QSpinBox {{
+                background-color: {CT['bg_2']};
+                color: {CT['fg_0']};
+                border: 1px solid {CT['border_soft']};
+                selection-background-color: {CT['accent_bg']};
                 border-radius: 4px;
-            }
+            }}
         """)
-        
+
         from PyQt6.QtGui import QTextCharFormat
         from PyQt6.QtCore import Qt
-        
+
         fmt_weekday = QTextCharFormat()
-        fmt_weekday.setForeground(QColor("#8e8e93"))
+        fmt_weekday.setForeground(QColor(CT['fg_2']))
         for day in (Qt.DayOfWeek.Monday, Qt.DayOfWeek.Tuesday, Qt.DayOfWeek.Wednesday, Qt.DayOfWeek.Thursday, Qt.DayOfWeek.Friday):
             self.setWeekdayTextFormat(day, fmt_weekday)
-            
+
         fmt_sat = QTextCharFormat()
-        fmt_sat.setForeground(QColor("#0a84ff")) # 파란색
+        fmt_sat.setForeground(QColor(CT['accent'])) # 파란색
         self.setWeekdayTextFormat(Qt.DayOfWeek.Saturday, fmt_sat)
-        
+
         fmt_sun = QTextCharFormat()
-        fmt_sun.setForeground(QColor("#ff453a")) # 빨간색
+        fmt_sun.setForeground(QColor(CT['red'])) # 빨간색
         self.setWeekdayTextFormat(Qt.DayOfWeek.Sunday, fmt_sun)
         
     def _force_square_cells(self):
@@ -212,17 +219,18 @@ class HUDStyleCalendar(QCalendarWidget):
         if date.month() == self.monthShown():
             holiday = is_holiday(date)
             if date.dayOfWeek() == 6:
-                base_bg_color = QColor(42, 50, 65)  # 약간 푸른빛 바탕 (토요일)
+                base_bg_color = QColor(35, 45, 62)  # 약간 푸른빛 바탕 (토요일)
             elif date.dayOfWeek() == 7 or holiday:
-                base_bg_color = QColor(65, 42, 42)  # 약간 붉은빛 바탕 (일요일/공휴일)
+                base_bg_color = QColor(56, 38, 40)  # 약간 붉은빛 바탕 (일요일/공휴일)
             else:
-                base_bg_color = QColor(58, 58, 60)  # 기본 짙은 회색 바탕
-                
+                base_bg_color = QColor(CT['bg_3'])  # 기본 짙은 회색 바탕
+
             if has_event:
                 # 일정이 있는 날짜는 격자 바탕이 조금 투명해지도록 (알파값 조정)
                 base_bg_color.setAlpha(150)
         else:
-            base_bg_color = QColor(44, 44, 46, 40)  # 더 투명하게
+            base_bg_color = QColor(CT['bg_2'])  # 더 투명하게
+            base_bg_color.setAlpha(60)
             
         painter.setBrush(QBrush(base_bg_color))
         painter.setPen(Qt.PenStyle.NoPen)
@@ -231,22 +239,26 @@ class HUDStyleCalendar(QCalendarWidget):
         
         # --- 2. 셀 하이라이트/선택 표시 ---
         if is_today:
-            # [오늘] 흰색 꽉 찬 원형 배경 (높이 기준 원, 조금 더 큼직하게 80%)
+            # [오늘] 액센트 반투명 원형 배경 (높이 기준 원, 조금 더 큼직하게 80%)
             circle_size = int(min(bg_width, bg_height) * 0.8)
             circle_rect = QRect(0, 0, circle_size, circle_size)
             circle_rect.moveCenter(bg_rect.center())
-            
-            painter.setBrush(QBrush(QColor("#ffffff")))
-            painter.setPen(Qt.PenStyle.NoPen)
+
+            today_color = QColor(CT['accent'])
+            today_color.setAlpha(56)
+            painter.setBrush(QBrush(today_color))
+            today_pen = QPen(QColor(CT['accent']))
+            today_pen.setWidth(1)
+            painter.setPen(today_pen)
             painter.drawEllipse(circle_rect)
-            
+
         elif is_selected:
-            # [선택됨] 얇은 파란색 외곽선 (배경 박스보다 1px 바깥쪽에 여유롭게 그림)
+            # [선택됨] 얇은 액센트 외곽선 (배경 박스보다 1px 바깥쪽에 여유롭게 그림)
             painter.setBrush(Qt.BrushStyle.NoBrush)
-            pen = QPen(QColor("#0a84ff"))
+            pen = QPen(QColor(CT['accent']))
             pen.setWidth(2)
             painter.setPen(pen)
-            
+
             sel_rect = bg_rect.adjusted(-1, -1, 1, 1)
             painter.drawRoundedRect(sel_rect, radius, radius)
             
@@ -254,28 +266,28 @@ class HUDStyleCalendar(QCalendarWidget):
         font = painter.font()
         font_size = max(9, int(min(bg_width, bg_height) * 0.35))
         font.setPixelSize(font_size)
-        font.setFamily("-apple-system")
+        font.setFamily("Segoe UI")
         font.setWeight(QFont.Weight.Light) # 얇은 폰트 적용
-        
+
         # 이벤트 있는 날짜는 볼드 처리 (이미지처럼)
         if has_event and date.month() == self.monthShown():
             font.setBold(True)
         else:
             font.setBold(False)
-        
+
         painter.setFont(font)
-        
+
         # 글자 색상
         if date.month() != self.monthShown():
-            text_color = QColor("#48484a")
+            text_color = QColor(CT['fg_3'])
         elif is_today:
-            text_color = QColor("#000000")
+            text_color = QColor(CT['accent_hi'])
         elif date.dayOfWeek() == 6:
-            text_color = QColor("#0a84ff")
+            text_color = QColor(CT['accent'])
         elif date.dayOfWeek() == 7 or is_holiday(date):
-            text_color = QColor("#ff453a")
+            text_color = QColor(CT['red'])
         else:
-            text_color = QColor("#f2f2f7")
+            text_color = QColor(CT['fg_1'])
             
         painter.setPen(text_color)
         
@@ -285,7 +297,7 @@ class HUDStyleCalendar(QCalendarWidget):
         
         # --- 4. 일정 인디케이터 (작은 점) ---
         if has_event:
-            dot_color = QColor("#0a84ff") if is_today else QColor("#8e8e93")
+            dot_color = QColor(CT['accent']) if is_today else QColor(CT['fg_2'])
             painter.setBrush(QBrush(dot_color))
             painter.setPen(Qt.PenStyle.NoPen)
             
@@ -312,24 +324,40 @@ class ScheduleEditDialog(QDialog):
         
         self.setWindowTitle("리마인더 상세 편집")
         self.setFixedSize(380, 520)
-        self.setStyleSheet("""
-            QDialog { background-color: #0b141e; border: 1px solid #335566; }
-            QLabel { color: #ffffff; font-size: 10pt; }
-            QGroupBox { border: 1px solid #335566; margin-top: 10px; padding-top: 15px; color: #66aacc; }
-            QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top center; padding: 0 5px; }
-            QLineEdit, QDateEdit, QTimeEdit, QComboBox {
-                background-color: rgba(2, 11, 20, 120); border: 1px solid #335566; color: #00ffff;
-                padding: 6px; border-radius: 4px;
-            }
-            QPushButton {
-                background-color: #005566; color: white; border: none; padding: 10px; border-radius: 6px; font-weight: bold;
-            }
-            QPushButton:hover { background-color: #007788; }
-            QPushButton#btnCancel { background-color: #444; }
-            QPushButton#btnCancel:hover { background-color: #666; }
-            QPushButton#btnDelete { background-color: #660000; }
-            QPushButton#btnDelete:hover { background-color: #880000; }
-            QCheckBox { color: #ddd; }
+        self.setStyleSheet(f"""
+            QDialog {{ background-color: {CT['bg_1']}; border: 1px solid {CT['border']}; border-radius: 12px; }}
+            QLabel {{ color: {CT['fg_1']}; font-size: 10pt; }}
+            QGroupBox {{ border: 1px solid {CT['border_soft']}; border-radius: 8px; margin-top: 10px; padding-top: 15px; color: {CT['fg_2']}; }}
+            QGroupBox::title {{ subcontrol-origin: margin; subcontrol-position: top center; padding: 0 5px; }}
+            QLineEdit, QDateEdit, QTimeEdit, QComboBox {{
+                background-color: {CT['bg_2']}; border: 1px solid {CT['border_soft']}; color: {CT['fg_0']};
+                padding: 6px; border-radius: 8px;
+            }}
+            QLineEdit:focus, QDateEdit:focus, QTimeEdit:focus, QComboBox:focus {{
+                border: 1px solid {CT['accent_border']};
+            }}
+            QComboBox QAbstractItemView {{
+                background-color: {CT['bg_2']}; color: {CT['fg_0']};
+                border: 1px solid {CT['border']};
+                selection-background-color: {CT['accent_bg']};
+                selection-color: {CT['accent_hi']};
+            }}
+            QPushButton {{
+                background-color: {CT['accent']}; color: #ffffff; border: 1px solid {CT['accent_hi']};
+                padding: 8px 12px; border-radius: 8px; font-weight: bold;
+            }}
+            QPushButton:hover {{ background-color: {CT['accent_hi']}; }}
+            QPushButton#btnCancel {{
+                background-color: {CT['bg_2']}; color: {CT['fg_1']}; border: 1px solid {CT['border_soft']};
+                font-weight: normal;
+            }}
+            QPushButton#btnCancel:hover {{ background-color: {CT['bg_3']}; color: {CT['fg_0']}; }}
+            QPushButton#btnDelete {{
+                background-color: transparent; color: {CT['red']}; border: none;
+                font-weight: normal;
+            }}
+            QPushButton#btnDelete:hover {{ background-color: rgba(250, 104, 99, 30); }}
+            QCheckBox {{ color: {CT['fg_1']}; }}
         """)
         
         layout = QVBoxLayout(self)
@@ -507,10 +535,10 @@ class ScheduleCardWidget(QFrame):
         title_text = self.schedule.get("title", "")
         self.lbl_title = QLabel(title_text)
         # 글자 크기 조금 더 키움 (11pt -> 13pt)
-        font_str = "font-size: 13pt; font-weight: 500; font-family: -apple-system, BlinkMacSystemFont, sans-serif; color: #ffffff;"
+        font_str = f"font-size: 13pt; font-weight: 500; font-family: 'Segoe UI', sans-serif; color: {CT['fg_0']};"
         if is_completed:
-            # 너무 어둡지 않게 색상 상향 조정 (#8a8a8e 등)
-            font_str += " text-decoration: line-through; color: #8a8a8e;"
+            # 너무 어둡지 않게 색상 상향 조정
+            font_str += f" text-decoration: line-through; color: {CT['fg_3']};"
         self.lbl_title.setStyleSheet(font_str)
         text_layout.addWidget(self.lbl_title)
         
@@ -557,27 +585,28 @@ class ScheduleCardWidget(QFrame):
 
         self.lbl_desc = QLabel(desc)
         if is_overdue:
-            desc_color = "#ff6b6b"  # 기한 경과: 빨간색
+            desc_color = CT['red']    # 기한 경과: 빨간색
         elif snooze_str:
-            desc_color = "#ffa500"  # 스누즈 중: 주황색
+            desc_color = CT['amber']  # 스누즈 중: 앰버
         elif is_completed:
-            desc_color = "#6e6e73"
+            desc_color = CT['fg_3']
         else:
-            desc_color = "#8e8e93"
-        self.lbl_desc.setStyleSheet(f"font-size: 10pt; color: {desc_color}; font-family: -apple-system;")
+            desc_color = CT['fg_3']
+        self.lbl_desc.setStyleSheet(f"font-size: 10pt; color: {desc_color}; font-family: 'Segoe UI', sans-serif;")
         text_layout.addWidget(self.lbl_desc)
         
         layout.addLayout(text_layout, stretch=1)
         
-        # 3. 상세 관리 버튼 (ℹ️ 모양 흉내)
-        self.btn_edit = QPushButton("i")
+        # 3. 상세 관리 버튼 (MoreV 글리프 ghost 버튼)
+        self.btn_edit = QPushButton("")
         self.btn_edit.setFixedSize(20, 20)
-        self.btn_edit.setStyleSheet("""
-            QPushButton {
-                background-color: transparent; border: 1px solid rgba(10, 132, 255, 120);
-                border-radius: 10px; color: #0a84ff; font-size: 10pt; font-family: 'Times New Roman', serif; font-style: italic;
-            }
-            QPushButton:hover { background-color: rgba(10, 132, 255, 30); }
+        self.btn_edit.setIcon(QIcon(pixmap("MoreV", size=14, color=CT['fg_2'])))
+        self.btn_edit.setIconSize(QSize(14, 14))
+        self.btn_edit.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent; border: none; border-radius: 6px;
+            }}
+            QPushButton:hover {{ background-color: {CT['bg_3']}; }}
         """)
         self.btn_edit.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_edit.clicked.connect(self.open_edit_dialog)
@@ -641,25 +670,29 @@ class MK3ScheduleOnlyWidget(QWidget):
         nav_layout.setContentsMargins(0, 0, 0, 0)
         nav_layout.setSpacing(5)
         
-        # < > 화살표 (Apple 스타일로 왼쪽에 나란히)
-        btn_style = """
-            QPushButton {
-                background-color: transparent; color: #8e8e93;
-                font-size: 14pt; font-weight: bold; border: none;
-                padding: 2px 8px;
-            }
-            QPushButton:hover { color: #ffffff; }
+        # < > 화살표 (Chevron 글리프 ghost 버튼)
+        btn_style = f"""
+            QPushButton {{
+                background-color: transparent; border: none; border-radius: 6px;
+                padding: 2px;
+            }}
+            QPushButton:hover {{ background-color: {CT['bg_3']}; }}
         """
         # 1. 왼쪽 그룹 (< > 화살표)
         left_group = QHBoxLayout()
         left_group.setSpacing(5)
-        self.btn_prev_month = QPushButton("❮")
+        chevron_px = pixmap("Chevron", size=16, color=CT['fg_2'])
+        self.btn_prev_month = QPushButton("")
+        self.btn_prev_month.setIcon(QIcon(chevron_px.transformed(QTransform().rotate(180))))
+        self.btn_prev_month.setIconSize(QSize(16, 16))
         self.btn_prev_month.setStyleSheet(btn_style)
         self.btn_prev_month.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_prev_month.setFixedSize(30, 30)
         left_group.addWidget(self.btn_prev_month)
-        
-        self.btn_next_month = QPushButton("❯")
+
+        self.btn_next_month = QPushButton("")
+        self.btn_next_month.setIcon(QIcon(chevron_px))
+        self.btn_next_month.setIconSize(QSize(16, 16))
         self.btn_next_month.setStyleSheet(btn_style)
         self.btn_next_month.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_next_month.setFixedSize(30, 30)
@@ -668,9 +701,9 @@ class MK3ScheduleOnlyWidget(QWidget):
         # 2. 중앙 타이틀 ("2026년 3월")
         self.lbl_cal_title = QLabel()
         self.lbl_cal_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lbl_cal_title.setStyleSheet("""
-            color: #ffffff; font-size: 20pt; font-weight: bold;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        self.lbl_cal_title.setStyleSheet(f"""
+            color: {CT['fg_0']}; font-size: 20pt; font-weight: bold;
+            font-family: 'Segoe UI', sans-serif;
         """)
         
         # 3. 양옆 여백으로 중앙 조절
@@ -679,16 +712,11 @@ class MK3ScheduleOnlyWidget(QWidget):
         nav_layout.addWidget(self.lbl_cal_title)
         nav_layout.addStretch()
         
-        # + 버튼 (Apple 스타일)
-        self.btn_add_schedule = QPushButton("+")
-        self.btn_add_schedule.setStyleSheet("""
-            QPushButton {
-                background-color: transparent; color: #8e8e93;
-                font-size: 18pt; font-weight: bold; border: none;
-                padding: 2px 8px;
-            }
-            QPushButton:hover { color: #ffffff; }
-        """)
+        # + 버튼 (Plus 글리프 ghost 버튼)
+        self.btn_add_schedule = QPushButton("")
+        self.btn_add_schedule.setIcon(QIcon(pixmap("Plus", size=16, color=CT['fg_2'])))
+        self.btn_add_schedule.setIconSize(QSize(16, 16))
+        self.btn_add_schedule.setStyleSheet(btn_style)
         self.btn_add_schedule.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_add_schedule.setFixedSize(30, 30)
         nav_layout.addWidget(self.btn_add_schedule)
@@ -729,14 +757,14 @@ class MK3ScheduleOnlyWidget(QWidget):
         # 중앙 정렬을 양쪽 스페이서로 구현
         list_header.addStretch(1)
         self.lbl_list_header = QLabel("전체 일정")
-        self.lbl_list_header.setStyleSheet("color: #ffffff; font-size: 12pt; font-weight: bold; font-family: -apple-system;")
+        self.lbl_list_header.setStyleSheet(f"color: {CT['fg_0']}; font-size: 12pt; font-weight: bold; font-family: 'Segoe UI', sans-serif;")
         self.lbl_list_header.setAlignment(Qt.AlignmentFlag.AlignCenter)
         list_header.addWidget(self.lbl_list_header, stretch=0)
         
         list_header.addStretch(1)
         
         self.btn_show_all = QPushButton("모두 보기")
-        self.btn_show_all.setStyleSheet("background-color: transparent; color: #0a84ff; font-weight: bold; text-decoration: none;")
+        self.btn_show_all.setStyleSheet(f"background-color: transparent; color: {CT['accent']}; font-weight: bold; text-decoration: none; border: none;")
         self.btn_show_all.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_show_all.clicked.connect(self.show_all_schedules)
         self.btn_show_all.hide()  # 평소(전체보기일 때)는 숨김
@@ -747,24 +775,24 @@ class MK3ScheduleOnlyWidget(QWidget):
         
         # 리스트 위젯 껍데기 투명화 (애플 스타일의 줄바꿈 선만 유지)
         self.schedule_list = QListWidget()
-        self.schedule_list.setStyleSheet("""
-            QListWidget {
+        self.schedule_list.setStyleSheet(f"""
+            QListWidget {{
                 background-color: transparent;
                 border: none;
-                color: #ffffff;
+                color: {CT['fg_0']};
                 font-size: 10pt;
                 outline: none;
-            }
-            QListWidget::item { 
-                padding: 6px 0px; 
-                border-bottom: 1px solid #38383a; 
-            }
-            QListWidget::item:selected { 
-                background-color: transparent; 
-            }
-            QListWidget::item:focus { 
-                outline: none; 
-            }
+            }}
+            QListWidget::item {{
+                padding: 6px 0px;
+                border-bottom: 1px solid {CT['border_soft']};
+            }}
+            QListWidget::item:selected {{
+                background-color: transparent;
+            }}
+            QListWidget::item:focus {{
+                outline: none;
+            }}
         """)
         self.schedule_list.itemDoubleClicked.connect(self._on_schedule_item_clicked)
         self.schedule_list.keyPressEvent = self._on_schedule_key_press
@@ -957,31 +985,51 @@ class MK3MemoOnlyWidget(QWidget):
         header_layout = QHBoxLayout(header_container)
         header_layout.setContentsMargins(10, 5, 10, 5)
         
-        header = QLabel("📝 MK3 - 메모장")
-        header.setStyleSheet("color: #ffa500; font-size: 12pt; font-weight: bold;")
+        header = QLabel("MK3 - 메모장")
+        header.setStyleSheet(f"color: {CT['fg_2']}; font-size: 9pt; font-weight: 700; letter-spacing: 1.5px;")
         header_layout.addWidget(header)
-        
+
         header_layout.addStretch()
-        
-        # 버튼 스타일 (모던 자비스 스타일)
-        from .widgets import NeonButton
-        
-        # AI 정리 버튼
-        btn_organize = NeonButton("🔄 정리", color="green")
+
+        # 아이콘 전용 ghost 버튼 스타일
+        ghost_btn_style = f"""
+            QPushButton {{
+                background-color: transparent; border: none; border-radius: 6px;
+            }}
+            QPushButton:hover {{ background-color: {CT['bg_3']}; }}
+        """
+
+        # AI 정리 버튼 (보조 버튼 스타일)
+        btn_organize = QPushButton("정리")
+        btn_organize.setIcon(QIcon(pixmap("Sparkles", size=14, color=CT['fg_2'])))
+        btn_organize.setIconSize(QSize(14, 14))
+        btn_organize.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {CT['bg_2']}; border: 1px solid {CT['border_soft']};
+                border-radius: 8px; padding: 6px 12px; color: {CT['fg_1']};
+            }}
+            QPushButton:hover {{ background-color: {CT['bg_3']}; color: {CT['fg_0']}; }}
+        """)
         btn_organize.setFixedSize(85, 32)
         btn_organize.setToolTip("AI로 메모 내용 정리")
         btn_organize.clicked.connect(self._organize_memo_with_ai)
         header_layout.addWidget(btn_organize)
-        
-        # 새 메모 추가 버튼
-        btn_add = NeonButton("＋", color="cyan")
+
+        # 새 메모 추가 버튼 (ghost)
+        btn_add = QPushButton("")
+        btn_add.setIcon(QIcon(pixmap("Plus", size=14, color=CT['fg_2'])))
+        btn_add.setIconSize(QSize(14, 14))
+        btn_add.setStyleSheet(ghost_btn_style)
         btn_add.setFixedSize(38, 32)
         btn_add.setToolTip("새 메모 추가")
         btn_add.clicked.connect(self._add_new_memo)
         header_layout.addWidget(btn_add)
-        
-        # 단축키 설정 버튼
-        btn_settings = NeonButton("⌨", color="purple")
+
+        # 단축키 설정 버튼 (ghost)
+        btn_settings = QPushButton("")
+        btn_settings.setIcon(QIcon(pixmap("Settings", size=14, color=CT['fg_2'])))
+        btn_settings.setIconSize(QSize(14, 14))
+        btn_settings.setStyleSheet(ghost_btn_style)
         btn_settings.setFixedSize(38, 32)
         btn_settings.setToolTip("단축키 설정")
         btn_settings.clicked.connect(self.hotkey_settings_clicked.emit)
@@ -998,38 +1046,38 @@ class MK3MemoOnlyWidget(QWidget):
         self.tab_widget.currentChanged.connect(self._on_tab_changed)
         self.tab_widget.tabBarDoubleClicked.connect(self._rename_tab)
         
-        self.tab_widget.setStyleSheet("""
-            QTabWidget::pane {
+        self.tab_widget.setStyleSheet(f"""
+            QTabWidget::pane {{
                 border: none;
                 background-color: transparent;
-            }
-            QTabBar {
+            }}
+            QTabBar {{
                 background: transparent;
-            }
-            QTabBar::tab {
-                background-color: rgba(40, 45, 55, 200);
-                color: #888888;
+            }}
+            QTabBar::tab {{
+                background-color: {CT['bg_2']};
+                color: {CT['fg_2']};
                 padding: 6px 24px 6px 10px;
                 margin-right: 3px;
-                border: 1px solid rgba(80, 90, 100, 100);
+                border: 1px solid {CT['border_soft']};
                 border-bottom: none;
                 border-top-left-radius: 8px;
                 border-top-right-radius: 8px;
                 min-width: 60px;
                 max-width: 120px;
-            }
-            QTabBar::tab:selected {
-                background-color: rgba(60, 70, 85, 250);
-                color: #ffa500;
-                border: 1px solid #ffa500;
-                border-bottom: 2px solid #ffa500;
-            }
-            QTabBar::tab:hover:!selected {
-                background-color: rgba(55, 65, 75, 220);
-                color: #cccccc;
-                border: 1px solid rgba(100, 110, 120, 150);
-            }
-            QTabBar::close-button {
+            }}
+            QTabBar::tab:selected {{
+                background-color: {CT['accent_bg']};
+                color: {CT['accent_hi']};
+                border: 1px solid {CT['accent_border']};
+                border-bottom: 2px solid {CT['accent']};
+            }}
+            QTabBar::tab:hover:!selected {{
+                background-color: {CT['bg_3']};
+                color: {CT['fg_1']};
+                border: 1px solid {CT['border']};
+            }}
+            QTabBar::close-button {{
                 subcontrol-position: right;
                 subcontrol-origin: padding;
                 width: 16px;
@@ -1037,22 +1085,22 @@ class MK3MemoOnlyWidget(QWidget):
                 border-radius: 8px;
                 background: transparent;
                 margin-right: 2px;
-            }
-            QTabBar::close-button:hover {
-                background-color: #ff5555;
-            }
-            QTabBar::scroller {
+            }}
+            QTabBar::close-button:hover {{
+                background-color: rgba(250, 104, 99, 60);
+            }}
+            QTabBar::scroller {{
                 width: 24px;
-            }
-            QTabBar QToolButton {
-                background-color: rgba(40, 50, 60, 200);
-                border: 1px solid #555555;
+            }}
+            QTabBar QToolButton {{
+                background-color: {CT['bg_2']};
+                border: 1px solid {CT['border_soft']};
                 border-radius: 4px;
-                color: #00d4ff;
-            }
-            QTabBar QToolButton:hover {
-                background-color: rgba(0, 200, 255, 50);
-            }
+                color: {CT['fg_2']};
+            }}
+            QTabBar QToolButton:hover {{
+                background-color: {CT['bg_3']};
+            }}
         """)
         
         # 탭 우클릭 메뉴 활성화
@@ -1078,17 +1126,17 @@ class MK3MemoOnlyWidget(QWidget):
         editor.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
         editor.setAcceptRichText(False)  # Plain text만 허용 (서식 붙여넣기 방지)
         
-        editor.setStyleSheet("""
-            QTextEdit {
+        editor.setStyleSheet(f"""
+            QTextEdit {{
                 background-color: transparent;
-                color: #ffffff;
+                color: {CT['fg_0']};
                 font-size: 11pt;
                 line-height: 1.6;
-                selection-background-color: rgba(255, 165, 0, 100);
-                selection-color: #ffffff;
+                selection-background-color: rgba(75, 163, 247, 90);
+                selection-color: {CT['fg_0']};
                 padding: 10px;
                 border: none;
-            }
+            }}
         """)
         
         editor.textChanged.connect(self._on_text_changed)
@@ -1248,7 +1296,15 @@ class MK3MemoOnlyWidget(QWidget):
         is_locked = editor.property("locked") or False
         
         menu = QMenu(self)
-        menu.setStyleSheet("QMenu { background-color: #0d1117; color: white; border: 1px solid #ffa500; } QMenu::item:selected { background-color: #ffa500; }")
+        menu.setStyleSheet(f"""
+            QMenu {{
+                background-color: {CT['bg_2']}; color: {CT['fg_0']};
+                border: 1px solid {CT['border']}; border-radius: 8px;
+            }}
+            QMenu::item:selected {{
+                background-color: {CT['accent_bg']}; color: {CT['accent_hi']};
+            }}
+        """)
         
         if is_locked:
             action_lock = menu.addAction("🔓 잠금 해제")
@@ -1298,7 +1354,7 @@ class MK3MemoOnlyWidget(QWidget):
         
         # UI 피드백
         original_text = content
-        editor.setPlainText("⏳ AI가 정리 중...")
+        editor.setPlainText("AI가 정리 중...")
         editor.setReadOnly(True)
         
         # 백그라운드 스레드에서 AI 호출

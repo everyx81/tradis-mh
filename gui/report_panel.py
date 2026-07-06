@@ -16,10 +16,11 @@ from PyQt6.QtWidgets import (
     QCheckBox
 )
 import json
-from PyQt6.QtCore import Qt, QDate, pyqtSignal, QTimer
-from PyQt6.QtGui import QFont, QColor, QTextDocument
+from PyQt6.QtCore import Qt, QDate, pyqtSignal, QTimer, QSize
+from PyQt6.QtGui import QFont, QColor, QTextDocument, QIcon
 
-from .widgets import NeonButton
+from .claude_theme import C as CT
+from .claude_icons import pixmap
 from .dialogs import JarvisMessageBox
 
 
@@ -75,31 +76,31 @@ class ReportPanel(QWidget):
         
         # 타이틀
         title_layout = QHBoxLayout()
-        title_label = QLabel("📊 일일 업무 보고서")
-        title_label.setStyleSheet("color: #00ffff; font-size: 16pt; font-weight: bold;")
+        title_label = QLabel("일일 업무 보고서")
+        title_label.setStyleSheet(f"color: {CT['fg_0']}; font-size: 16pt; font-weight: 700; background: transparent;")
         title_layout.addWidget(title_label)
         title_layout.addStretch()
         main_layout.addLayout(title_layout)
         
         # === 메인 분할 영역 (입력 | 미리보기) ===
         splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.setStyleSheet("""
-            QSplitter::handle {
-                background-color: #00aaaa;
-                width: 3px;
-            }
+        splitter.setStyleSheet(f"""
+            QSplitter::handle {{
+                background-color: {CT['border_soft']};
+                width: 1px;
+            }}
         """)
-        
+
         # ========== 왼쪽: 입력 패널 ==========
         left_panel = QWidget()
-        left_panel.setStyleSheet("background-color: rgba(5, 15, 30, 100); border-radius: 10px;")
+        left_panel.setStyleSheet(f"background-color: {CT['bg_1']}; border-radius: 10px;")
         left_layout = QVBoxLayout(left_panel)
         left_layout.setContentsMargins(15, 15, 15, 15)
         left_layout.setSpacing(10)
-        
+
         # 헤더
-        left_header = QLabel("📝 데이터 입력")
-        left_header.setStyleSheet("color: #00cccc; font-weight: bold; font-size: 11pt;")
+        left_header = QLabel("데이터 입력")
+        left_header.setStyleSheet(self._section_title_css())
         left_layout.addWidget(left_header)
         
         # 스크롤 영역
@@ -113,23 +114,29 @@ class ReportPanel(QWidget):
         
         # 날짜 + Excel 로드
         date_row = QHBoxLayout()
-        date_row.addWidget(QLabel("보고 날짜:"))
+        lbl_date = QLabel("보고 날짜:")
+        lbl_date.setStyleSheet(f"color: {CT['fg_1']}; background: transparent;")
+        date_row.addWidget(lbl_date)
         self.date_edit = QDateEdit()
         self.date_edit.setDate(QDate.currentDate())
         self.date_edit.setCalendarPopup(True)
         self.date_edit.setStyleSheet(self._get_input_style())
         self.date_edit.dateChanged.connect(self._schedule_update)
         date_row.addWidget(self.date_edit)
-        
-        self.btn_load_excel = NeonButton("📂 Excel", color="cyan")
-        self.btn_load_excel.setFixedSize(70, 28)
+
+        self.btn_load_excel = QPushButton("  Excel")
+        self.btn_load_excel.setIcon(QIcon(pixmap("Folder", size=14, color=CT['fg_2'])))
+        self.btn_load_excel.setIconSize(QSize(14, 14))
+        self.btn_load_excel.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_load_excel.setStyleSheet(self._secondary_btn_css())
+        self.btn_load_excel.setFixedSize(86, 28)
         self.btn_load_excel.clicked.connect(self._load_excel)
         date_row.addWidget(self.btn_load_excel)
         date_row.addStretch()
         scroll_layout.addLayout(date_row)
         
         # --- 통관 실적 (2열 레이아웃으로 컴팩트하게) ---
-        self._add_section_header(scroll_layout, "📈 통관 실적")
+        self._add_section_header(scroll_layout, "통관 실적")
         
         from PyQt6.QtWidgets import QGridLayout
         stats_grid = QGridLayout()
@@ -137,26 +144,26 @@ class ReportPanel(QWidget):
         
         # 1행: 당일 건수, 당일 수수료
         lbl_daily_count = QLabel("당일 건수:")
-        lbl_daily_count.setStyleSheet("color: #aaaaaa;")
+        lbl_daily_count.setStyleSheet(f"color: {CT['fg_1']}; background: transparent;")
         stats_grid.addWidget(lbl_daily_count, 0, 0)
         self.spin_daily_count = self._create_spinbox(0, 9999)
         stats_grid.addWidget(self.spin_daily_count, 0, 1)
         
         lbl_daily_fee = QLabel("당일 수수료(공급가):")
-        lbl_daily_fee.setStyleSheet("color: #aaaaaa;")
+        lbl_daily_fee.setStyleSheet(f"color: {CT['fg_1']}; background: transparent;")
         stats_grid.addWidget(lbl_daily_fee, 0, 2)
         self.spin_daily_fee = self._create_spinbox(0, 999999999, step=10000)
         stats_grid.addWidget(self.spin_daily_fee, 0, 3)
         
         # 2행: 월 누계 건수, 월 누계 수수료
         lbl_monthly_count = QLabel("월 누계 건수:")
-        lbl_monthly_count.setStyleSheet("color: #aaaaaa;")
+        lbl_monthly_count.setStyleSheet(f"color: {CT['fg_1']}; background: transparent;")
         stats_grid.addWidget(lbl_monthly_count, 1, 0)
         self.spin_monthly_count = self._create_spinbox(0, 99999)
         stats_grid.addWidget(self.spin_monthly_count, 1, 1)
         
         lbl_monthly_fee = QLabel("월 누계 수수료(공급가):")
-        lbl_monthly_fee.setStyleSheet("color: #aaaaaa;")
+        lbl_monthly_fee.setStyleSheet(f"color: {CT['fg_1']}; background: transparent;")
         stats_grid.addWidget(lbl_monthly_fee, 1, 2)
         self.spin_monthly_fee = self._create_spinbox(0, 999999999, step=100000)
         stats_grid.addWidget(self.spin_monthly_fee, 1, 3)
@@ -165,15 +172,19 @@ class ReportPanel(QWidget):
         
         # --- 미수금 (헤더 + 버튼 같은 행) ---
         recv_header_row = QHBoxLayout()
-        recv_label = QLabel("💰 미수금")
-        recv_label.setStyleSheet("color: #00aaaa; font-weight: bold; font-size: 10pt; margin-top: 5px;")
+        recv_label = QLabel("미수금")
+        recv_label.setStyleSheet(self._section_title_css() + " margin-top: 5px;")
         recv_header_row.addWidget(recv_label)
         recv_header_row.addStretch()
-        btn_add_r = NeonButton("+", color="cyan")
+        btn_add_r = QPushButton("+")
+        btn_add_r.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_add_r.setStyleSheet(self._small_btn_css())
         btn_add_r.setFixedSize(28, 22)
         btn_add_r.clicked.connect(lambda: self._add_row(self.table_receivables))
         recv_header_row.addWidget(btn_add_r)
-        btn_del_r = NeonButton("-", color="orange")
+        btn_del_r = QPushButton("-")
+        btn_del_r.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_del_r.setStyleSheet(self._small_btn_css())
         btn_del_r.setFixedSize(28, 22)
         btn_del_r.clicked.connect(lambda: self._del_row(self.table_receivables))
         recv_header_row.addWidget(btn_del_r)
@@ -184,22 +195,28 @@ class ReportPanel(QWidget):
         
         # --- 대납금 (헤더 + 버튼 같은 행) ---
         adv_header_row = QHBoxLayout()
-        adv_label = QLabel("🏦 대납금")
-        adv_label.setStyleSheet("color: #00aaaa; font-weight: bold; font-size: 10pt; margin-top: 5px;")
+        adv_label = QLabel("대납금")
+        adv_label.setStyleSheet(self._section_title_css() + " margin-top: 5px;")
         adv_header_row.addWidget(adv_label)
         adv_header_row.addStretch()
-        
+
         # Google Sheets에서 가져오기 버튼
-        btn_sheets = NeonButton("가져오기", color="green")
+        btn_sheets = QPushButton("가져오기")
+        btn_sheets.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_sheets.setStyleSheet(self._small_btn_css())
         btn_sheets.setFixedSize(80, 22)
         btn_sheets.clicked.connect(self._load_advances_from_sheets)
         adv_header_row.addWidget(btn_sheets)
-        
-        btn_add_a = NeonButton("+", color="cyan")
+
+        btn_add_a = QPushButton("+")
+        btn_add_a.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_add_a.setStyleSheet(self._small_btn_css())
         btn_add_a.setFixedSize(28, 22)
         btn_add_a.clicked.connect(lambda: self._add_row(self.table_advances))
         adv_header_row.addWidget(btn_add_a)
-        btn_del_a = NeonButton("-", color="orange")
+        btn_del_a = QPushButton("-")
+        btn_del_a.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_del_a.setStyleSheet(self._small_btn_css())
         btn_del_a.setFixedSize(28, 22)
         btn_del_a.clicked.connect(lambda: self._del_row(self.table_advances))
         adv_header_row.addWidget(btn_del_a)
@@ -210,7 +227,9 @@ class ReportPanel(QWidget):
         scroll_layout.addWidget(self.table_advances)
         
         # 3. 통관, 인사, 영업 특이사항
-        scroll_layout.addWidget(QLabel("📝 통관, 인사, 영업 특이사항"))
+        issues_label = QLabel("통관, 인사, 영업 특이사항")
+        issues_label.setStyleSheet(self._section_title_css() + " margin-top: 5px;")
+        scroll_layout.addWidget(issues_label)
         self.text_issues = QTextEdit()
         self.text_issues.setPlaceholderText("특이사항을 입력하세요...")
         self.text_issues.setMinimumHeight(100)
@@ -224,29 +243,29 @@ class ReportPanel(QWidget):
         
         # ========== 오른쪽: 미리보기 패널 ==========
         right_panel = QWidget()
-        right_panel.setStyleSheet("background-color: rgba(255, 255, 255, 5); border-radius: 10px;")
+        right_panel.setStyleSheet(f"background-color: {CT['bg_1']}; border-radius: 10px;")
         right_layout = QVBoxLayout(right_panel)
         right_layout.setContentsMargins(15, 15, 15, 15)
         right_layout.setSpacing(10)
-        
+
         # 헤더
-        right_header = QLabel("📄 서류 미리보기")
-        right_header.setStyleSheet("color: #00cccc; font-weight: bold; font-size: 11pt;")
+        right_header = QLabel("서류 미리보기")
+        right_header.setStyleSheet(self._section_title_css())
         right_layout.addWidget(right_header)
-        
-        # 미리보기 영역 (HTML 렌더링)
+
+        # 미리보기 영역 (HTML 렌더링) — 서류이므로 흰 배경 유지
         self.preview_display = QTextEdit()
         self.preview_display.setReadOnly(True)
-        self.preview_display.setStyleSheet("""
-            QTextEdit {
+        self.preview_display.setStyleSheet(f"""
+            QTextEdit {{
                 background-color: #ffffff;
-                border: 2px solid #00aaaa;
+                border: 1px solid {CT['border']};
                 border-radius: 8px;
                 color: #333333;
                 padding: 15px;
                 font-family: 'Malgun Gothic', sans-serif;
                 font-size: 10pt;
-            }
+            }}
         """)
         right_layout.addWidget(self.preview_display)
         
@@ -260,17 +279,29 @@ class ReportPanel(QWidget):
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(10)
         
-        self.btn_generate_pdf = NeonButton("📄 PDF 저장", color="cyan")
+        self.btn_generate_pdf = QPushButton("  PDF 저장")
+        self.btn_generate_pdf.setIcon(QIcon(pixmap("Download", size=14, color=CT['fg_2'])))
+        self.btn_generate_pdf.setIconSize(QSize(14, 14))
+        self.btn_generate_pdf.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_generate_pdf.setStyleSheet(self._secondary_btn_css())
         self.btn_generate_pdf.setFixedHeight(40)
         self.btn_generate_pdf.clicked.connect(self._generate_pdf)
         btn_layout.addWidget(self.btn_generate_pdf)
-        
-        self.btn_send_mail = NeonButton("📧 메일 발송", color="cyan")
+
+        self.btn_send_mail = QPushButton("  메일 발송")
+        self.btn_send_mail.setIcon(QIcon(pixmap("Upload", size=14, color="#ffffff")))
+        self.btn_send_mail.setIconSize(QSize(14, 14))
+        self.btn_send_mail.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_send_mail.setStyleSheet(self._primary_btn_css())
         self.btn_send_mail.setFixedHeight(40)
         self.btn_send_mail.clicked.connect(self._send_mail)
         btn_layout.addWidget(self.btn_send_mail)
-        
-        self.btn_clear = NeonButton("🗑️ 초기화", color="orange")
+
+        self.btn_clear = QPushButton("  초기화")
+        self.btn_clear.setIcon(QIcon(pixmap("X", size=14, color=CT['red'])))
+        self.btn_clear.setIconSize(QSize(14, 14))
+        self.btn_clear.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_clear.setStyleSheet(self._danger_btn_css())
         self.btn_clear.setFixedHeight(40)
         self.btn_clear.clicked.connect(self._clear_all)
         btn_layout.addWidget(self.btn_clear)
@@ -280,40 +311,128 @@ class ReportPanel(QWidget):
         # 초기 미리보기
         self._update_preview()
     
-    def _get_input_style(self) -> str:
-        return """
-            background-color: rgba(5, 15, 30, 200);
-            border: 1px solid #00aaaa;
-            border-radius: 5px;
-            color: #ffffff;
-            padding: 5px;
+    def _section_title_css(self) -> str:
+        return (
+            f"color: {CT['fg_2']}; font-size: 9pt; font-weight: 700; "
+            f"letter-spacing: 1.5px; background: transparent;"
+        )
+
+    def _secondary_btn_css(self) -> str:
+        return f"""
+            QPushButton {{
+                background-color: {CT['bg_2']};
+                border: 1px solid {CT['border_soft']};
+                border-radius: 8px;
+                padding: 6px 12px;
+                color: {CT['fg_1']};
+                font-weight: 500;
+            }}
+            QPushButton:hover {{
+                background-color: {CT['bg_3']};
+                color: {CT['fg_0']};
+            }}
+            QPushButton:pressed {{
+                background-color: {CT['bg_4']};
+            }}
         """
-    
+
+    def _small_btn_css(self) -> str:
+        return f"""
+            QPushButton {{
+                background-color: {CT['bg_2']};
+                border: 1px solid {CT['border_soft']};
+                border-radius: 6px;
+                padding: 0px;
+                color: {CT['fg_1']};
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                background-color: {CT['bg_3']};
+                color: {CT['fg_0']};
+            }}
+            QPushButton:pressed {{
+                background-color: {CT['bg_4']};
+            }}
+        """
+
+    def _primary_btn_css(self) -> str:
+        return f"""
+            QPushButton {{
+                background-color: {CT['accent']};
+                border: 1px solid {CT['accent_hi']};
+                border-radius: 8px;
+                padding: 6px 12px;
+                color: #ffffff;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                background-color: {CT['accent_hi']};
+            }}
+            QPushButton:pressed {{
+                background-color: {CT['accent_lo']};
+            }}
+        """
+
+    def _danger_btn_css(self) -> str:
+        return f"""
+            QPushButton {{
+                background-color: transparent;
+                border: 1px solid transparent;
+                border-radius: 8px;
+                padding: 6px 12px;
+                color: {CT['red']};
+                font-weight: 500;
+            }}
+            QPushButton:hover {{
+                background-color: rgba(250, 104, 99, 30);
+            }}
+        """
+
+    def _get_input_style(self) -> str:
+        return f"""
+            QLineEdit, QSpinBox, QDateEdit, QTextEdit {{
+                background-color: {CT['bg_2']};
+                border: 1px solid {CT['border_soft']};
+                border-radius: 8px;
+                color: {CT['fg_0']};
+                padding: 5px;
+            }}
+            QLineEdit:focus, QSpinBox:focus, QDateEdit:focus, QTextEdit:focus {{
+                border: 1px solid {CT['accent_border']};
+            }}
+        """
+
     def _create_spinbox(self, min_val, max_val, step=1) -> QSpinBox:
         spin = QSpinBox()
         spin.setRange(min_val, max_val)
         spin.setSingleStep(step)
-        spin.setStyleSheet("""
-            QSpinBox {
-                background-color: rgba(5, 15, 30, 200);
-                border: 1px solid #00aaaa;
-                border-radius: 5px;
-                color: #ffffff;
+        spin.setStyleSheet(f"""
+            QSpinBox {{
+                background-color: {CT['bg_2']};
+                border: 1px solid {CT['border_soft']};
+                border-radius: 8px;
+                color: {CT['fg_0']};
                 padding: 5px;
                 min-width: 120px;
-            }
-            QSpinBox::up-button, QSpinBox::down-button {
-                background-color: #00aaaa;
+            }}
+            QSpinBox:focus {{
+                border: 1px solid {CT['accent_border']};
+            }}
+            QSpinBox::up-button, QSpinBox::down-button {{
+                background-color: {CT['bg_3']};
                 border: none;
                 width: 18px;
-            }
+            }}
+            QSpinBox::up-button:hover, QSpinBox::down-button:hover {{
+                background-color: {CT['bg_4']};
+            }}
         """)
         spin.valueChanged.connect(self._schedule_update)
         return spin
-    
+
     def _add_section_header(self, layout, text: str):
         header = QLabel(text)
-        header.setStyleSheet("color: #00aaaa; font-weight: bold; font-size: 10pt; margin-top: 5px;")
+        header.setStyleSheet(self._section_title_css() + " margin-top: 5px;")
         layout.addWidget(header)
     
     def _create_data_table(self, headers) -> QTableWidget:
@@ -323,30 +442,37 @@ class ReportPanel(QWidget):
         table.setHorizontalHeaderLabels(headers)
         table.setMaximumHeight(150)
         table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        table.setStyleSheet("""
-            QTableWidget {
-                background-color: rgba(5, 15, 30, 200);
-                border: 1px solid #555;
+        table.setStyleSheet(f"""
+            QTableWidget {{
+                background-color: {CT['bg_1']};
+                border: 1px solid {CT['border_soft']};
                 border-radius: 5px;
-                color: #ffffff;
-                gridline-color: #333;
+                color: {CT['fg_0']};
+                gridline-color: {CT['border_soft']};
                 font-size: 9pt;
-            }
-            QTableWidget::item { padding: 3px; }
-            QTableWidget::item:selected { background-color: rgba(0, 255, 255, 50); }
-            QTableWidget QLineEdit {
-                background-color: #0a1929;
-                color: #ffffff;
-                border: 1px solid #00aaaa;
+            }}
+            QTableWidget::item {{ padding: 3px; }}
+            QTableWidget::item:selected {{
+                background-color: {CT['accent_bg']};
+                color: {CT['fg_0']};
+            }}
+            QTableWidget QLineEdit {{
+                background-color: {CT['bg_3']};
+                color: {CT['fg_0']};
+                border: 1px solid {CT['accent_border']};
                 padding: 2px;
-            }
-            QHeaderView::section {
-                background-color: #1a2332;
-                color: #00ffff;
+            }}
+            QHeaderView::section {{
+                background-color: {CT['bg_2']};
+                color: {CT['fg_2']};
                 padding: 4px;
-                border: 1px solid #333;
+                border: 1px solid {CT['border_soft']};
                 font-size: 9pt;
-            }
+            }}
+            QTableCornerButton::section {{
+                background-color: {CT['bg_2']};
+                border: 1px solid {CT['border_soft']};
+            }}
         """)
         table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         # 나머지 컬럼은 Fixed
@@ -398,13 +524,25 @@ class ReportPanel(QWidget):
         
         # 확인/상태 (CheckBox)
         chk_widget = QWidget()
+        chk_widget.setStyleSheet("background: transparent;")
         chk_layout = QHBoxLayout(chk_widget)
         chk_layout.setContentsMargins(0, 0, 0, 0)
         chk_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
         chk = QCheckBox()
         chk.setChecked(confirmed)
-        chk.setStyleSheet("QCheckBox::indicator { width: 16px; height: 16px; }")
+        chk.setStyleSheet(f"""
+            QCheckBox::indicator {{
+                width: 16px; height: 16px;
+                border: 1px solid {CT['border_strong']};
+                border-radius: 4px;
+                background-color: {CT['bg_2']};
+            }}
+            QCheckBox::indicator:checked {{
+                background-color: {CT['accent']};
+                border: 1px solid {CT['accent_hi']};
+            }}
+        """)
         chk.stateChanged.connect(self._schedule_update)
         
         chk_layout.addWidget(chk)

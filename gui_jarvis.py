@@ -1663,8 +1663,7 @@ class JarvisGUI(QMainWindow):
 
     def setup_left_panel(self):
         """Claude Design handoff_2 centered variant 사이드바.
-        brand + CircleToggle(giant) + stats + statusbar(chips) + floating logs."""
-        from gui.claude_widgets import CircleToggle
+        brand(T 로고 = 감시 토글, 감시 중 글로우) + statusbar(chips) + floating logs."""
         from gui.claude_icons import pixmap as _icpx
         from PyQt6.QtCore import QSize as _QSize
         from PyQt6.QtGui import QIcon as _QIcon
@@ -1692,21 +1691,58 @@ class JarvisGUI(QMainWindow):
         brand_col.setSpacing(6)
         brand_col.setAlignment(Qt.AlignmentFlag.AlignHCenter)
 
-        brand_mark = QLabel("T")
-        brand_mark.setFixedSize(52, 52)
+        # T 로고 = 감시 시작/중지 토글 (클릭 시 아이언맨 눈처럼 점화)
+        from PyQt6.QtWidgets import QGraphicsDropShadowEffect as _QShadow
+        from PyQt6.QtGui import QColor as _QColor
+
+        self.brand_mark = QLabel("T")
+        brand_mark = self.brand_mark
+        brand_mark.setFixedSize(64, 64)
         brand_mark.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        brand_mark.setStyleSheet(f"""
+        brand_mark.setCursor(Qt.CursorShape.PointingHandCursor)
+        # 꺼짐: 어두운 강판 느낌 (도르만트) — 점화 대비를 위해 무광
+        self._brand_css_off = f"""
             background: qlineargradient(
                 x1:0, y1:0, x2:1, y2:1,
-                stop:0 {CT['accent_hi']},
-                stop:1 {CT['accent_lo']}
+                stop:0 {CT['bg_3']},
+                stop:1 {CT['bg_1']}
             );
-            color: #ffffff;
+            color: {CT['fg_2']};
+            border: 1px solid {CT['border']};
             font-weight: 700;
-            font-size: 18pt;
-            border-radius: 14px;
+            font-size: 22pt;
+            border-radius: 16px;
             letter-spacing: -0.6px;
-        """)
+        """
+        # 켜짐: 흰빛에 가까운 발광 타일 + 짙은 파랑 T
+        self._brand_css_on = """
+            background: qlineargradient(
+                x1:0, y1:0, x2:1, y2:1,
+                stop:0 #e6f7ff,
+                stop:1 #6cbcff
+            );
+            color: #0a3b6e;
+            border: 1px solid #bfe6ff;
+            font-weight: 700;
+            font-size: 22pt;
+            border-radius: 16px;
+            letter-spacing: -0.6px;
+        """
+        brand_mark.setStyleSheet(self._brand_css_off)
+
+        # 글로우 이펙트 (점화 시 흰빛-하늘색 발광)
+        self._brand_glow = _QShadow(brand_mark)
+        self._brand_glow.setBlurRadius(60)
+        self._brand_glow.setOffset(0, 0)
+        self._brand_glow.setColor(_QColor(170, 225, 255, 0))
+        brand_mark.setGraphicsEffect(self._brand_glow)
+        self._brand_anim = None
+
+        def _brand_click(ev):
+            if ev.button() == Qt.MouseButton.LeftButton:
+                self._on_circle_toggle()
+        brand_mark.mousePressEvent = _brand_click
+        self._monitor_on = False
         _bm_wrap = QHBoxLayout()
         _bm_wrap.addStretch()
         _bm_wrap.addWidget(brand_mark)
@@ -1738,70 +1774,6 @@ class JarvisGUI(QMainWindow):
         brand_col.addWidget(lbl_brand_author)
         hero_center.addLayout(brand_col)
 
-        # ── Giant Circle Toggle ──
-        self.circle_toggle = CircleToggle(size=120)
-        self.circle_toggle.clicked.connect(self._on_circle_toggle)
-        _ct_wrap = QHBoxLayout()
-        _ct_wrap.addStretch()
-        _ct_wrap.addWidget(self.circle_toggle)
-        _ct_wrap.addStretch()
-        hero_center.addLayout(_ct_wrap)
-
-        # ── State label (● 감시 중) ──
-        state_row = QHBoxLayout()
-        state_row.setSpacing(8)
-        state_row.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._state_dot = QLabel()
-        self._state_dot.setFixedSize(6, 6)
-        self._state_dot.setStyleSheet(f"background-color: {CT['fg_3']}; border-radius: 3px; border: none;")
-        state_row.addWidget(self._state_dot)
-        self._state_label = QLabel("감시 중지됨")
-        self._state_label.setStyleSheet(
-            f"color: {CT['fg_2']}; font-size: 9pt; font-weight: 500; background: transparent;"
-        )
-        state_row.addWidget(self._state_label)
-        hero_center.addLayout(state_row)
-
-        # ── Stats inline (처리 | 대기 | 오류) ──
-        stats_row = QHBoxLayout()
-        stats_row.setSpacing(18)
-        stats_row.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        def _make_stat(key, klabel, warn=False):
-            col = QVBoxLayout()
-            col.setSpacing(5)
-            col.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            v = QLabel("0")
-            v_color = CT['amber'] if warn else CT['fg_0']
-            v.setStyleSheet(
-                f"color: {v_color}; font-family: {_mono}; font-size: 15pt; "
-                f"font-weight: 600; background: transparent; border: none; letter-spacing: -0.4px;"
-            )
-            v.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            k = QLabel(klabel)
-            k.setStyleSheet(
-                f"color: {CT['fg_3']}; font-size: 7.5pt; background: transparent; "
-                f"letter-spacing: 1.2px; border: none;"
-            )
-            k.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            col.addWidget(v)
-            col.addWidget(k)
-            return col, v
-
-        stat_proc_col, self._stat_processed = _make_stat("processed", "처리됨")
-        stat_pend_col, self._stat_pending   = _make_stat("pending",   "대기")
-        stat_err_col,  self._stat_errors    = _make_stat("errors",    "오류", warn=True)
-
-        stats_row.addLayout(stat_proc_col)
-        _sep1 = QFrame(); _sep1.setFixedSize(1, 22)
-        _sep1.setStyleSheet(f"background-color: {CT['border_soft']}; border: none;")
-        stats_row.addWidget(_sep1)
-        stats_row.addLayout(stat_pend_col)
-        _sep2 = QFrame(); _sep2.setFixedSize(1, 22)
-        _sep2.setStyleSheet(f"background-color: {CT['border_soft']}; border: none;")
-        stats_row.addWidget(_sep2)
-        stats_row.addLayout(stat_err_col)
-        hero_center.addLayout(stats_row)
         # 아래쪽 stretch (상/하 대칭으로 세로 중앙 정렬)
         hero_center.addStretch(1)
 
@@ -1967,8 +1939,8 @@ class JarvisGUI(QMainWindow):
     # 사이드바 이벤트 핸들러 (handoff_2)
     # ─────────────────────────────────────────
     def _on_circle_toggle(self):
-        """원형 토글 클릭 → monitoring 상태 전환."""
-        if self.circle_toggle.monitoring():
+        """T 로고 클릭 → monitoring 상태 전환."""
+        if getattr(self, '_monitor_on', False):
             self.stop_monitoring()
         else:
             self.start_monitoring()
@@ -1984,28 +1956,71 @@ class JarvisGUI(QMainWindow):
         self.btn_watch_chip.setText("  " + short)
         self.btn_watch_chip.setToolTip(path or "")
 
+    def _brand_glow_set(self, v):
+        """T 로고 글로우 알파값 적용."""
+        from PyQt6.QtGui import QColor
+        self._brand_glow.setColor(QColor(170, 225, 255, int(v)))
+
+    def _brand_anim_stop(self):
+        """진행 중인 T 로고 애니메이션 정지."""
+        anim = getattr(self, '_brand_anim', None)
+        if anim is not None:
+            try:
+                anim.stop()
+            except RuntimeError:
+                pass
+        self._brand_anim = None
+
+    def _brand_ignite(self):
+        """점화 연출 — 순간 번쩍(0→255, 0.15초) → 안정 글로우 정착 → 느린 호흡."""
+        from PyQt6.QtCore import QVariantAnimation, QEasingCurve, QSequentialAnimationGroup
+        self._brand_anim_stop()
+        seq = QSequentialAnimationGroup(self)
+
+        ignite = QVariantAnimation(seq)
+        ignite.setDuration(150)
+        ignite.setStartValue(0)
+        ignite.setEndValue(255)
+        ignite.setEasingCurve(QEasingCurve.Type.OutQuad)
+        ignite.valueChanged.connect(self._brand_glow_set)
+        seq.addAnimation(ignite)
+
+        settle = QVariantAnimation(seq)
+        settle.setDuration(550)
+        settle.setStartValue(255)
+        settle.setEndValue(205)
+        settle.setEasingCurve(QEasingCurve.Type.InOutQuad)
+        settle.valueChanged.connect(self._brand_glow_set)
+        seq.addAnimation(settle)
+
+        def _steady():
+            from PyQt6.QtCore import QVariantAnimation as _V, QEasingCurve as _E
+            breathe = _V(self)
+            breathe.setDuration(3200)
+            breathe.setStartValue(205)
+            breathe.setKeyValueAt(0.5, 250)
+            breathe.setEndValue(205)
+            breathe.setEasingCurve(_E.Type.InOutSine)
+            breathe.setLoopCount(-1)
+            breathe.valueChanged.connect(self._brand_glow_set)
+            breathe.start()
+            self._brand_anim = breathe
+        seq.finished.connect(_steady)
+        seq.start()
+        self._brand_anim = seq
+
     def _update_state_ui(self, monitoring: bool):
-        """감시 중/중지 상태 라벨 갱신."""
-        if not hasattr(self, '_state_label'):
+        """감시 상태 → T 로고 점등/소등."""
+        self._monitor_on = monitoring
+        if not hasattr(self, 'brand_mark'):
             return
         if monitoring:
-            self._state_dot.setStyleSheet(
-                f"background-color: {CT['green']}; border-radius: 3px; border: none;"
-            )
-            self._state_label.setText("감시 중")
-            self._state_label.setStyleSheet(
-                f"color: {CT['fg_0']}; font-size: 9pt; font-weight: 500; background: transparent;"
-            )
+            self.brand_mark.setStyleSheet(self._brand_css_on)
+            self._brand_ignite()
         else:
-            self._state_dot.setStyleSheet(
-                f"background-color: {CT['fg_3']}; border-radius: 3px; border: none;"
-            )
-            self._state_label.setText("감시 중지됨")
-            self._state_label.setStyleSheet(
-                f"color: {CT['fg_2']}; font-size: 9pt; font-weight: 500; background: transparent;"
-            )
-        if hasattr(self, 'circle_toggle'):
-            self.circle_toggle.set_monitoring(monitoring)
+            self._brand_anim_stop()
+            self._brand_glow_set(0)
+            self.brand_mark.setStyleSheet(self._brand_css_off)
 
     def _update_stats_ui(self):
         """통계 카운터 UI 반영."""
@@ -2209,19 +2224,44 @@ class JarvisGUI(QMainWindow):
 
         _mono = "'JetBrains Mono','Consolas',monospace"
 
-        # ── 1) TITLE ROW ──
+        # ── 1) HEADER ROW — 경로 + 그룹 수 + 뷰 전환 + 재스캔 (한 줄) ──
         title_row = QHBoxLayout()
         title_row.setSpacing(10)
         title_row.setContentsMargins(0, 0, 0, 0)
 
-        lbl_title = QLabel("폴더 및 파일 관리")
-        lbl_title.setStyleSheet(f"color: {CT['fg_0']}; font-size: 15pt; font-weight: 700; letter-spacing: -0.2px; background: transparent;")
-        title_row.addWidget(lbl_title)
+        from gui.claude_icons import pixmap as _icpx0
+        _crumbs_folder = QLabel()
+        _crumbs_folder.setFixedSize(16, 16)
+        _crumbs_folder.setPixmap(_icpx0("Folder", size=15, color=CT['fg_2']))
+        _crumbs_folder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        _crumbs_folder.setStyleSheet("background: transparent; border: none;")
+        title_row.addWidget(_crumbs_folder)
 
-        lbl_title_en = QLabel("FOLDER & FILE MANAGEMENT")
-        lbl_title_en.setStyleSheet(f"color: {CT['fg_3']}; font-size: 8.5pt; font-weight: 500; letter-spacing: 1.5px; background: transparent;")
-        lbl_title_en.setAlignment(Qt.AlignmentFlag.AlignBottom)
-        title_row.addWidget(lbl_title_en)
+        # 경로 라벨 — 클릭하면 감시 폴더 변경
+        self.lbl_location = QLabel("폴더를 선택하세요")
+        self.lbl_location.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.lbl_location.setStyleSheet(f"""
+            color: {CT['fg_1']};
+            background-color: {CT['bg_2']};
+            border: 1px solid {CT['border_soft']};
+            border-radius: 6px;
+            padding: 5px 10px;
+            font-family: {_mono};
+            font-size: 9pt;
+        """)
+        def _loc_click(ev):
+            if ev.button() == Qt.MouseButton.LeftButton:
+                self.browse_directory()
+        self.lbl_location.mousePressEvent = _loc_click
+        title_row.addWidget(self.lbl_location)
+
+        # 그룹 수
+        self.current_card_filter = 'all'
+        self.group_cards = []
+        self.filter_btns = {}  # 레거시 호환 (칩 제거됨)
+        self.lbl_section_hint = QLabel("그룹 0")
+        self.lbl_section_hint.setStyleSheet(f"color: {CT['fg_3']}; font-size: 9pt; font-weight: 500; background: transparent;")
+        title_row.addWidget(self.lbl_section_hint)
         title_row.addStretch()
 
         # ── 중앙 뷰 전환: [그룹] 카드 / [파일] 브라우저 ──
@@ -2253,53 +2293,17 @@ class JarvisGUI(QMainWindow):
 
         from gui.claude_icons import pixmap as _icpx
         from PyQt6.QtCore import QSize as _QSize
-        btn_rescan = QPushButton("  폴더 재스캔")
-        btn_rescan.setIcon(QIcon(_icpx("Scan", size=16, color=CT['fg_1'])))
-        btn_rescan.setIconSize(_QSize(16, 16))
-        btn_rescan.setFixedHeight(32)
+        btn_rescan = QPushButton()
+        btn_rescan.setIcon(QIcon(_icpx("Refresh", size=15, color=CT['fg_1'])))
+        btn_rescan.setIconSize(_QSize(15, 15))
+        btn_rescan.setFixedSize(32, 30)
         btn_rescan.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_rescan.setStyleSheet(self._btn_secondary_css())
         btn_rescan.clicked.connect(self.run_intelligent_merge)
         title_row.addWidget(btn_rescan)
         layout.addLayout(title_row)
 
-        # ── 2) BREADCRUMBS (folder icon + path) ──
-        layout.addSpacing(10)
-        crumbs_row = QHBoxLayout()
-        crumbs_row.setSpacing(8)
-        crumbs_row.setContentsMargins(0, 0, 0, 0)
-
-        from gui.claude_icons import pixmap as _icpx
-        _crumbs_folder = QLabel()
-        _crumbs_folder.setFixedSize(16, 16)
-        _crumbs_folder.setPixmap(_icpx("Folder", size=14, color=CT['fg_2']))
-        _crumbs_folder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        _crumbs_folder.setStyleSheet("background: transparent; border: none;")
-        crumbs_row.addWidget(_crumbs_folder)
-
-        self.lbl_location = QLabel("폴더를 선택하세요")
-        self.lbl_location.setStyleSheet(f"""
-            color: {CT['fg_2']};
-            background-color: {CT['bg_2']};
-            border: 1px solid {CT['border_soft']};
-            border-radius: 6px;
-            padding: 4px 9px;
-            font-family: {_mono};
-            font-size: 9pt;
-        """)
-        crumbs_row.addWidget(self.lbl_location)
-        crumbs_row.addStretch()
-
-        # 그룹 수 표시 — 경로 줄 오른쪽 끝에 통합 (세로 공간 절약)
-        self.current_card_filter = 'all'
-        self.group_cards = []
-        self.filter_btns = {}  # 레거시 호환 (칩 제거됨)
-        self.lbl_section_hint = QLabel("ID CLASSIFIED · 0 GROUPS")
-        self.lbl_section_hint.setStyleSheet(f"color: {CT['fg_3']}; font-size: 8.5pt; font-weight: 600; letter-spacing: 1.5px; background: transparent;")
-        crumbs_row.addWidget(self.lbl_section_hint)
-        layout.addLayout(crumbs_row)
-
-        # ── 3) 구분선 ──
+        # ── 2) 구분선 ──
         layout.addSpacing(12)
         line = QFrame()
         line.setFixedHeight(1)
@@ -2367,9 +2371,9 @@ class JarvisGUI(QMainWindow):
         if not hasattr(self, 'filter_btns'):
             return
         total = len(self.group_cards)
-        # section hint: "ID CLASSIFIED · N GROUPS"
+        # 그룹 수 표시 갱신
         if hasattr(self, 'lbl_section_hint'):
-            self.lbl_section_hint.setText(f"ID CLASSIFIED · {total} GROUPS")
+            self.lbl_section_hint.setText(f"그룹 {total}")
         # 현재 필터 재적용 (상태 바뀐 카드 반영)
         self._apply_card_filter(self.current_card_filter)
 

@@ -32,6 +32,8 @@ _SVG_SHAPES = {
     "Download":  '<path d="M12 3v12M7 10l5 5 5-5"/><path d="M5 21h14"/>',
     "Upload":    '<path d="M12 21V9M7 14l5-5 5 5"/><path d="M5 3h14"/>',
     "Chevron":   '<path d="m9 6 6 6-6 6"/>',
+    "ChevronUp":   '<path d="m6 15 6-6 6 6"/>',
+    "ChevronDown": '<path d="m6 9 6 6 6-6"/>',
     "MoreV":     '<circle cx="12" cy="6" r="1.2" fill="{fill}" stroke="none"/><circle cx="12" cy="12" r="1.2" fill="{fill}" stroke="none"/><circle cx="12" cy="18" r="1.2" fill="{fill}" stroke="none"/>',
     "Zap":       '<path d="M13 3 4 14h7l-1 7 9-11h-7l1-7Z"/>',
     "Scan":      '<path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M3 12h18"/>',

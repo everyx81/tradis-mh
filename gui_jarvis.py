@@ -960,12 +960,13 @@ class JarvisGUI(QMainWindow):
         """글로벌 단축키 초기화"""
         self.hotkey_settings = self._load_hotkey_settings()
         self._register_hotkeys()
-        self.emit_log(f"Global Hotkeys Initialized: Memo={self.hotkey_settings.get('memo_hotkey', 'ctrl+shift+m')}, Tray={self.hotkey_settings.get('tray_hotkey', 'alt+t')}")
+        self.emit_log(f"Global Hotkeys Initialized: Memo={self.hotkey_settings.get('memo_hotkey', 'ctrl+shift+m')}, Tray={self.hotkey_settings.get('tray_hotkey', 'ctrl+g')}")
     
     def _load_hotkey_settings(self):
         """단축키 설정 로드"""
         default_settings = {
             "memo_hotkey": "ctrl+shift+m",
+            "tray_hotkey": "ctrl+g",
             "snippets": [
                 {"hotkey": "ctrl+1", "text": "[해도관세사무소]"},
                 {"hotkey": "ctrl+2", "text": "확인 후 송금 부탁드립니다"},
@@ -1092,8 +1093,8 @@ class JarvisGUI(QMainWindow):
         memo_key = self.hotkey_settings.get("memo_hotkey", "ctrl+shift+m")
         self._memo_vk_combo = self._parse_hotkey_combo(memo_key)
 
-        # --- 보내기 트레이 단축키 파싱 (기본: Alt+T) ---
-        tray_key = self.hotkey_settings.get("tray_hotkey", "alt+t")
+        # --- 보내기 트레이 단축키 파싱 (기본: Ctrl+G) ---
+        tray_key = self.hotkey_settings.get("tray_hotkey", "ctrl+g")
         self._tray_vk_combo = self._parse_hotkey_combo(tray_key)
 
         # --- VK 코드 → 스니펫 텍스트 맵 구축 ---
@@ -1181,7 +1182,7 @@ class JarvisGUI(QMainWindow):
                                 activate_memo_fn()
                                 return 1
 
-                        # 보내기 트레이 단축키 체크 (예: Alt+T)
+                        # 보내기 트레이 단축키 체크 (예: Ctrl+G)
                         if tray_combo:
                             need_ctrl, need_alt, need_shift, trigger_vk = tray_combo
                             if kb.vkCode == trigger_vk and mods == (need_ctrl, need_alt, need_shift):
@@ -1290,11 +1291,11 @@ class JarvisGUI(QMainWindow):
         dlg = QDialog(self)
         dlg.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
         dlg.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        dlg.setFixedSize(750, 580)
+        dlg.setFixedSize(750, 650)
         
         # 메인 컨테이너 (네온 테두리)
         container = QFrame(dlg)
-        container.setGeometry(0, 0, 750, 580)
+        container.setGeometry(0, 0, 750, 650)
         container.setStyleSheet("""
             QFrame {
                 background-color: rgba(8, 15, 25, 245);
@@ -1349,6 +1350,31 @@ class JarvisGUI(QMainWindow):
         """)
         memo_layout.addWidget(memo_input, 1)
         main_layout.addWidget(memo_frame)
+
+        # ===== 보내기 트레이 단축키 섹션 =====
+        tray_frame = QFrame()
+        tray_frame.setStyleSheet("""
+            QFrame {
+                background-color: rgba(0, 30, 45, 150);
+                border: 1px solid #00aaaa;
+                border-radius: 12px;
+            }
+        """)
+        tray_layout = QHBoxLayout(tray_frame)
+        tray_layout.setContentsMargins(15, 12, 15, 12)
+        tray_layout.setSpacing(15)
+
+        tray_label = QLabel("보내기 트레이:")
+        tray_label.setStyleSheet("color: #00cccc; font-size: 10pt; font-weight: bold; border: none;")
+        tray_label.setFixedWidth(100)
+        tray_layout.addWidget(tray_label)
+
+        tray_input = QLineEdit(self.hotkey_settings.get("tray_hotkey", "ctrl+g"))
+        tray_input.setFixedHeight(36)
+        tray_input.setPlaceholderText("ctrl+g")
+        tray_input.setStyleSheet(memo_input.styleSheet())
+        tray_layout.addWidget(tray_input, 1)
+        main_layout.addWidget(tray_frame)
         
         # ===== 열 헤더: HOTKEY | SNIPPET TEXT =====
         col_header = QWidget()
@@ -1521,8 +1547,20 @@ class JarvisGUI(QMainWindow):
         """)
         
         def save_and_close():
+            # 유효성 검사: 잘못된 조합(단독 문자, shift+문자 등)은 저장 전에 거부
+            for name, val in (("메모장", memo_input.text().strip()),
+                              ("보내기 트레이", tray_input.text().strip())):
+                if val and self._parse_hotkey_combo(val) is None:
+                    QMessageBox.warning(
+                        dlg, "단축키 오류",
+                        f"'{val}' 은(는) 사용할 수 없는 {name} 단축키입니다.\n"
+                        "Ctrl 또는 Alt를 포함한 조합(예: ctrl+g, ctrl+shift+m, alt+t)이나 "
+                        "F키(예: f11)만 가능합니다."
+                    )
+                    return
             self._unregister_hotkeys()
             self.hotkey_settings["memo_hotkey"] = memo_input.text().strip()
+            self.hotkey_settings["tray_hotkey"] = tray_input.text().strip()
             new_snippets = []
             for hk_input, txt_input in snippet_inputs:
                 new_snippets.append({
@@ -2561,7 +2599,7 @@ class JarvisGUI(QMainWindow):
                 except Exception as e: self.emit_log(f"Error creating card for {text_id}: {e}")
 
             # 이체증(독립)·미분류 카드는 표시하지 않음 (2026-07 사용자 요청)
-            # — 해당 파일들은 [파일] 뷰와 보내기 트레이(Alt+T)에서 직접 다룰 수 있음
+            # — 해당 파일들은 [파일] 뷰와 보내기 트레이(전역 단축키, 기본 Ctrl+G)에서 직접 다룰 수 있음
             self.merge_layout.addStretch()
 
             # 필터 초기화 후 카운트 갱신

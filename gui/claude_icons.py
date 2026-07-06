@@ -27,6 +27,8 @@ _SVG_SHAPES = {
     "Check":     '<path d="m5 12 5 5L20 7"/>',
     "X":         '<path d="M6 6l12 12M18 6 6 18"/>',
     "ArrowDown": '<path d="M12 5v14M5 12l7 7 7-7"/>',
+    "ArrowUp":   '<path d="M12 19V5M5 12l7-7 7 7"/>',
+    "Home":      '<path d="m3 11 9-8 9 8"/><path d="M5 9.5V20a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9.5"/>',
     "Download":  '<path d="M12 3v12M7 10l5 5 5-5"/><path d="M5 21h14"/>',
     "Upload":    '<path d="M12 21V9M7 14l5-5 5 5"/><path d="M5 3h14"/>',
     "Chevron":   '<path d="m9 6 6 6-6 6"/>',

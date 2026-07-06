@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import *
 from PyQt6.QtCore import *
 from PyQt6.QtGui import *
 
-from .widgets import (DropListWidget, JarvisPanel, DraggableSearchResultList,
+from .widgets import (DropListWidget, DraggableSearchResultList,
                       DraggableTreeView, NeonButton, get_unique_filename, TargetListWidget)
 from .utils import resource_path, get_run_dir
 from .styles import TARGET_LIST_STYLESHEET
@@ -377,14 +377,28 @@ class FileManagerWidget(QWidget):
         
 
         
-        # === 오른쪽 영역: JARVIS SEARCH 패널 ===
-        self.search_panel = JarvisPanel()
+        # === 오른쪽 영역: 검색 패널 (Claude Design warm dark) ===
+        self.search_panel = QFrame()
+        self.search_panel.setObjectName("SearchSidePanel")
         self.search_panel.setMinimumWidth(480)
         self.search_panel.setMaximumWidth(480)
         search_panel_layout = QVBoxLayout(self.search_panel)
-        # 여백을 넉넉하게 확장 (Left, Top, Right, Bottom)
-        search_panel_layout.setContentsMargins(20, 25, 20, 25)
-        search_panel_layout.setSpacing(15)
+        search_panel_layout.setContentsMargins(16, 16, 16, 16)
+        search_panel_layout.setSpacing(12)
+
+        _sp_title_css = (
+            f"color: {CT['fg_2']}; font-size: 9pt; font-weight: 700; "
+            f"letter-spacing: 1.5px; background: transparent; border: none;"
+        )
+        _sp_icon_btn_css = f"""
+            QPushButton {{
+                background-color: transparent;
+                border: 1px solid transparent;
+                border-radius: 6px;
+            }}
+            QPushButton:hover {{ background-color: {CT['bg_3']}; }}
+        """
+        from .claude_icons import pixmap as _sp_icpx
         
         # 1. 상단 그룹: 검색
         self.search_group = QWidget()
@@ -394,42 +408,91 @@ class FileManagerWidget(QWidget):
         search_group_layout.setSpacing(3)
         
         self.search_header_layout = QHBoxLayout()
-        self.lbl_search_icon = QLabel("🔍")
-        self.lbl_search_icon.setStyleSheet("color: #00ffff; font-size: 12pt;")
+        self.search_header_layout.setSpacing(8)
+        self.lbl_search_icon = QLabel()
+        self.lbl_search_icon.setFixedSize(16, 16)
+        self.lbl_search_icon.setPixmap(_sp_icpx("Search", size=14, color=CT['fg_2']))
+        self.lbl_search_icon.setStyleSheet("background: transparent; border: none;")
         self.search_header_layout.addWidget(self.lbl_search_icon)
         self.lbl_search_text = QLabel("검색")
-        self.lbl_search_text.setStyleSheet("color: #00ffff; font-weight: bold; font-size: 10pt;")
+        self.lbl_search_text.setStyleSheet(_sp_title_css)
         self.search_header_layout.addWidget(self.lbl_search_text)
         self.search_header_layout.addStretch()
-        btn_close_search = NeonButton("✕", color="cyan")
-        btn_close_search.setFixedSize(25, 25)
+        btn_close_search = QPushButton()
+        btn_close_search.setIcon(QIcon(_sp_icpx("X", size=13, color=CT['fg_2'])))
+        btn_close_search.setIconSize(QSize(13, 13))
+        btn_close_search.setFixedSize(26, 22)
+        btn_close_search.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_close_search.setStyleSheet(_sp_icon_btn_css)
         btn_close_search.clicked.connect(self._toggle_search_panel)
         self.search_header_layout.addWidget(btn_close_search)
         search_group_layout.addLayout(self.search_header_layout)
         
         self.search_input_module = QWidget()
         search_input_module_layout = QHBoxLayout(self.search_input_module)
-        search_input_module_layout.setContentsMargins(0,0,0,0)
+        search_input_module_layout.setContentsMargins(0, 0, 0, 0)
+        search_input_module_layout.setSpacing(6)
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("검색어 입력 (업체명, BL번호)")
         self.search_input.returnPressed.connect(self._everything_search)
-        self.search_input.setStyleSheet("""
-            QLineEdit { background-color: rgba(2, 11, 20, 120); border: 2px solid #335566; border-radius: 8px; color: #ffffff; padding: 6px 10px; font-size: 10pt; }
-            QLineEdit:focus { border: 2px solid #00ffff; }
+        self.search_input.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {CT['bg_2']};
+                border: 1px solid {CT['border_soft']};
+                border-radius: 8px;
+                color: {CT['fg_0']};
+                padding: 6px 10px;
+                font-size: 10pt;
+            }}
+            QLineEdit:focus {{ border: 1px solid {CT['accent_border']}; }}
         """)
         search_input_module_layout.addWidget(self.search_input, stretch=1)
-        self.btn_search = NeonButton("검색", color="cyan")
+        self.btn_search = QPushButton("검색")
         self.btn_search.setFixedSize(55, 32)
+        self.btn_search.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_search.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {CT['accent']};
+                color: #ffffff;
+                border: 1px solid {CT['accent_hi']};
+                border-radius: 8px;
+                font-size: 9.5pt;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{ background-color: {CT['accent_hi']}; }}
+            QPushButton:pressed {{ background-color: {CT['accent_lo']}; }}
+        """)
         self.btn_search.clicked.connect(self._everything_search)
         search_input_module_layout.addWidget(self.btn_search)
         search_group_layout.addWidget(self.search_input_module)
         
         self.search_result_list = DraggableSearchResultList()
         self.search_result_list.itemClicked.connect(self._on_search_result_clicked)
+        self.search_result_list.setStyleSheet(f"""
+            QListWidget {{
+                background-color: transparent;
+                border: 1px solid {CT['border_soft']};
+                border-radius: 10px;
+                color: {CT['fg_0']};
+                font-size: 9pt;
+                padding: 4px;
+                outline: 0;
+            }}
+            QListWidget::item {{
+                padding: 5px 8px;
+                border-radius: 6px;
+            }}
+            QListWidget::item:hover {{ background: {CT['bg_3']}; }}
+            QListWidget::item:selected {{
+                background: {CT['accent_bg']};
+                color: {CT['fg_0']};
+                border: 1px solid {CT['accent_border']};
+            }}
+        """)
         search_group_layout.addWidget(self.search_result_list)
-        
+
         self.search_status_label = QLabel("검색 결과 클릭 ↓ 하단 탐색기")
-        self.search_status_label.setStyleSheet("color: #888; font-size: 8pt;")
+        self.search_status_label.setStyleSheet(f"color: {CT['fg_3']}; font-size: 8.5pt; background: transparent;")
         self.search_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         search_group_layout.addWidget(self.search_status_label)
         search_panel_layout.addWidget(self.search_group, stretch=1)
@@ -442,47 +505,86 @@ class FileManagerWidget(QWidget):
         browser_group_layout.setSpacing(3)
         
         self.browser_header_layout = QHBoxLayout()
-        self.lbl_browser_icon = QLabel("📂")
-        self.lbl_browser_icon.setStyleSheet("color: #00ffff; font-size: 11pt;")
+        self.browser_header_layout.setSpacing(8)
+        self.lbl_browser_icon = QLabel()
+        self.lbl_browser_icon.setFixedSize(16, 16)
+        self.lbl_browser_icon.setPixmap(_sp_icpx("Folder", size=14, color=CT['fg_2']))
+        self.lbl_browser_icon.setStyleSheet("background: transparent; border: none;")
         self.browser_header_layout.addWidget(self.lbl_browser_icon)
         self.lbl_browser_text = QLabel("폴더 탐색")
-        self.lbl_browser_text.setStyleSheet("color: #00ffff; font-weight: bold; font-size: 9pt;")
+        self.lbl_browser_text.setStyleSheet(_sp_title_css)
         self.browser_header_layout.addWidget(self.lbl_browser_text)
-        self.btn_go_up = NeonButton("⬆", color="cyan")
-        self.btn_go_up.setFixedSize(36, 32)
-        self.btn_go_up.setStyleSheet(self.btn_go_up.styleSheet() + "font-size: 14pt;")
-        self.btn_go_up.clicked.connect(self._browser_go_up)
-        self.browser_header_layout.addWidget(self.btn_go_up)
-        self.btn_go_home = NeonButton("🏠", color="cyan")
-        self.btn_go_home.setFixedSize(36, 32)
-        self.btn_go_home.setStyleSheet(self.btn_go_home.styleSheet() + "font-size: 14pt;")
-        self.btn_go_home.clicked.connect(self._browser_go_home)
-        self.browser_header_layout.addWidget(self.btn_go_home)
-        self.btn_set_home = NeonButton("⚙", color="cyan")
-        self.btn_set_home.setFixedSize(36, 32)
-        self.btn_set_home.setStyleSheet(self.btn_set_home.styleSheet() + "font-size: 14pt;")
-        self.btn_set_home.clicked.connect(self._set_browser_home)
-        self.browser_header_layout.addWidget(self.btn_set_home)
         self.browser_header_layout.addStretch()
+
+        def _sp_tool_btn(icon_name, tooltip, slot):
+            btn = QPushButton()
+            btn.setIcon(QIcon(_sp_icpx(icon_name, size=14, color=CT['fg_2'])))
+            btn.setIconSize(QSize(14, 14))
+            btn.setFixedSize(28, 24)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setToolTip(tooltip)
+            btn.setStyleSheet(_sp_icon_btn_css)
+            btn.clicked.connect(slot)
+            return btn
+
+        self.btn_go_up = _sp_tool_btn("ArrowUp", "상위 폴더로", self._browser_go_up)
+        self.browser_header_layout.addWidget(self.btn_go_up)
+        self.btn_go_home = _sp_tool_btn("Home", "홈 폴더로", self._browser_go_home)
+        self.browser_header_layout.addWidget(self.btn_go_home)
+        self.btn_set_home = _sp_tool_btn("Settings", "홈 폴더 지정", self._set_browser_home)
+        self.browser_header_layout.addWidget(self.btn_set_home)
         browser_group_layout.addLayout(self.browser_header_layout)
-        
+
         self.current_path_label = QLabel("경로: (폴더를 선택하세요)")
-        self.current_path_label.setStyleSheet("color: #888; font-size: 8pt;")
+        self.current_path_label.setStyleSheet(f"color: {CT['fg_3']}; font-size: 8.5pt; background: transparent;")
         self.current_path_label.setWordWrap(True)
         browser_group_layout.addWidget(self.current_path_label)
-        
+
         self.file_browser = DraggableTreeView()
         self.file_browser.doubleClicked.connect(self._browser_on_double_click)
+        self.file_browser.setStyleSheet(f"""
+            QTreeView {{
+                background-color: transparent;
+                border: 1px solid {CT['border_soft']};
+                border-radius: 10px;
+                color: {CT['fg_0']};
+                font-size: 9.5pt;
+                padding: 4px;
+                outline: 0;
+            }}
+            QTreeView::item {{
+                padding: 4px;
+                border-radius: 6px;
+            }}
+            QTreeView::item:hover {{ background: {CT['bg_3']}; }}
+            QTreeView::item:selected {{
+                background: {CT['accent_bg']};
+                color: {CT['fg_0']};
+            }}
+            QTreeView::branch {{ background-color: transparent; }}
+            QTreeView QLineEdit {{
+                background-color: {CT['bg_3']};
+                border: 1px solid {CT['accent_border']};
+                border-radius: 4px;
+                color: {CT['fg_0']};
+                padding: 2px 5px;
+            }}
+        """)
         browser_group_layout.addWidget(self.file_browser)
-        
-        self.browser_hint = QLabel("→ 드래그하여 리스트에 추가")
-        self.browser_hint.setStyleSheet("color: #00cccc; font-size: 9pt; font-weight: bold; padding: 5px;")
+
+        self.browser_hint = QLabel("드래그하여 리스트에 추가")
+        self.browser_hint.setStyleSheet(f"color: {CT['fg_3']}; font-size: 8.5pt; background: transparent; padding: 2px;")
         self.browser_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         browser_group_layout.insertWidget(0, self.browser_hint)
         search_panel_layout.addWidget(self.browser_group, stretch=1)
-        
-        self.search_panel.setObjectName("JarvisSearchPanel")
-        self.search_panel.setStyleSheet("#JarvisSearchPanel { border-left: 2px solid #00aaff; }")
+
+        self.search_panel.setStyleSheet(f"""
+            QFrame#SearchSidePanel {{
+                background-color: {CT['bg_1']};
+                border: 1px solid {CT['border']};
+                border-radius: 12px;
+            }}
+        """)
         self.search_panel.hide()
         
         t1_layout.addWidget(left_widget, stretch=2)
@@ -1122,58 +1224,16 @@ class FileManagerWidget(QWidget):
             self.search_panel.setGeometry(geo)
 
     def _animate_search_panel(self, show):
-        anim_targets = [
-            (self.lbl_search_text, 200, 'typing', "검색"),
-            (self.lbl_search_icon, 700, 'fade', None),
-            (self.lbl_browser_text, 1000, 'typing', "폴더 탐색"),
-            (self.lbl_browser_icon, 1500, 'fade', None),
-            (self.btn_go_up, 1650, 'fade', None),
-            (self.search_input_module, 1800, 'fade', None),
-            (self.search_result_list, 2000, 'fade', None),
-            (self.file_browser, 2300, 'fade', None),
-            (self.browser_hint, 2600, 'typing', "→ 드래그하여 리스트에 추가"),
-        ]
-        
+        # 구 JARVIS 인트로(타이핑·네온 글로우) 제거 — 단순 슬라이드 인/아웃
         if show:
             self.search_group.show()
             self.browser_group.show()
-            self.search_panel.set_core_opacity(0.0)
-            if hasattr(self, 'pulse_group'): self.pulse_group.stop()
-
-            for widget, delay, type_, content in anim_targets:
-                effect = widget.graphicsEffect()
-                if not effect or not isinstance(effect, QGraphicsOpacityEffect):
-                    effect = QGraphicsOpacityEffect(widget)
-                    widget.setGraphicsEffect(effect)
-                
-                if type_ == 'typing':
-                    widget.setText("")
-                    effect.setOpacity(1.0)
-                else:
-                    effect.setOpacity(0.0)
-                widget.show()
-            
-            for w in [self.search_status_label, self.current_path_label]:
-                if not w.graphicsEffect(): w.setGraphicsEffect(QGraphicsOpacityEffect(w))
-                w.graphicsEffect().setOpacity(0.0)
-                QTimer.singleShot(2500, lambda w=w: w.graphicsEffect().setOpacity(1.0))
-
-            if not hasattr(self, 'glow_overlay'):
-                self.glow_overlay = QWidget(self.search_panel)
-                self.glow_overlay.setStyleSheet("background-color: #00ffff;")
-                self.glow_overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-                self.glow_opacity = QGraphicsOpacityEffect(self.glow_overlay)
-                self.glow_opacity.setOpacity(0.0)
-                self.glow_overlay.setGraphicsEffect(self.glow_opacity)
-            self.glow_overlay.resize(self.search_panel.size())
-            self.glow_overlay.raise_()
-            self.glow_overlay.show()
         
         self.anim_group = QParallelAnimationGroup()
 
         geo_anim = QPropertyAnimation(self.search_panel, b"geometry")
-        geo_anim.setDuration(600)
-        geo_anim.setEasingCurve(QEasingCurve.Type.OutBack if show else QEasingCurve.Type.InBack)
+        geo_anim.setDuration(280)
+        geo_anim.setEasingCurve(QEasingCurve.Type.OutCubic if show else QEasingCurve.Type.InCubic)
         
         target_geo = self._calculate_target_geometry()
         # 애니메이션 시작/끝 설정
@@ -1186,60 +1246,6 @@ class FileManagerWidget(QWidget):
             geo_anim.setEndValue(QRect(target_geo.x(), target_geo.y(), 0, target_geo.height()))
             
         self.anim_group.addAnimation(geo_anim)
-
-        if show:
-            core_anim = QPropertyAnimation(self.search_panel, b"core_opacity_prop")
-            core_anim.setDuration(2000)
-            core_anim.setStartValue(0.0)
-            core_anim.setEndValue(0.8)
-            core_anim.setEasingCurve(QEasingCurve.Type.OutQuad)
-            self.anim_group.addAnimation(core_anim)
-        else:
-            core_anim = QPropertyAnimation(self.search_panel, b"core_opacity_prop")
-            core_anim.setDuration(500)
-            core_anim.setStartValue(self.search_panel.get_core_opacity())
-            core_anim.setEndValue(0.0)
-            self.anim_group.addAnimation(core_anim)
-            if hasattr(self, 'pulse_group'): self.pulse_group.stop()
-
-        if show:
-            for widget, delay, type_, content in anim_targets:
-                seq = QSequentialAnimationGroup()
-                seq.addPause(delay)
-                if type_ == 'typing':
-                    char_duration = 30
-                    total_dur = len(content) * char_duration 
-                    anim = QVariantAnimation()
-                    anim.setDuration(max(300, total_dur))
-                    anim.setStartValue(0)
-                    anim.setEndValue(len(content))
-                    anim.valueChanged.connect(lambda v, w=widget, t=content: w.setText(t[:int(v)]))
-                    seq.addAnimation(anim)
-                else:
-                    anim = QPropertyAnimation(widget.graphicsEffect(), b"opacity")
-                    anim.setDuration(200)
-                    anim.setStartValue(0.0)
-                    anim.setEndValue(1.0)
-                    anim.setEasingCurve(QEasingCurve.Type.OutExpo)
-                    seq.addAnimation(anim)
-                self.anim_group.addAnimation(seq)
-            
-            glow_seq = QSequentialAnimationGroup()
-            glow_seq.addPause(2600)
-            glow_in = QPropertyAnimation(self.glow_opacity, b"opacity")
-            glow_in.setDuration(500)
-            glow_in.setStartValue(0.0)
-            glow_in.setEndValue(0.3)
-            glow_seq.addAnimation(glow_in)
-            glow_out = QPropertyAnimation(self.glow_opacity, b"opacity")
-            glow_out.setDuration(1000)
-            glow_out.setStartValue(0.3)
-            glow_out.setEndValue(0.0)
-            glow_seq.addAnimation(glow_out)
-            self.anim_group.addAnimation(glow_seq)
-            QTimer.singleShot(2500, lambda: self.glow_overlay.resize(self.search_panel.size()))
-        else:
-            if hasattr(self, 'glow_overlay'): self.glow_opacity.setOpacity(0.0)
 
         if not show:
             self.anim_group.finished.connect(self._on_search_panel_hidden)
@@ -1424,13 +1430,13 @@ class FileManagerWidget(QWidget):
             self.search_panel.setMaximumWidth(0)
             self.search_panel.show()
             self._animate_search_panel(True)
-            self.btn_toggle_search.setText("◀ CLOSE")
+            self.btn_toggle_search.setText("  닫기")
             self.search_input.setFocus()
 
     def _on_search_panel_hidden(self):
         self.search_panel.hide()
         self.search_panel.setMaximumWidth(480)
-        self.btn_toggle_search.setText("🔍 SEARCH")
+        self.btn_toggle_search.setText("  검색")
 
     def _get_es_path(self):
         if getattr(sys, 'frozen', False):

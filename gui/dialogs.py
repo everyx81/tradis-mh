@@ -1028,13 +1028,6 @@ class GroupCard(GlassFrame):
     # 상태 변경 시그널 (필터 카운트 갱신용)
     status_changed = pyqtSignal()
 
-    STATUS_ICONS = {
-        'green': '🟢',
-        'yellow': '🟡',
-        'red': '🔴',
-        'gray': '⚪',
-    }
-
     def __init__(self, parent_widget, renamer, directory, text_id, data, unclassified, parent=None):
         super().__init__(parent)
         # GlassFrame의 반투명 + 글로우 paintEvent 비활성화 (스타일시트 사용을 위해)
@@ -1226,7 +1219,7 @@ class GroupCard(GlassFrame):
             #GroupCardRoot {{
                 background-color: rgb({r}, {g}, {b});
                 border: 1px solid rgba({br_r}, {br_g}, {br_b}, {br_a});
-                border-radius: 14px;
+                border-radius: 11px;
             }}
         """)
 
@@ -1256,8 +1249,8 @@ class GroupCard(GlassFrame):
         self._apply_card_bg(0.0)
 
         self.layout = QVBoxLayout(self)
-        # 디자인 .group-head { padding: 14px 18px; } — top/bottom 8, 좌우 18로 컴팩트
-        self.layout.setContentsMargins(18, 8, 18, 8)
+        # 카드 두께 슬림화 — top/bottom 4, 좌우 16
+        self.layout.setContentsMargins(16, 4, 16, 4)
         self.layout.setSpacing(4)
 
         # ── 클릭 가능한 헤더 ──
@@ -1282,7 +1275,7 @@ class GroupCard(GlassFrame):
         self.id_pill = QFrame()
         self.id_pill.setObjectName("IdPill")
         pill_layout = QHBoxLayout(self.id_pill)
-        pill_layout.setContentsMargins(11, 5, 13, 5)
+        pill_layout.setContentsMargins(11, 3, 13, 3)
         pill_layout.setSpacing(8)
 
         self.pill_dot = QLabel()
@@ -1370,14 +1363,14 @@ class GroupCard(GlassFrame):
         self.btn_toggle = QPushButton("  " + btn_text)
         self.btn_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_toggle.setMinimumWidth(88)
-        # 디자인 .btn.small: padding 6px 10px, font-size 11.5px (~8.5pt) Pretendard/Inter
+        # 디자인 .btn.small: 카드 슬림화에 맞춰 세로 padding 축소
         self.btn_toggle.setStyleSheet(f"""
             QPushButton {{
                 background-color: {_CT['bg_2']};
                 color: {_CT['fg_1']};
                 border: 1px solid {_CT['border_soft']};
-                border-radius: 8px;
-                padding: 6px 10px;
+                border-radius: 7px;
+                padding: 4px 10px;
                 font-family: 'Pretendard','Malgun Gothic','Segoe UI',sans-serif;
                 font-size: 8.5pt;
                 font-weight: 500;

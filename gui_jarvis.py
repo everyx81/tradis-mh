@@ -2289,80 +2289,25 @@ class JarvisGUI(QMainWindow):
         """)
         crumbs_row.addWidget(self.lbl_location)
         crumbs_row.addStretch()
+
+        # 그룹 수 표시 — 경로 줄 오른쪽 끝에 통합 (세로 공간 절약)
+        self.current_card_filter = 'all'
+        self.group_cards = []
+        self.filter_btns = {}  # 레거시 호환 (칩 제거됨)
+        self.lbl_section_hint = QLabel("ID CLASSIFIED · 0 GROUPS")
+        self.lbl_section_hint.setStyleSheet(f"color: {CT['fg_3']}; font-size: 8.5pt; font-weight: 600; letter-spacing: 1.5px; background: transparent;")
+        crumbs_row.addWidget(self.lbl_section_hint)
         layout.addLayout(crumbs_row)
 
         # ── 3) 구분선 ──
-        layout.addSpacing(14)
+        layout.addSpacing(12)
         line = QFrame()
         line.setFixedHeight(1)
         line.setStyleSheet(f"background-color: {CT['border_soft']}; border: none;")
         layout.addWidget(line)
-        layout.addSpacing(14)
 
-        # ── 4) FILTER CHIPS (ID classified · N groups + chips) ──
-        self.current_card_filter = 'all'
-        self.group_cards = []
-
-        self.filter_bar = QWidget()
-        filter_layout = QHBoxLayout(self.filter_bar)
-        filter_layout.setContentsMargins(0, 0, 0, 0)
-        filter_layout.setSpacing(6)
-
-        self.lbl_section_hint = QLabel("ID CLASSIFIED · 0 GROUPS")
-        self.lbl_section_hint.setStyleSheet(f"color: {CT['fg_3']}; font-size: 8.5pt; font-weight: 600; letter-spacing: 1.5px; background: transparent;")
-        filter_layout.addWidget(self.lbl_section_hint)
-        filter_layout.addSpacing(6)
-
-        # chip factory — color dot + text (setIcon으로 dot pixmap)
-        from PyQt6.QtGui import QPixmap, QPainter, QColor
-        from PyQt6.QtCore import QSize as _QSize
-
-        def _make_dot_pixmap(hex_color: str, size: int = 10) -> QPixmap:
-            pm = QPixmap(size, size)
-            pm.fill(Qt.GlobalColor.transparent)
-            p = QPainter(pm)
-            p.setRenderHint(QPainter.RenderHint.Antialiasing)
-            p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(QColor(hex_color))
-            p.drawEllipse(0, 0, size, size)
-            p.end()
-            return pm
-
-        def _make_chip(key, text, dot_color=None):
-            # 텍스트 앞에 2칸 공백(아이콘 간격) + dot_color 있으면 작은 색 원 icon
-            btn = QPushButton(("  " if dot_color else "") + text)
-            btn.setCheckable(True)
-            btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setProperty("chip_key", key)
-            if dot_color:
-                btn.setIcon(QIcon(_make_dot_pixmap(dot_color, size=10)))
-                btn.setIconSize(_QSize(7, 7))
-            btn.setStyleSheet(self._chip_css(dot_color))
-            btn.clicked.connect(lambda: self._apply_card_filter(key))
-            return btn
-
-        self.filter_btns = {
-            'all':    _make_chip('all',    "전체 0"),
-            'green':  _make_chip('green',  "완료 0",   CT['green']),
-            'yellow': _make_chip('yellow', "대기 0",   CT['amber']),
-            'red':    _make_chip('red',    "충돌 0",   CT['red']),
-            'gray':   _make_chip('gray',   "미분류 0", CT['fg_3']),
-        }
-        for key in ('all', 'green', 'yellow', 'red', 'gray'):
-            filter_layout.addWidget(self.filter_btns[key])
-        filter_layout.addStretch()
-        self.filter_btns['all'].setChecked(True)
-        layout.addWidget(self.filter_bar)
-
-        # ── filter-row 와 카드 목록 사이 구분선 (Claude Design .filter-row border-bottom) ──
-        layout.addSpacing(10)
-        self._filter_sep = QFrame()
-        self._filter_sep.setFixedHeight(1)
-        self._filter_sep.setStyleSheet(f"background-color: {CT['border_soft']}; border: none;")
-        layout.addWidget(self._filter_sep)
-
-        # ── 5) GROUP CARD SCROLL ──
-        layout.addSpacing(14)
+        # ── 4) GROUP CARD SCROLL ──
+        layout.addSpacing(12)
         self.merge_scroll = QScrollArea()
         self.merge_scroll.setWidgetResizable(True)
         self.merge_scroll.setStyleSheet("background: transparent; border: none;")
@@ -2374,7 +2319,7 @@ class JarvisGUI(QMainWindow):
         self.merge_container.setStyleSheet("background: transparent;")
         self.merge_layout = QVBoxLayout(self.merge_container)
         self.merge_layout.setContentsMargins(0, 0, 0, 0)
-        self.merge_layout.setSpacing(10)
+        self.merge_layout.setSpacing(8)
         self.merge_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         self.merge_scroll.setWidget(self.merge_container)
@@ -2397,40 +2342,12 @@ class JarvisGUI(QMainWindow):
         is_files = (mode == 'files')
         self.btn_view_groups.setChecked(not is_files)
         self.btn_view_files.setChecked(is_files)
-        # 필터 칩은 그룹 카드 전용 → 파일 뷰에서는 숨김
-        self.filter_bar.setVisible(not is_files)
-        self._filter_sep.setVisible(not is_files)
+        # 그룹 수 표시는 그룹 카드 전용 → 파일 뷰에서는 숨김
+        self.lbl_section_hint.setVisible(not is_files)
         self.center_stack.setCurrentIndex(1 if is_files else 0)
         if is_files:
             # 열 때마다 지정 폴더 기준 최신 상태로
             self.center_file_browser.go_home()
-
-    def _chip_css(self, dot_color=None):
-        """필터 chip 스타일 (색 dot + 텍스트) — 완전 둥근 pill."""
-        # 수직 padding을 늘려 border-radius: 999px가 확실히 pill 모양이 되게 함
-        base = f"""
-            QPushButton {{
-                background-color: {CT['bg_2']};
-                color: {CT['fg_1']};
-                border: 1px solid {CT['border_soft']};
-                border-radius: 12px;
-                padding: 6px 14px;
-                font-size: 9pt;
-                font-weight: 500;
-                text-align: center;
-                min-height: 12px;
-            }}
-            QPushButton:hover {{
-                background-color: {CT['bg_3']};
-                color: {CT['fg_0']};
-            }}
-            QPushButton:checked {{
-                background-color: {CT['accent_bg']};
-                border: 1px solid {CT['accent_border']};
-                color: {CT['accent_hi']};
-            }}
-        """
-        return base
 
     def _apply_card_filter(self, key):
         """필터 버튼 클릭 → 해당 상태 카드만 표시"""
@@ -2446,26 +2363,13 @@ class JarvisGUI(QMainWindow):
             card.setVisible(key == 'all' or card.get_status() == key)
 
     def _refresh_filter_counts(self):
-        """필터 버튼의 카운트 갱신"""
+        """필터 상태 갱신 (칩 라벨은 숫자 없이 고정, 그룹 수는 section hint에만 표시)"""
         if not hasattr(self, 'filter_btns'):
             return
-        counts = {'all': 0, 'green': 0, 'yellow': 0, 'red': 0, 'gray': 0}
-        for card in self.group_cards:
-            counts['all'] += 1
-            if hasattr(card, 'get_status'):
-                counts[card.get_status()] = counts.get(card.get_status(), 0) + 1
-        labels = {
-            'all':    f"전체 {counts['all']}",
-            'green':  f"  완료 {counts['green']}",
-            'yellow': f"  대기 {counts['yellow']}",
-            'red':    f"  충돌 {counts['red']}",
-            'gray':   f"  미분류 {counts['gray']}",
-        }
+        total = len(self.group_cards)
         # section hint: "ID CLASSIFIED · N GROUPS"
         if hasattr(self, 'lbl_section_hint'):
-            self.lbl_section_hint.setText(f"ID CLASSIFIED · {counts['all']} GROUPS")
-        for key, btn in self.filter_btns.items():
-            btn.setText(labels[key])
+            self.lbl_section_hint.setText(f"ID CLASSIFIED · {total} GROUPS")
         # 현재 필터 재적용 (상태 바뀐 카드 반영)
         self._apply_card_filter(self.current_card_filter)
 

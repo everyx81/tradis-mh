@@ -2738,6 +2738,8 @@ class GroupCard(GlassFrame):
         
         # 파일 매핑 리스트 (▲/▼ 버튼으로 파일 교환)
         self.combo_list = []  # 콤보박스 참조 저장
+        self.badge_list = []  # 순번 배지 참조 (상태 색 갱신용)
+        self.row_label_list = []  # 서류 라벨 참조 (상태 색 갱신용)
         
         from .claude_theme import C as _CT
         from .claude_icons import pixmap as _icpx
@@ -2775,59 +2777,19 @@ class GroupCard(GlassFrame):
             row_layout.setContentsMargins(10, 6, 10, 6)
             row_layout.setSpacing(8)
 
-            # 해당없음 여부 (징수형태 / 월납업체 / 사용자 override)
-            try:
-                _na_set = self._compute_na_set()
-            except Exception:
-                _na_set = set()
-            _label_raw = item.get('label', '')
-            if ']' in _label_raw:
-                _item_name = _label_raw.split(']')[-1].strip()
-            elif ':' in _label_raw:
-                _item_name = _label_raw.split(':')[-1].strip()
-            else:
-                _item_name = _label_raw
-            _is_na = _item_name in _na_set
-            has_file = bool(item.get('filename', ''))
-            is_included = '포함' in item['label']
-
-            # 순번 배지 — 상태 색 (녹색=파일 있음 / 빨강=누락 / 회색=해당없음)
+            # 순번 배지 + 서류 라벨 (상태 색은 _apply_row_status 공용 적용)
             _badge = QLabel(str(idx + 1))
             _badge.setFixedSize(20, 20)
             _badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            if _is_na:
-                _b_bg, _b_bd, _b_fg = _CT['bg_3'], _CT['border_soft'], _CT['fg_3']
-            elif has_file:
-                _b_bg, _b_bd, _b_fg = "rgba(89, 200, 134, 36)", "rgba(89, 200, 134, 120)", _CT['green']
-            else:
-                _b_bg, _b_bd, _b_fg = "rgba(250, 104, 99, 36)", "rgba(250, 104, 99, 120)", _CT['red']
-            _badge.setStyleSheet(f"""
-                background-color: {_b_bg};
-                border: 1px solid {_b_bd};
-                border-radius: 6px;
-                color: {_b_fg};
-                font-family: 'JetBrains Mono','Consolas',monospace;
-                font-size: 8.5pt;
-                font-weight: 600;
-            """)
             row_layout.addWidget(_badge)
 
-            # 서류 라벨
             lbl = QLabel(item['label'])
-            if _is_na:
-                lbl.setText(f"{item['label']}  (해당없음)")
-                lbl.setStyleSheet(f"color: {_CT['fg_3']}; background: transparent; font-size: 9.5pt;")
-                lbl.setToolTip("해당없음 항목 — 금액 검증/파일 요구 안 함")
-            elif item.get('matched_by_amount', False):
-                lbl.setStyleSheet(f"color: {_CT['accent_hi']}; background: transparent; font-weight: 600; font-size: 9.5pt;")
-                lbl.setToolTip("총금액 비교로 매칭되었습니다.")
-            elif not has_file and not is_included:
-                lbl.setStyleSheet(f"color: {_CT['red']}; background: transparent; font-weight: 600; font-size: 9.5pt;")
-                lbl.setToolTip("계산서 매칭 안 됨")
-            else:
-                lbl.setStyleSheet(f"color: {_CT['fg_1']}; background: transparent; font-size: 9.5pt;")
             lbl.setMinimumWidth(120)
             row_layout.addWidget(lbl)
+
+            self.badge_list.append(_badge)
+            self.row_label_list.append(lbl)
+            self._apply_row_status(idx)
             
             # 콤보박스 (파일 선택)
             combo = QComboBox()
@@ -2971,6 +2933,69 @@ class GroupCard(GlassFrame):
         # 맵핑 UI 새로고침(또는 AI 분석) 후 자동 검증 실행
         self._run_amount_validation()
     
+    def _apply_row_status(self, idx):
+        """매핑 행의 순번 배지·서류 라벨 상태 색 적용 (생성/파일변경/교환 공용)
+
+        녹색=파일 있음·타 계산서에 포함 / 빨강=누락 / 회색=해당없음
+        """
+        if not (0 <= idx < len(self.mapping)
+                and idx < len(getattr(self, 'badge_list', []))
+                and idx < len(getattr(self, 'row_label_list', []))):
+            return
+        from .claude_theme import C as _CT
+        item = self.mapping[idx]
+        badge = self.badge_list[idx]
+        lbl = self.row_label_list[idx]
+
+        # 해당없음 여부 (징수형태 / 월납업체 / 사용자 override)
+        try:
+            _na_set = self._compute_na_set()
+        except Exception:
+            _na_set = set()
+        _label_raw = item.get('label', '')
+        if ']' in _label_raw:
+            _item_name = _label_raw.split(']')[-1].strip()
+        elif ':' in _label_raw:
+            _item_name = _label_raw.split(':')[-1].strip()
+        else:
+            _item_name = _label_raw
+        _is_na = _item_name in _na_set
+        has_file = bool(item.get('filename', ''))
+        is_included = '포함' in _label_raw
+
+        if _is_na:
+            _b_bg, _b_bd, _b_fg = _CT['bg_3'], _CT['border_soft'], _CT['fg_3']
+        elif has_file or is_included:
+            _b_bg, _b_bd, _b_fg = "rgba(89, 200, 134, 36)", "rgba(89, 200, 134, 120)", _CT['green']
+        else:
+            _b_bg, _b_bd, _b_fg = "rgba(250, 104, 99, 36)", "rgba(250, 104, 99, 120)", _CT['red']
+        badge.setStyleSheet(f"""
+            background-color: {_b_bg};
+            border: 1px solid {_b_bd};
+            border-radius: 6px;
+            color: {_b_fg};
+            font-family: 'JetBrains Mono','Consolas',monospace;
+            font-size: 8.5pt;
+            font-weight: 600;
+        """)
+
+        if _is_na:
+            lbl.setText(f"{_label_raw}  (해당없음)")
+            lbl.setStyleSheet(f"color: {_CT['fg_3']}; background: transparent; font-size: 9.5pt;")
+            lbl.setToolTip("해당없음 항목 — 금액 검증/파일 요구 안 함")
+        elif item.get('matched_by_amount', False):
+            lbl.setText(_label_raw)
+            lbl.setStyleSheet(f"color: {_CT['accent_hi']}; background: transparent; font-weight: 600; font-size: 9.5pt;")
+            lbl.setToolTip("총금액 비교로 매칭되었습니다.")
+        elif not has_file and not is_included:
+            lbl.setText(_label_raw)
+            lbl.setStyleSheet(f"color: {_CT['red']}; background: transparent; font-weight: 600; font-size: 9.5pt;")
+            lbl.setToolTip("계산서 매칭 안 됨")
+        else:
+            lbl.setText(_label_raw)
+            lbl.setStyleSheet(f"color: {_CT['fg_1']}; background: transparent; font-size: 9.5pt;")
+            lbl.setToolTip("")
+
     def _swap_files(self, idx_a, idx_b):
         """두 행의 파일명(콤보박스 값)만 교환, 라벨은 고정"""
         if 0 <= idx_a < len(self.mapping) and 0 <= idx_b < len(self.mapping):
@@ -2994,7 +3019,11 @@ class GroupCard(GlassFrame):
             
             combo_a.blockSignals(False)
             combo_b.blockSignals(False)
-            
+
+            # 배지/라벨 상태 색 갱신
+            self._apply_row_status(idx_a)
+            self._apply_row_status(idx_b)
+
             # 체크리스트 및 검증 갱신
             self._update_checklist_from_mapping()
             self._run_amount_validation()
@@ -3009,6 +3038,7 @@ class GroupCard(GlassFrame):
         val = combo.currentText()
         if val == '(선택 안 함)': val = ""
         self.mapping[idx]['filename'] = val
+        self._apply_row_status(idx)
         self._update_checklist_from_mapping()
         self._run_amount_validation()
 

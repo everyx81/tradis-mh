@@ -192,17 +192,19 @@ class GeminiOCR:
 응답은 오직 JSON 형식이어야 하며, 다른 텍스트는 포함하지 마세요.
 """
 
-    def analyze_pdf(self, fp):
-        """PDF 분석 (파일 캐싱 적용)"""
+    def analyze_pdf(self, fp, force=False):
+        """PDF 분석 (파일 캐싱 적용). force=True면 캐시를 무시하고 재분석 후 캐시 갱신
+        (business_no 백필 등 구 캐시에 새 필드를 채울 때 사용)."""
         client = get_client()
         if client is None:
             return {"company_name": "Unknown", "identifier": "Unknown", "id_type": "Unknown", "doc_type": "Unknown"}
 
         # --- 캐시 확인 ---
-        cached_result = self._get_cached_result(fp)
-        if cached_result:
-            print(f"[캐시] 사용: {os.path.basename(fp)}")
-            return cached_result
+        if not force:
+            cached_result = self._get_cached_result(fp)
+            if cached_result:
+                print(f"[캐시] 사용: {os.path.basename(fp)}")
+                return cached_result
 
         try:
             from google.genai import types
@@ -233,6 +235,11 @@ class GeminiOCR:
             from .utils import normalize_doc_type
             if "doc_type" in result:
                 result["doc_type"] = normalize_doc_type(result["doc_type"])
+
+            # 신고필증 3종은 business_no 키를 보장 — 모델이 키를 생략해도
+            # 'Unknown'으로 확정 저장해 캐시가 영구 유효하도록 (재분석 루프 방지)
+            if result.get('doc_type') in ('수입신고필증', '수출신고필증', '반송신고필증'):
+                result.setdefault('business_no', 'Unknown')
 
             # --- 결과 캐싱 저장 (모든 파일) ---
             self._save_to_cache(fp, result)
@@ -357,10 +364,9 @@ class GeminiOCR:
             if result and result.get('doc_type') == '수입신고필증':
                 if 'levy_type' not in result:
                     return None
-            # 신고필증에 business_no 필드가 없는 구 캐시도 재분석을 위해 무효화
-            if result and result.get('doc_type') in ('수입신고필증', '수출신고필증', '반송신고필증'):
-                if 'business_no' not in result:
-                    return None
+            # 주의: business_no 누락은 무효화하지 않음 (소프트 미스) —
+            # 무효화하면 levy_type 등 유효한 캐시까지 소실되고 파일 처리 파이프라인이
+            # 전부 재분석을 유발함. business_no 백필은 GroupCard가 force 재분석으로 처리.
             return result
         except Exception as e:
             print(f"캐시 읽기 오류: {e}")

@@ -549,20 +549,9 @@ class IndependentCard(GlassFrame):
             self._animate_hover(0.0)
 
     def _animate_hover(self, target):
-        from PyQt6.QtCore import QVariantAnimation, QEasingCurve
-        if getattr(self, '_hover_anim', None) is not None:
-            try:
-                self._hover_anim.stop()
-            except RuntimeError:
-                pass
-        anim = QVariantAnimation(self)
-        anim.setStartValue(float(self._hover_progress))
-        anim.setEndValue(float(target))
-        anim.setDuration(420)
-        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-        anim.valueChanged.connect(self._apply_card_bg)
-        anim.start()
-        self._hover_anim = anim
+        # 성능: 틱마다 setStyleSheet 재파싱(카드+자식 전체 re-polish)하던
+        # 420ms 애니메이션 제거 — 호버 상태를 즉시 1회만 적용
+        self._apply_card_bg(float(target))
 
     def cleanup(self):
         """카드 삭제 직전 호출 — 애니메이션/그래픽효과 안전 해제."""
@@ -1027,6 +1016,8 @@ def _cleanup_empty_marked_folders(parent, folders):
 class GroupCard(GlassFrame):
     # 상태 변경 시그널 (필터 카운트 갱신용)
     status_changed = pyqtSignal()
+    # 사업자번호 추출 완료 (워커 스레드 → GUI 스레드 마샬링용)
+    _biz_no_ready = pyqtSignal(str)
 
     def __init__(self, parent_widget, renamer, directory, text_id, data, unclassified, parent=None):
         super().__init__(parent)
@@ -1104,20 +1095,9 @@ class GroupCard(GlassFrame):
             self._animate_hover(0.0)
 
     def _animate_hover(self, target):
-        from PyQt6.QtCore import QVariantAnimation, QEasingCurve
-        if getattr(self, '_hover_anim', None) is not None:
-            try:
-                self._hover_anim.stop()
-            except RuntimeError:
-                pass
-        anim = QVariantAnimation(self)
-        anim.setStartValue(float(self._hover_progress))
-        anim.setEndValue(float(target))
-        anim.setDuration(420)
-        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-        anim.valueChanged.connect(self._apply_card_bg)
-        anim.start()
-        self._hover_anim = anim
+        # 성능: 틱마다 setStyleSheet 재파싱(카드+자식 전체 re-polish)하던
+        # 420ms 애니메이션 제거 — 호버 상태를 즉시 1회만 적용
+        self._apply_card_bg(float(target))
 
     def cleanup(self):
         """카드 삭제 직전 호출 — 애니메이션/시그널/그래픽효과 안전 해제.
@@ -1151,6 +1131,20 @@ class GroupCard(GlassFrame):
             # status_changed 시그널 전체 해제 (외부 receiver 가 deleted card 에 접근 방지)
             self.status_changed.disconnect()
         except (TypeError, RuntimeError):
+            pass
+        try:
+            self._biz_no_ready.disconnect()
+        except (TypeError, RuntimeError):
+            pass
+        # 늦게 끝난 금액 검증 워커가 삭제된 카드를 건드리지 않도록 시그널 해제
+        try:
+            vw = getattr(self, '_validator_worker', None)
+            if vw is not None:
+                try:
+                    vw.finished.disconnect()
+                except (TypeError, RuntimeError):
+                    pass
+        except Exception:
             pass
 
     def _set_btn_toggle(self, text: str):
@@ -1237,14 +1231,9 @@ class GroupCard(GlassFrame):
         self._hover_anim = None
         self._toggle_in_progress = False
 
-        # 호버 시 카드 주변 파란 glow (QGraphicsDropShadowEffect)
-        from PyQt6.QtWidgets import QGraphicsDropShadowEffect
-        from PyQt6.QtGui import QColor
-        self._hover_shadow = QGraphicsDropShadowEffect(self)
-        self._hover_shadow.setBlurRadius(26)
-        self._hover_shadow.setOffset(0, 0)
-        self._hover_shadow.setColor(QColor(0, 180, 230, 0))  # 초기 투명
-        self.setGraphicsEffect(self._hover_shadow)
+        # 성능: 카드별 그림자(블러) 이펙트 제거 — 카드가 많을 때 스크롤/호버마다
+        # 전체 카드 오프스크린 렌더+블러가 발생해 버벅임의 주원인이었음
+        self._hover_shadow = None
 
         self._apply_card_bg(0.0)
 
@@ -1270,7 +1259,11 @@ class GroupCard(GlassFrame):
         self._amount_sev = None
         self._amount_msg = ""
         self.lbl_statusline = QLabel("")
-        self.lbl_statusline.setStyleSheet("background: transparent; border: none; font-size: 8.5pt;")
+        # 안 A: 조치 필요는 전부 빨강 — 스타일은 여기서 1회만 지정 (#fa6863 = CT red)
+        self.lbl_statusline.setStyleSheet(
+            "color: #fa6863; background: transparent; border: none; "
+            "font-size: 8.5pt; font-weight: 600;"
+        )
         self.lbl_statusline.setContentsMargins(28, 0, 0, 0)
         self.lbl_statusline.hide()
         _hdr_col.addWidget(self.lbl_statusline)
@@ -1311,10 +1304,12 @@ class GroupCard(GlassFrame):
 
         header.addWidget(self.id_pill)
 
-        # ── 수출/수입 구분 태그 (↓수입=파랑, ↑수출=보라) ──
+        # ── 수출/수입 구분 태그 (수입=파랑, 수출=보라) ──
+        # 필증뿐 아니라 신고서 단계도 인식하도록 키/파일명 모두에서 '수출신고/반송신고' 탐색
+        _docs = self.data.get('docs', {})
         _io_is_export = any(
-            ('수출신고필증' in v) or ('반송신고필증' in v)
-            for v in self.data.get('docs', {}).values()
+            ('수출신고' in s) or ('반송신고' in s)
+            for s in list(_docs.keys()) + list(_docs.values())
         )
         if _io_is_export:
             _io_txt, _io_fg = "수출", "#d9c6fa"
@@ -1669,16 +1664,20 @@ class GroupCard(GlassFrame):
         self._run_amount_validation()
         # 초기 상태 배지 계산
         self._update_status_badge()
-        # 사업자등록번호 백그라운드 추출
+        # 사업자등록번호 백그라운드 추출 (시그널로 GUI 스레드 마샬링)
+        self._biz_no_ready.connect(self._set_biz_no)
         self._load_biz_no_async()
 
-    # 사업자번호 백그라운드 AI 분석 — 동시 실행 제한 + 세션 내 실패 기록 (재시도 방지)
+    # 사업자번호 백그라운드 AI 분석 — 동시 실행 제한 + 중복/실패 기록
     _BIZ_SEM = threading.Semaphore(2)
-    _BIZ_FAILED = set()
+    _BIZ_FAILED = set()      # 분석은 성공했으나 번호가 없는 파일 (세션 내 재시도 방지)
+    _BIZ_INFLIGHT = set()    # 진행 중인 파일 (카드 재생성 시 중복 분석 방지)
+    _BIZ_LOCK = threading.Lock()
 
     def _load_biz_no_async(self):
         """신고필증의 사업자등록번호 표시 — AI 분석 결과(business_no) 사용.
-        business_no 없는 구 캐시는 백그라운드에서 1회 재분석해 채운다."""
+        캐시 조회·해싱·분석 등 모든 I/O는 워커 스레드에서 수행하고,
+        결과는 _biz_no_ready 시그널로 GUI 스레드에 안전하게 전달한다."""
         docs = self.data.get('docs', {})
         target = None
         for key in ("수입신고필증", "수출신고필증", "반송신고필증"):
@@ -1694,31 +1693,44 @@ class GroupCard(GlassFrame):
             return
         fpath = os.path.join(self.directory, target)
 
-        from auto_rename import gemini_ocr
-        cached = None
-        try:
-            cached = gemini_ocr._get_cached_result(fpath)
-        except Exception:
-            pass
-        biz = str((cached or {}).get('business_no', '') or '')
-        if biz and biz != 'Unknown':
-            self._set_biz_no(biz)
-            return
         if fpath in GroupCard._BIZ_FAILED:
             return
+        with GroupCard._BIZ_LOCK:
+            if fpath in GroupCard._BIZ_INFLIGHT:
+                return
+            GroupCard._BIZ_INFLIGHT.add(fpath)
 
         def run():
             b = ""
             try:
-                with GroupCard._BIZ_SEM:
-                    res = gemini_ocr.analyze_pdf(fpath) or {}
-                b = str(res.get('business_no', '') or '')
+                from auto_rename import gemini_ocr
+                from core.config import get_client
+                cached = None
+                try:
+                    cached = gemini_ocr._get_cached_result(fpath)
+                except Exception:
+                    pass
+                b = str((cached or {}).get('business_no', '') or '')
+                if (not b) and get_client() is not None:
+                    with GroupCard._BIZ_SEM:
+                        # 구 캐시(필드 없음)면 force 재분석으로 백필, 캐시 없으면 일반 분석
+                        res = gemini_ocr.analyze_pdf(fpath, force=bool(cached)) or {}
+                    b = str(res.get('business_no', '') or '')
+                    # 분석이 실제로 성공했는데 번호가 없을 때만 실패로 기록
+                    # (API 키 미설정/일시 오류로는 오염시키지 않음 → 다음 스캔에서 재시도)
+                    if res.get('doc_type', 'Unknown') != 'Unknown' and (not b or b == 'Unknown'):
+                        GroupCard._BIZ_FAILED.add(fpath)
             except Exception as e:
                 print(f"[biz_no] AI 추출 오류: {e}")
-            if (not b) or b == 'Unknown':
-                GroupCard._BIZ_FAILED.add(fpath)
+            finally:
+                with GroupCard._BIZ_LOCK:
+                    GroupCard._BIZ_INFLIGHT.discard(fpath)
+            if b == 'Unknown':
                 b = ""
-            QTimer.singleShot(0, lambda: self._set_biz_no(b))
+            try:
+                self._biz_no_ready.emit(b)
+            except RuntimeError:
+                pass
 
         threading.Thread(target=run, daemon=True).start()
 
@@ -1776,8 +1788,8 @@ class GroupCard(GlassFrame):
     # Warning banner 스타일 헬퍼 (severity: green/yellow/red/neutral)
     # ─────────────────────────────────────────────────
     def _refresh_header_status(self):
-        """적응형 헤더: 누락 서류/금액 문제 → 상태 줄 표시, 완비+일치 → 인라인 ✓."""
-        from .claude_theme import C as _CT
+        """적응형 헤더: 누락 서류/금액 문제 → 상태 줄 표시, 완비+일치 → 인라인 ✓.
+        스타일은 생성 시 1회 지정 — 여기서는 텍스트와 표시 여부만 갱신."""
         missing = getattr(self, '_missing_docs', [])
         sev = getattr(self, '_amount_sev', None)
         msg = getattr(self, '_amount_msg', "")
@@ -1790,21 +1802,9 @@ class GroupCard(GlassFrame):
             if len(missing) > 3:
                 names += f" 외 {len(missing) - 3}"
             self.lbl_statusline.setText(f"{names} 누락")
-            self.lbl_statusline.setStyleSheet(
-                f"color: {_CT['red']}; background: transparent; border: none; "
-                f"font-size: 8.5pt; font-weight: 600;"
-            )
-            self.lbl_statusline.setContentsMargins(28, 0, 0, 0)
             self.lbl_statusline.show()
         elif sev in ('yellow', 'red') and msg:
-            # 안 A: 조치 필요는 전부 빨강으로 통일 (심각도 상세는 펼친 배너에서 구분)
-            _c = _CT['red']
             self.lbl_statusline.setText(msg)
-            self.lbl_statusline.setStyleSheet(
-                f"color: {_c}; background: transparent; border: none; "
-                f"font-size: 8.5pt; font-weight: 600;"
-            )
-            self.lbl_statusline.setContentsMargins(28, 0, 0, 0)
             self.lbl_statusline.show()
         else:
             self.lbl_statusline.hide()
@@ -2606,7 +2606,6 @@ class GroupCard(GlassFrame):
         not_applicable=True: 회색 빈 네모 + '해당없음' 서브텍스트로 흐리게 표시
         클릭 시 해당 여부 토글 (config 에 BL별로 저장)"""
         from .claude_theme import C as _CT
-        from .claude_icons import pixmap as _icpx
         w = QWidget()
         w.setStyleSheet("background: transparent;")
         w.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -2674,7 +2673,6 @@ class GroupCard(GlassFrame):
     def _make_summary_widget(self, total, missing, ok=True):
         """요약 위젯 (전체 N개 완료 / N개 미확인)."""
         from .claude_theme import C as _CT
-        from .claude_icons import pixmap as _icpx
         w = QWidget()
         w.setStyleSheet("background: transparent;")
         lay = QHBoxLayout(w)
@@ -3193,9 +3191,8 @@ class GroupCard(GlassFrame):
         self.btn_toggle.setToolTip("펼치기" if is_visible else "접기")
     
     def _refresh_file_list(self):
-        """파일 목록 위젯 갱신 (Claude Design file-row: 체크박스 + 아이콘 + 이름 + 메타)"""
+        """파일 목록 위젯 갱신 (통일 디자인: 초록 도트 + 파일명 한 줄)"""
         from .claude_theme import C as _CT
-        from .claude_icons import pixmap as _icpx
         from PyQt6.QtCore import QSize as _QSize
         self.file_list.clear()
         docs = self.data.get('docs', {})
@@ -3286,12 +3283,9 @@ class GroupCard(GlassFrame):
         return (99, fn)
 
     def _make_file_row_widget(self, filename: str, full_path: str):
-        """파일 한 행의 커스텀 위젯 (Claude Design .file-row)."""
+        """파일 한 행의 커스텀 위젯 (통일 디자인: 도트 + 이름)."""
         from .claude_theme import C as _CT
-        from .claude_icons import pixmap as _icpx
-        from PyQt6.QtCore import QSize as _QSize
         from PyQt6.QtWidgets import QSizePolicy as _QSP
-        import os as _os
 
         row = QWidget()
         row.setStyleSheet("background: transparent;")
@@ -3343,30 +3337,6 @@ class GroupCard(GlassFrame):
         lay.addWidget(lbl_name, stretch=1)
 
         return row
-
-    def _doc_type_of(self, filename: str) -> str:
-        """파일명에서 서류 종류 추출 (메타 줄 표시용, _file_sort_key와 동일 기준)."""
-        fn = filename or ""
-        if "자금정산서" in fn or "정산서" in fn:
-            return "자금정산서"
-        if "수입신고필증" in fn:
-            return "수입신고필증"
-        if "수출신고필증" in fn:
-            return "수출신고필증"
-        if "반송신고필증" in fn:
-            return "반송신고필증"
-        if "납부고지서" in fn or "납부영수증" in fn:
-            return "납부고지서"
-        if "수입세금계산서" in fn:
-            return "수입세금계산서"
-        if "수수료계산서" in fn:
-            return "수수료계산서"
-        for kw in ("선박운임", "해상운임", "항공운임", "운송료", "보세운송", "창고료", "보관료", "운송", "보험료"):
-            if kw in fn:
-                return "비용계산서"
-        if "계산서" in fn or "청구서" in fn:
-            return "계산서"
-        return "기타 서류"
 
     def _fl_context_menu(self, pos):
         """파일 목록 우클릭 메뉴"""

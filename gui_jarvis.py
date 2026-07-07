@@ -182,10 +182,10 @@ class JarvisGUI(QMainWindow):
                     "PDF 투입 → AI 분석 → BL별 매칭 → 합치기 → 서버 이동\n\n"
                     "━━━ 최초 1회 설정 ━━━\n\n"
                     "① API 키\n"
-                    "   사이드바 하단 [AI Connected] → 톱니바퀴\n"
+                    "   상단 헤더 오른쪽 [AI] 표시 클릭\n"
                     "   → Gemini API 키 입력 (관리자 발급)\n\n"
                     "② 감시 폴더\n"
-                    "   사이드바 하단 폴더 칩 클릭\n"
+                    "   상단 헤더의 경로 표시 클릭\n"
                     "   → PDF 넣으면 자동 분석·이름 변경\n\n"
                     "③ 서버 / 선적서류 경로\n"
                     "   [설정] 탭 → 수입·수출 서버, 선적서류 폴더 지정"
@@ -218,14 +218,13 @@ class JarvisGUI(QMainWindow):
                 "title": "사용 흐름",
                 "content": (
                     "━━━ ① 파일 분석 ━━━\n"
-                    "1. 사이드바 원형 토글 클릭 → 모니터링 ON\n"
+                    "1. 상단 헤더의 T 로고 클릭 → 모니터링 ON (파랗게 점화)\n"
                     "2. 감시 폴더에 PDF 넣기\n"
-                    "3. AI 자동 분석 → 이름 변경 → BL별 카드 생성\n"
-                    "상단 통계: 처리됨 / 대기 / 오류\n\n"
+                    "3. AI 자동 분석 → 이름 변경 → BL별 카드 생성\n\n"
                     "━━━ ② 합치기 / 폴더 정리 ━━━\n"
                     "1. 카드 헤더 클릭 → 펼치기\n"
-                    "2. 체크리스트 확인\n"
-                    "   ✓ 녹색: 매칭  ✗ 빨강: 누락  — 회색: 해당없음\n"
+                    "2. 서류 확인 줄 보기\n"
+                    "   ● 녹색: 있음  ○ 빨강: 누락  ─ 회색: 해당없음\n"
                     "3. [합치기 실행] 또는 [폴더 정리]\n"
                     "합치기 후 선적서류 자동 검색, 더블클릭으로 열기\n\n"
                     "━━━ ③ 서버 이동 ━━━\n"
@@ -237,8 +236,8 @@ class JarvisGUI(QMainWindow):
             {
                 "title": "편의 기능",
                 "content": (
-                    "• 사이드바 하단 [Logs]\n"
-                    "   → 실시간 로그 플로팅 패널\n\n"
+                    "• 실행 로그\n"
+                    "   → data\\logs 폴더에 일자별 파일로 저장\n\n"
                     "• 카드 파일 더블클릭\n"
                     "   → 기본 프로그램으로 열기\n\n"
                     "• 체크리스트 항목 클릭\n"
@@ -1656,9 +1655,6 @@ class JarvisGUI(QMainWindow):
         T 로고 토글·AI·Logs 칩은 setup_middle_panel 헤더로 이동했다."""
         _mono = "'JetBrains Mono','Consolas',monospace"
 
-        # 오늘 통계 (처리/대기/오류) — emit_log/renamer 콜백으로 갱신
-        self._today_stats = {"processed": 0, "pending": 0, "errors": 0}
-
         # ═══════════════════════════════════════
         # HIDDEN COMPATIBILITY WIDGETS
         # (기존 코드 호환을 위한 더미 - 레이아웃에 추가하지 않음)
@@ -1706,8 +1702,6 @@ class JarvisGUI(QMainWindow):
         self.lbl_app_version = QLabel(f"{APP_NAME} v{__version__}")
         self.lbl_app_version.hide()
 
-        # Floating log panel (hidden by default)
-        self._log_float_panel = None
 
     # ─────────────────────────────────────────
     # 사이드바 이벤트 핸들러 (handoff_2)
@@ -1720,9 +1714,13 @@ class JarvisGUI(QMainWindow):
             self.start_monitoring()
 
     def _update_watch_chip(self, path: str):
-        """감시 폴더 경로 표시 갱신 — 중앙 헤더의 경로 라벨."""
+        """감시 폴더 경로 표시 갱신 — 중앙 헤더의 경로 라벨 (긴 경로는 앞을 줄임)."""
         if hasattr(self, 'lbl_location') and path:
-            self.lbl_location.setText(path)
+            short = path
+            if len(short) > 55:
+                short = "..." + short[-52:]
+            self.lbl_location.setText(short)
+            self.lbl_location.setToolTip(path)
 
     def _brand_glow_set(self, v):
         """T 로고 글로우 알파값 적용."""
@@ -1762,17 +1760,19 @@ class JarvisGUI(QMainWindow):
         seq.addAnimation(settle)
 
         def _steady():
-            from PyQt6.QtCore import QVariantAnimation as _V, QEasingCurve as _E
-            breathe = _V(self)
-            breathe.setDuration(3200)
-            breathe.setStartValue(205)
-            breathe.setKeyValueAt(0.5, 250)
-            breathe.setEndValue(205)
-            breathe.setEasingCurve(_E.Type.InOutSine)
-            breathe.setLoopCount(-1)
-            breathe.valueChanged.connect(self._brand_glow_set)
-            breathe.start()
-            self._brand_anim = breathe
+            # 성능: 60fps 애니메이션 대신 120ms 간격 QTimer로 호흡
+            # (블러 재렌더 빈도 ~87% 감소 — 하루 종일 켜두는 앱의 유휴 부하 최소화)
+            import math
+            timer = QTimer(self)
+            timer.setInterval(120)
+            state = {'t': 0.0}
+            def _tick():
+                state['t'] = (state['t'] + 0.120 / 3.2) % 1.0
+                alpha = 205 + (250 - 205) * 0.5 * (1 - math.cos(2 * math.pi * state['t']))
+                self._brand_glow_set(int(alpha))
+            timer.timeout.connect(_tick)
+            timer.start()
+            self._brand_anim = timer
         seq.finished.connect(_steady)
         seq.start()
         self._brand_anim = seq
@@ -1801,145 +1801,6 @@ class JarvisGUI(QMainWindow):
             if hasattr(self, 'lbl_brand_status'):
                 self.lbl_brand_status.setText(self._status_html_off)
 
-    def _update_stats_ui(self):
-        """통계 카운터 UI 반영."""
-        if not hasattr(self, '_stat_processed'):
-            return
-        s = self._today_stats
-        self._stat_processed.setText(str(s.get("processed", 0)))
-        self._stat_pending.setText(str(s.get("pending", 0)))
-        self._stat_errors.setText(str(s.get("errors", 0)))
-
-    def _bump_stat(self, key: str, delta: int = 1):
-        """통계 증가."""
-        self._today_stats[key] = self._today_stats.get(key, 0) + delta
-        self._update_stats_ui()
-
-    def _toggle_log_float(self):
-        """Logs chip 클릭 → floating log panel 토글."""
-        if self._log_float_panel is None:
-            self._create_log_float_panel()
-        if self._log_float_panel.isVisible():
-            self._log_float_panel.hide()
-            if hasattr(self, 'btn_logs_chip'):
-                self.btn_logs_chip.setChecked(False)
-        else:
-            self._position_log_float_panel()
-            self._log_float_panel.show()
-            self._log_float_panel.raise_()
-            if hasattr(self, 'btn_logs_chip'):
-                self.btn_logs_chip.setChecked(True)
-
-    def _create_log_float_panel(self):
-        """Floating 로그 패널 생성 (사이드바 우측에 오버레이)."""
-        self._log_float_panel = QFrame(self)
-        self._log_float_panel.setObjectName("LogFloatPanel")
-        self._log_float_panel.setStyleSheet(f"""
-            QFrame#LogFloatPanel {{
-                background-color: {CT['logs_bg']};
-                border: 1px solid {CT['border']};
-                border-radius: 12px;
-            }}
-        """)
-        # 그림자 효과
-        from PyQt6.QtWidgets import QGraphicsDropShadowEffect
-        _sh = QGraphicsDropShadowEffect(self._log_float_panel)
-        _sh.setBlurRadius(28)
-        _sh.setOffset(0, 6)
-        _sh.setColor(QColor(0, 0, 0, 140))
-        self._log_float_panel.setGraphicsEffect(_sh)
-
-        lay = QVBoxLayout(self._log_float_panel)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(0)
-
-        # 헤더 (dots + title + live + close)
-        head = QFrame()
-        head.setFixedHeight(30)
-        head.setStyleSheet(f"""
-            QFrame {{
-                background-color: {CT['bg_2']};
-                border: none;
-                border-bottom: 1px solid {CT['border_soft']};
-                border-top-left-radius: 11px;
-                border-top-right-radius: 11px;
-            }}
-        """)
-        hlay = QHBoxLayout(head)
-        hlay.setContentsMargins(10, 0, 10, 0)
-        hlay.setSpacing(8)
-
-        _dots_wrap = QHBoxLayout()
-        _dots_wrap.setSpacing(4)
-        for _ in range(3):
-            d = QLabel(); d.setFixedSize(6, 6)
-            d.setStyleSheet(f"background-color: {CT['fg_3']}; border-radius: 3px;")
-            _dots_wrap.addWidget(d)
-        hlay.addLayout(_dots_wrap)
-
-        lbl_title = QLabel("tradis.log")
-        lbl_title.setStyleSheet(
-            f"color: {CT['fg_3']}; font-family: 'JetBrains Mono','Consolas',monospace; "
-            f"font-size: 8.5pt; background: transparent;"
-        )
-        hlay.addWidget(lbl_title)
-        hlay.addStretch()
-
-        lbl_live_dot = QLabel()
-        lbl_live_dot.setFixedSize(6, 6)
-        lbl_live_dot.setStyleSheet(f"background-color: {CT['green']}; border-radius: 3px;")
-        hlay.addWidget(lbl_live_dot)
-        lbl_live = QLabel("live")
-        lbl_live.setStyleSheet(
-            f"color: {CT['fg_3']}; font-family: 'JetBrains Mono','Consolas',monospace; "
-            f"font-size: 8pt; background: transparent;"
-        )
-        hlay.addWidget(lbl_live)
-
-        btn_close = QPushButton()
-        from gui.claude_icons import pixmap as _icpx2
-        from PyQt6.QtCore import QSize as _QSize2
-        btn_close.setIcon(QIcon(_icpx2("X", size=12, color=CT['fg_2'])))
-        btn_close.setIconSize(_QSize2(12, 12))
-        btn_close.setFixedSize(22, 22)
-        btn_close.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_close.setStyleSheet(f"""
-            QPushButton {{
-                background: transparent;
-                border: 1px solid transparent;
-                border-radius: 5px;
-            }}
-            QPushButton:hover {{ background-color: {CT['bg_3']}; }}
-        """)
-        btn_close.clicked.connect(self._toggle_log_float)
-        hlay.addWidget(btn_close)
-        lay.addWidget(head)
-
-        # log_area 옮겨심기
-        if self.log_area.parent() is not None:
-            self.log_area.setParent(self._log_float_panel)
-        lay.addWidget(self.log_area, stretch=1)
-
-        self._log_float_panel.hide()
-
-    def _position_log_float_panel(self):
-        """Floating 로그 패널 위치 계산 — 헤더 Logs 칩 아래로 플로팅."""
-        if self._log_float_panel is None:
-            return
-        # Logs 칩 아래에 띄우기 (JarvisGUI 내부 좌표계 기준)
-        try:
-            panel_w = 380
-            panel_h = 360
-            # 중앙 패널 우상단 기준으로 배치
-            tr = self.middle_panel.mapTo(self, QPoint(self.middle_panel.width(), 0))
-            x = tr.x() - panel_w - 16
-            y = tr.y() + 70
-            # 화면 너머로 나가지 않도록 clamp
-            if x + panel_w > self.width() - 20:
-                x = self.width() - panel_w - 20
-            self._log_float_panel.setGeometry(x, y, panel_w, panel_h)
-        except Exception as e:
-            print(f"[log_float position] {e}")
     def _btn_primary_css(self):
         return f"""
             QPushButton {{
@@ -2333,38 +2194,30 @@ class JarvisGUI(QMainWindow):
 
     def emit_log(self, msg):
         self.log_signal.emit(msg)
-        
+
+    def _write_log_file(self, line: str):
+        """로그를 파일로도 기록 — data/logs/tradis_YYYY-MM-DD.log"""
+        try:
+            if getattr(sys, 'frozen', False):
+                base = os.path.dirname(sys.executable)
+            else:
+                base = os.path.dirname(os.path.abspath(__file__))
+            log_dir = os.path.join(base, 'data', 'logs')
+            os.makedirs(log_dir, exist_ok=True)
+            fname = os.path.join(log_dir, f"tradis_{datetime.datetime.now().strftime('%Y-%m-%d')}.log")
+            with open(fname, 'a', encoding='utf-8') as f:
+                f.write(line + "\n")
+        except Exception:
+            pass
+
     def append_log(self, msg):
         MAX_LOG_LINES = 200  # 성능 최적화를 위해 로그 보관 줄 수 축소 (1000 -> 200)
 
-        self.log_area.append(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] {msg}")
-        # 로그 개수 라벨 갱신 (Claude Design)
-        if hasattr(self, 'lbl_log_count'):
-            self.lbl_log_count.setText(str(self.log_area.document().blockCount()))
+        line = f"[{datetime.datetime.now().strftime('%H:%M:%S')}] {msg}"
+        self.log_area.append(line)
+        # UI 로그 패널이 제거되어 파일이 확인 창구 — data/logs/에 일자별 기록
+        self._write_log_file(line)
 
-        # Claude Design handoff_2: 메시지 내용 파싱해서 통계 카운트 증가
-        # - 처리: [성공] / [미분류 처리] (이름 변경 완료)
-        # - 대기: [AI 분석 대기/시작] (분석 시작했지만 아직 결과 없음)
-        # - 오류: [오류] / [실패]
-        if hasattr(self, '_today_stats'):
-            try:
-                if "[성공]" in msg or "[미분류 처리]" in msg:
-                    # 이름 변경 완료 (정상 또는 미분류) → 처리됨 증가, 대기중 감소
-                    self._today_stats["processed"] = self._today_stats.get("processed", 0) + 1
-                    if self._today_stats.get("pending", 0) > 0:
-                        self._today_stats["pending"] -= 1
-                    self._update_stats_ui()
-                elif "[AI 분석 대기" in msg or "[AI 분석 시작" in msg or "분석 대기/시작" in msg:
-                    self._today_stats["pending"] = self._today_stats.get("pending", 0) + 1
-                    self._update_stats_ui()
-                elif "[오류]" in msg or "[실패]" in msg or "Error" in msg:
-                    self._today_stats["errors"] = self._today_stats.get("errors", 0) + 1
-                    if self._today_stats.get("pending", 0) > 0:
-                        self._today_stats["pending"] -= 1
-                    self._update_stats_ui()
-            except Exception:
-                pass
-        
         # 로그가 너무 길어지면 오래된 로그 삭제 (메모리 안정화)
         if self.log_area.document().blockCount() > MAX_LOG_LINES:
             cursor = self.log_area.textCursor()
@@ -2409,7 +2262,7 @@ class JarvisGUI(QMainWindow):
             directory = report.get('directory', '')
             self.emit_log(f"Scan Report: {len(groups)} Groups, {len(unclassified)} Unclassified")
 
-            if directory: self.lbl_location.setText(directory)
+            if directory: self._update_watch_chip(directory)
 
             if not groups and not unclassified:
                 lbl = QLabel("No files to process.")

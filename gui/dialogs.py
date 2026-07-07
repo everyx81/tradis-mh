@@ -1478,26 +1478,26 @@ class GroupCard(GlassFrame):
         self.lbl_arrow = QLabel()    # 더미 (구 코드 호환)
         self.lbl_badge = QLabel()    # 더미 (구 코드 호환)
 
-        # ── 본문 (접힘/펼침 대상) ──
+        # ── 본문 (접힘/펼침 대상) — 캐럿 라인 기준 들여쓰기 정렬 ──
         self.body_widget = QWidget()
         body_layout = QVBoxLayout(self.body_widget)
-        body_layout.setContentsMargins(0, 8, 0, 0)
+        body_layout.setContentsMargins(28, 8, 0, 0)
         body_layout.setSpacing(10)
 
         # 필요 서류 체크리스트 (Claude Design doc-checklist — chip 위젯 그리드)
         from PyQt6.QtWidgets import QAbstractItemView
         from PyQt6.QtGui import QShortcut, QKeySequence
+        # 통일 디자인: 박스·라벨 없이 투명 (심플)
         self._checklist_container = QFrame()
-        self._checklist_container.setStyleSheet(f"""
-            QFrame {{
-                background-color: {_CT['bg_3']};
-                border: 1px solid {_CT['border_soft']};
-                border-radius: 10px;
-            }}
+        self._checklist_container.setStyleSheet("""
+            QFrame {
+                background-color: transparent;
+                border: none;
+            }
         """)
         _checklist_lay = QVBoxLayout(self._checklist_container)
-        _checklist_lay.setContentsMargins(12, 10, 12, 10)
-        _checklist_lay.setSpacing(0)
+        _checklist_lay.setContentsMargins(0, 0, 0, 0)
+        _checklist_lay.setSpacing(6)
 
         # 체크리스트 chip들이 들어갈 컨테이너 — wrap되는 flow 레이아웃은 없으므로
         # 동적으로 QVBoxLayout → 내부에 QHBoxLayout 행들을 생성해 wrap 구현
@@ -1581,7 +1581,7 @@ class GroupCard(GlassFrame):
             QFrame {{
                 background-color: rgba(250, 104, 99, 22);
                 border: 1px solid rgba(250, 104, 99, 65);
-                border-radius: 10px;
+                border-radius: 8px;
             }}
         """)
         _warn_lay = QHBoxLayout(self._warning_frame)
@@ -1824,7 +1824,7 @@ class GroupCard(GlassFrame):
             QFrame {{
                 background-color: {bg};
                 border: 1px solid {border};
-                border-radius: 10px;
+                border-radius: 8px;
             }}
         """)
         # dot / text 색도 갱신 — 자식 위젯 스타일 직접 수정
@@ -2622,46 +2622,20 @@ class GroupCard(GlassFrame):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(6)
 
-        # 16x16 체크박스
+        # 상태 도트 (통일 언어: ●=있음, ○=없음, ─=해당없음)
         mark = QLabel()
-        mark.setFixedSize(16, 16)
         mark.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
         if not_applicable:
-            # 해당 없음: 빈 회색 네모 + 얇은 보더
-            mark.setStyleSheet(f"""
-                background-color: transparent;
-                border: 1.5px dashed {_CT['fg_3']};
-                border-radius: 4px;
-            """)
-            # 중앙에 '—' 기호 (minus) 약하게
-            mark.setText("—")
-            _font = mark.font()
-            _font.setBold(True)
-            mark.setFont(_font)
-            mark.setStyleSheet(f"""
-                background-color: transparent;
-                color: {_CT['fg_3']};
-                border: 1.5px dashed {_CT['fg_3']};
-                border-radius: 4px;
-                font-size: 9pt;
-            """)
+            mark.setText("─")
+            mark.setStyleSheet(f"color: {_CT['fg_3']}; background: transparent; border: none; font-size: 9.5pt;")
             name_color = _CT['fg_3']
         elif is_found:
-            mark.setStyleSheet(f"""
-                background-color: {_CT['green']};
-                border: 1.5px solid {_CT['green']};
-                border-radius: 4px;
-            """)
-            mark.setPixmap(_icpx("Check", size=11, color="#0d0f15", stroke_width=3))
+            mark.setText("●")
+            mark.setStyleSheet(f"color: {_CT['green']}; background: transparent; border: none; font-size: 9.5pt;")
             name_color = _CT['fg_1']
         else:
-            mark.setStyleSheet(f"""
-                background-color: {_CT['red']};
-                border: 1.5px solid {_CT['red']};
-                border-radius: 4px;
-            """)
-            mark.setPixmap(_icpx("X", size=11, color="#0d0f15", stroke_width=3))
+            mark.setText("○")
+            mark.setStyleSheet(f"color: {_CT['red']}; background: transparent; border: none; font-size: 9.5pt; font-weight: 700;")
             name_color = _CT['red']
         lay.addWidget(mark)
 
@@ -2708,36 +2682,15 @@ class GroupCard(GlassFrame):
         lay.setSpacing(6)
 
         mark = QLabel()
-        mark.setFixedSize(16, 16)
         mark.setAlignment(Qt.AlignmentFlag.AlignCenter)
         if ok:
-            mark.setStyleSheet(f"""
-                background-color: {_CT['green']};
-                border: 1.5px solid {_CT['green']};
-                border-radius: 4px;
-            """)
-            mark.setPixmap(_icpx("Check", size=11, color="#0d0f15", stroke_width=3))
+            mark.setText("●")
+            mark.setStyleSheet(f"color: {_CT['green']}; background: transparent; border: none; font-size: 9.5pt;")
             text = f"전체 {total}개 항목 완료"
             text_color = _CT['green']
         else:
-            mark.setStyleSheet(f"""
-                background-color: {_CT['amber']};
-                border: 1.5px solid {_CT['amber']};
-                border-radius: 4px;
-            """)
-            # Claude Alert 아이콘이 없으므로 X 대신 경고표시 사용: 간단히 "!"
-            from PyQt6.QtGui import QPixmap as _QPixmap, QPainter as _QPainter, QColor as _QColor, QFont as _QFont
-            pm = _QPixmap(16, 16)
-            pm.fill(Qt.GlobalColor.transparent)
-            p = _QPainter(pm)
-            p.setRenderHint(_QPainter.RenderHint.Antialiasing)
-            p.setPen(_QColor("#0d0f15"))
-            f = _QFont("Pretendard", 9)
-            f.setBold(True)
-            p.setFont(f)
-            p.drawText(pm.rect(), Qt.AlignmentFlag.AlignCenter, "!")
-            p.end()
-            mark.setPixmap(pm)
+            mark.setText("!")
+            mark.setStyleSheet(f"color: {_CT['amber']}; background: transparent; border: none; font-size: 9.5pt; font-weight: 700;")
             text = f"{total}개 중 {missing}개 미확인"
             text_color = _CT['amber']
         lay.addWidget(mark)
@@ -2931,24 +2884,25 @@ class GroupCard(GlassFrame):
         for idx, item in enumerate(self.mapping):
             row_widget = QWidget()
             row_widget.setObjectName("MappingRow")
-            row_widget.setMinimumHeight(38)
+            row_widget.setMinimumHeight(36)
+            _row_top = f"border-top: 1px solid {_CT['border_soft']};" if idx > 0 else ""
             row_widget.setStyleSheet(f"""
                 QWidget#MappingRow {{
-                    background: {_CT['bg_2']};
-                    border: 1px solid {_CT['border_soft']};
-                    border-radius: 8px;
+                    background: transparent;
+                    border: none;
+                    {_row_top}
                 }}
                 QWidget#MappingRow:hover {{
-                    border: 1px solid {_CT['border']};
+                    background: {_CT['bg_2']};
                 }}
             """)
             row_layout = QHBoxLayout(row_widget)
-            row_layout.setContentsMargins(10, 6, 10, 6)
+            row_layout.setContentsMargins(0, 5, 0, 5)
             row_layout.setSpacing(8)
 
             # 순번 배지 + 서류 라벨 (상태 색은 _apply_row_status 공용 적용)
             _badge = QLabel(str(idx + 1))
-            _badge.setFixedSize(20, 20)
+            _badge.setFixedSize(18, 18)
             _badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
             row_layout.addWidget(_badge)
 
@@ -3055,6 +3009,12 @@ class GroupCard(GlassFrame):
         self.mapping_layout.setSpacing(4)
         self.mapping_layout.setContentsMargins(0, 0, 0, 0)
 
+        # 하단 액션 위 헤어라인 (통일 디자인)
+        _btn_sep = QFrame()
+        _btn_sep.setFixedHeight(1)
+        _btn_sep.setStyleSheet(f"background-color: {_CT['border_soft']}; border: none;")
+        self.mapping_layout.addWidget(_btn_sep)
+
         btn_row = QHBoxLayout()
         btn_row.setSpacing(8)
         btn_add_row = QPushButton("  행 추가")
@@ -3141,7 +3101,7 @@ class GroupCard(GlassFrame):
         badge.setStyleSheet(f"""
             background-color: {_b_bg};
             border: 1px solid {_b_bd};
-            border-radius: 6px;
+            border-radius: 5px;
             color: {_b_fg};
             font-family: 'JetBrains Mono','Consolas',monospace;
             font-size: 8.5pt;
@@ -3240,7 +3200,7 @@ class GroupCard(GlassFrame):
         self.file_list.clear()
         docs = self.data.get('docs', {})
         all_files = sorted(set(docs.values()), key=self._file_sort_key)
-        ROW_HEIGHT = 46
+        ROW_HEIGHT = 34
         for f in all_files:
             full_path = os.path.join(self.directory, f)
             item = QListWidgetItem()
@@ -3346,35 +3306,13 @@ class GroupCard(GlassFrame):
             self._open_file_with_default(_p)
         row.mouseDoubleClickEvent = _on_dbl_click
 
-        # ① 체크박스 (녹색 채운 정사각형 + 흰색 체크)
-        chk = QLabel()
-        chk.setFixedSize(16, 16)
+        # ① 상태 도트 (통일 언어: 파일 있음 = 초록 ●)
+        chk = QLabel("●")
         chk.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        chk.setStyleSheet(f"""
-            background-color: {_CT['green']};
-            border: 1.5px solid {_CT['green']};
-            border-radius: 4px;
-        """)
-        chk.setPixmap(_icpx("Check", size=11, color="#0d0f15", stroke_width=3))
+        chk.setStyleSheet(f"color: {_CT['green']}; background: transparent; border: none; font-size: 9pt;")
         lay.addWidget(chk)
 
-        # ② 파일 아이콘 (bg_3 정사각형 + File icon)
-        ico_wrap = QLabel()
-        ico_wrap.setFixedSize(20, 20)
-        ico_wrap.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        ico_wrap.setStyleSheet(f"""
-            background-color: {_CT['bg_3']};
-            border-radius: 4px;
-            border: none;
-        """)
-        ico_wrap.setPixmap(_icpx("File", size=13, color=_CT['fg_2']))
-        lay.addWidget(ico_wrap)
-
-        # ③ 이름 + 메타 두 줄 (긴 파일명이 잘리지 않도록)
-        name_col = QVBoxLayout()
-        name_col.setContentsMargins(0, 0, 0, 0)
-        name_col.setSpacing(1)
-
+        # ③ 파일 이름 (한 줄, 긴 이름 ellipsize)
         lbl_name = QLabel()
         lbl_name.setStyleSheet(f"""
             color: {_CT['fg_0']};
@@ -3402,30 +3340,7 @@ class GroupCard(GlassFrame):
             _orig(ev)
             _f()
         lbl_name.resizeEvent = _on_name_resize
-        name_col.addWidget(lbl_name)
-
-        # 메타 줄: 서류종류 · 크기 · 수정시각
-        _meta_parts = []
-        _dtype = self._doc_type_of(filename)
-        if _dtype:
-            _meta_parts.append(_dtype)
-        try:
-            st = _os.stat(full_path) if _os.path.exists(full_path) else None
-            if st:
-                import datetime as _dt
-                _meta_parts.append(f"{max(1, st.st_size // 1024)} KB")
-                _meta_parts.append(_dt.datetime.fromtimestamp(st.st_mtime).strftime('%m-%d %H:%M'))
-        except Exception:
-            pass
-        lbl_meta = QLabel(" · ".join(_meta_parts))
-        lbl_meta.setStyleSheet(f"""
-            color: {_CT['fg_3']};
-            font-size: 8.5pt;
-            background: transparent;
-            border: none;
-        """)
-        name_col.addWidget(lbl_meta)
-        lay.addLayout(name_col, stretch=1)
+        lay.addWidget(lbl_name, stretch=1)
 
         return row
 

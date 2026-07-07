@@ -175,6 +175,13 @@ class GeminiOCR:
 2. customs_duty (관세): 관세 금액 (숫자만, 없으면 0)
 3. vat (부가세): 부가가치세 금액 (숫자만, 없으면 0)
 
+[2-2단계: 사업자등록번호 (수입신고필증/수출신고필증/반송신고필증 전용)]
+- business_no: 사업자등록번호를 "123-45-67890" 형식 그대로 추출
+  - 수입신고필증: **납세의무자**의 사업자등록번호 (통관고유부호와 혼동 금지, 하이픈 포함 형식)
+  - 수출신고필증/반송신고필증: **수출화주(수출자)**의 사업자등록번호
+  - [주의] 신고인(관세사무소/관세법인)의 사업자번호를 추출하면 안 됩니다
+  - 명확히 확인되지 않으면 "Unknown"
+
 [3단계: 청구 항목 추출]
 - 계산서/세금계산서/영수증/입금표인 경우:
   - billing_items: 문서 내 모든 청구 항목을 [{"name": "항목명", "amount": 금액}] 리스트로 반환
@@ -349,6 +356,10 @@ class GeminiOCR:
             # 수입신고필증에 levy_type 필드가 없는 구 캐시는 재분석을 위해 무효화
             if result and result.get('doc_type') == '수입신고필증':
                 if 'levy_type' not in result:
+                    return None
+            # 신고필증에 business_no 필드가 없는 구 캐시도 재분석을 위해 무효화
+            if result and result.get('doc_type') in ('수입신고필증', '수출신고필증', '반송신고필증'):
+                if 'business_no' not in result:
                     return None
             return result
         except Exception as e:

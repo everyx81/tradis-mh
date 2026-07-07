@@ -1311,6 +1311,29 @@ class GroupCard(GlassFrame):
 
         header.addWidget(self.id_pill)
 
+        # ── 수출/수입 구분 태그 (↓수입=파랑, ↑수출=보라) ──
+        _io_is_export = any(
+            ('수출신고필증' in v) or ('반송신고필증' in v)
+            for v in self.data.get('docs', {}).values()
+        )
+        if _io_is_export:
+            _io_txt, _io_fg = "수출", "#d9c6fa"
+            _io_bg, _io_bd = "rgba(180, 141, 244, 30)", "rgba(180, 141, 244, 110)"
+        else:
+            _io_txt, _io_fg = "수입", "#bfe3ff"
+            _io_bg, _io_bd = "rgba(75, 163, 247, 30)", "rgba(75, 163, 247, 110)"
+        self.lbl_io_tag = QLabel(_io_txt)
+        self.lbl_io_tag.setStyleSheet(f"""
+            color: {_io_fg};
+            background-color: {_io_bg};
+            border: 1px solid {_io_bd};
+            border-radius: 5px;
+            padding: 2px 7px;
+            font-size: 8.5pt;
+            font-weight: 600;
+        """)
+        header.addWidget(self.lbl_io_tag)
+
         # ── group-meta: 카테고리 · 건수(pill) ── (Claude Design 헤더 인라인 메타)
         from .claude_theme import C as _CT
         _company = self.data.get('company', '') or ''
@@ -1330,6 +1353,20 @@ class GroupCard(GlassFrame):
             self.lbl_meta_company.setText(_fm.elidedText(_company, Qt.TextElideMode.ElideRight, 260))
         header.addSpacing(10)
         header.addWidget(self.lbl_meta_company)
+
+        # 사업자등록번호 (신고필증에서 백그라운드 추출, 성공 시에만 표시)
+        # BL번호와 동일하게 드래그 선택 → Ctrl+C 복사 가능
+        self.lbl_biz_no = QLabel("")
+        self.lbl_biz_no.setStyleSheet(
+            f"color: {_CT['fg_2']}; font-family: 'JetBrains Mono','Consolas',monospace; "
+            f"font-size: 9.5pt; background: transparent; border: none;"
+        )
+        self.lbl_biz_no.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.lbl_biz_no.setCursor(Qt.CursorShape.IBeamCursor)
+        self.lbl_biz_no.setToolTip("사업자등록번호 — 드래그하여 선택 후 Ctrl+C로 복사")
+        self.lbl_biz_no.hide()
+        header.addSpacing(6)
+        header.addWidget(self.lbl_biz_no)
 
         _dot_sep1 = QLabel("·")
         _dot_sep1.setStyleSheet(f"color: {_CT['fg_3']}; background: transparent; border: none;")
@@ -1632,6 +1669,67 @@ class GroupCard(GlassFrame):
         self._run_amount_validation()
         # 초기 상태 배지 계산
         self._update_status_badge()
+        # 사업자등록번호 백그라운드 추출
+        self._load_biz_no_async()
+
+    # 사업자번호 백그라운드 AI 분석 — 동시 실행 제한 + 세션 내 실패 기록 (재시도 방지)
+    _BIZ_SEM = threading.Semaphore(2)
+    _BIZ_FAILED = set()
+
+    def _load_biz_no_async(self):
+        """신고필증의 사업자등록번호 표시 — AI 분석 결과(business_no) 사용.
+        business_no 없는 구 캐시는 백그라운드에서 1회 재분석해 채운다."""
+        docs = self.data.get('docs', {})
+        target = None
+        for key in ("수입신고필증", "수출신고필증", "반송신고필증"):
+            if key in docs:
+                target = docs[key]
+                break
+        if not target:
+            for v in docs.values():
+                if '신고필증' in v:
+                    target = v
+                    break
+        if not target:
+            return
+        fpath = os.path.join(self.directory, target)
+
+        from auto_rename import gemini_ocr
+        cached = None
+        try:
+            cached = gemini_ocr._get_cached_result(fpath)
+        except Exception:
+            pass
+        biz = str((cached or {}).get('business_no', '') or '')
+        if biz and biz != 'Unknown':
+            self._set_biz_no(biz)
+            return
+        if fpath in GroupCard._BIZ_FAILED:
+            return
+
+        def run():
+            b = ""
+            try:
+                with GroupCard._BIZ_SEM:
+                    res = gemini_ocr.analyze_pdf(fpath) or {}
+                b = str(res.get('business_no', '') or '')
+            except Exception as e:
+                print(f"[biz_no] AI 추출 오류: {e}")
+            if (not b) or b == 'Unknown':
+                GroupCard._BIZ_FAILED.add(fpath)
+                b = ""
+            QTimer.singleShot(0, lambda: self._set_biz_no(b))
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _set_biz_no(self, biz: str):
+        """사업자등록번호 라벨 갱신 (없으면 숨김 유지). 하이픈 없이 숫자만 표시."""
+        try:
+            if biz and hasattr(self, 'lbl_biz_no'):
+                self.lbl_biz_no.setText(biz.replace('-', '').replace(' ', ''))
+                self.lbl_biz_no.show()
+        except RuntimeError:
+            pass
 
     # ═══════════════════════════════════════════════
     # Sub-action handlers (Claude Design group-sub-actions)
@@ -1919,11 +2017,11 @@ class GroupCard(GlassFrame):
             'dot':    '#59c886',       # CT green
         },
         'yellow': {
-            # 폴더 정리 대기 — 보라 틴트 (안 A: "버튼만 누르면 끝" 상태)
-            'bg':     'rgba(180, 141, 244, 36)',
-            'border': 'rgba(180, 141, 244, 130)',
-            'text':   '#d9c6fa',
-            'dot':    '#b48df4',       # CT purple
+            # 폴더 정리 대기 — 파스텔 옐로 틴트 (red/green과 같은 톤 계열로 조화)
+            'bg':     'rgba(234, 197, 79, 36)',
+            'border': 'rgba(234, 197, 79, 130)',
+            'text':   '#f3dc94',
+            'dot':    '#eac54f',
         },
         'red': {
             # 디자인: .id-pill.r 은 붉은 틴트 배경 + 붉은 보더 + 붉은 텍스트

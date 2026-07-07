@@ -1257,9 +1257,23 @@ class GroupCard(GlassFrame):
         self.header_widget = QWidget()
         self.header_widget.setCursor(Qt.CursorShape.PointingHandCursor)
         self.header_widget.mousePressEvent = self._on_header_click
-        header = QHBoxLayout(self.header_widget)
+        _hdr_col = QVBoxLayout(self.header_widget)
+        _hdr_col.setContentsMargins(0, 0, 0, 0)
+        _hdr_col.setSpacing(3)
+        header = QHBoxLayout()
         header.setContentsMargins(0, 0, 0, 0)
         header.setSpacing(10)
+        _hdr_col.addLayout(header)
+
+        # 적응형 상태 줄 — 누락 서류(빨강)/금액 문제(노랑·빨강)가 있을 때만 두 줄째 표시
+        self._missing_docs = []
+        self._amount_sev = None
+        self._amount_msg = ""
+        self.lbl_statusline = QLabel("")
+        self.lbl_statusline.setStyleSheet("background: transparent; border: none; font-size: 8.5pt;")
+        self.lbl_statusline.setContentsMargins(28, 0, 0, 0)
+        self.lbl_statusline.hide()
+        _hdr_col.addWidget(self.lbl_statusline)
 
         # ── Chevron caret (접힘/펼침 표시) ──
         from .claude_icons import pixmap as _icpx
@@ -1334,6 +1348,15 @@ class GroupCard(GlassFrame):
         """)
         header.addSpacing(6)
         header.addWidget(self.lbl_count_pill)
+
+        # 완료 인라인 표시 (서류 완비 + 금액 일치일 때만)
+        self.lbl_ok_inline = QLabel("✓ 금액 일치")
+        self.lbl_ok_inline.setStyleSheet(
+            f"color: {_CT['green']}; font-size: 8.5pt; font-weight: 600; background: transparent; border: none;"
+        )
+        self.lbl_ok_inline.hide()
+        header.addSpacing(8)
+        header.addWidget(self.lbl_ok_inline)
 
         header.addStretch(1)
 
@@ -1654,6 +1677,40 @@ class GroupCard(GlassFrame):
     # ─────────────────────────────────────────────────
     # Warning banner 스타일 헬퍼 (severity: green/yellow/red/neutral)
     # ─────────────────────────────────────────────────
+    def _refresh_header_status(self):
+        """적응형 헤더: 누락 서류/금액 문제 → 상태 줄 표시, 완비+일치 → 인라인 ✓."""
+        from .claude_theme import C as _CT
+        missing = getattr(self, '_missing_docs', [])
+        sev = getattr(self, '_amount_sev', None)
+        msg = getattr(self, '_amount_msg', "")
+        if hasattr(self, 'lbl_ok_inline'):
+            self.lbl_ok_inline.setVisible((not missing) and sev == 'green')
+        if not hasattr(self, 'lbl_statusline'):
+            return
+        if missing:
+            names = ", ".join(missing[:3])
+            if len(missing) > 3:
+                names += f" 외 {len(missing) - 3}"
+            self.lbl_statusline.setText(f"{names} 누락")
+            self.lbl_statusline.setStyleSheet(
+                f"color: {_CT['red']}; background: transparent; border: none; "
+                f"font-size: 8.5pt; font-weight: 600;"
+            )
+            self.lbl_statusline.setContentsMargins(28, 0, 0, 0)
+            self.lbl_statusline.show()
+        elif sev in ('yellow', 'red') and msg:
+            # 안 A: 조치 필요는 전부 빨강으로 통일 (심각도 상세는 펼친 배너에서 구분)
+            _c = _CT['red']
+            self.lbl_statusline.setText(msg)
+            self.lbl_statusline.setStyleSheet(
+                f"color: {_c}; background: transparent; border: none; "
+                f"font-size: 8.5pt; font-weight: 600;"
+            )
+            self.lbl_statusline.setContentsMargins(28, 0, 0, 0)
+            self.lbl_statusline.show()
+        else:
+            self.lbl_statusline.hide()
+
     def _set_warning(self, severity, text):
         """group-warning 배너를 상태별 색으로 갱신."""
         if not hasattr(self, '_warning_frame'):
@@ -1684,6 +1741,10 @@ class GroupCard(GlassFrame):
         )
         self.lbl_amount_check.setText(text)
         self._warning_frame.show()
+        # 헤더 적응형 상태 줄 동기화
+        self._amount_sev = severity
+        self._amount_msg = text
+        self._refresh_header_status()
 
     def _on_header_click(self, event):
         """헤더 영역 클릭 → 좌클릭: 접기/펼치기 / 우클릭: 컨텍스트 메뉴"""
@@ -1794,12 +1855,12 @@ class GroupCard(GlassFrame):
         QTimer.singleShot(120, self._resume_hover_fx)
 
     def _compute_status(self):
-        """카드 상태 계산 → 'green'|'yellow'|'red'|'gray'
+        """카드 상태 계산 → 'green'|'yellow'|'red'|'gray' (안 A: 행동 기준)
 
         정의:
         - 🟢 이상없음: AI가 실제로 검증해서 금액 OK + 파일 누락 없음
-        - 🟡 대기: 정산서가 없는 카드 / 금액 일부 불일치 / 파일 일부 누락
-        - 🔴 충돌: 금액 크게 불일치
+        - 🟡 대기: 정산서가 없는 카드 — 폴더 정리 버튼만 누르면 끝
+        - 🔴 조치 필요: 서류 누락 또는 금액 불일치 (크기 무관) — 사람이 처리해야 함
         - ⚪ 미분류: 분석 중 / 분석 실패 / 검증 항목 없음
         """
         # 분석 진행 중 → 미분류
@@ -1833,11 +1894,10 @@ class GroupCard(GlassFrame):
 
         validation = getattr(self, '_validation_status', None)
 
-        # 검증이 'no_items' (검증 항목 없음) 이어도 파일 누락 없으면 녹색
-        if validation == 'red':
+        # 안 A 기준: 빨강 = 조치 필요 (서류 누락 또는 금액 불일치 — 크기 무관)
+        #            노랑 = 폴더 정리 대기 (archive_only, 위에서 반환됨)
+        if missing or validation in ('red', 'yellow'):
             return 'red'
-        if validation == 'yellow' or missing:
-            return 'yellow'
         if validation == 'green' and not missing:
             return 'green'
         # no_items + 파일 누락 없음 → 모든 필요 항목이 NA라는 뜻 → 녹색 (완료)
@@ -1859,11 +1919,11 @@ class GroupCard(GlassFrame):
             'dot':    '#59c886',       # CT green
         },
         'yellow': {
-            # 붉은색과 동일하게 amber 틴트 (bg + border + text)
-            'bg':     'rgba(233, 171, 43, 36)',
-            'border': 'rgba(233, 171, 43, 130)',
-            'text':   '#f2d48a',
-            'dot':    '#e9ab2b',       # CT amber
+            # 폴더 정리 대기 — 보라 틴트 (안 A: "버튼만 누르면 끝" 상태)
+            'bg':     'rgba(180, 141, 244, 36)',
+            'border': 'rgba(180, 141, 244, 130)',
+            'text':   '#d9c6fa',
+            'dot':    '#b48df4',       # CT purple
         },
         'red': {
             # 디자인: .id-pill.r 은 붉은 틴트 배경 + 붉은 보더 + 붉은 텍스트
@@ -2599,6 +2659,17 @@ class GroupCard(GlassFrame):
         """체크리스트 컨테이너를 위젯 chip들로 재구성.
         items: [(name, is_found, sub), ...] 또는 [{'name':, 'found':, 'not_applicable':}, ...]
         summary: (total, missing, ok) 또는 None"""
+        # 헤더 상태 줄용 누락 서류 목록 갱신
+        _missing = []
+        for _it in items or []:
+            if isinstance(_it, dict):
+                if (not _it.get('found', False)) and (not _it.get('not_applicable', False)):
+                    _missing.append(_it.get('name', ''))
+            else:
+                if not _it[1]:
+                    _missing.append(_it[0])
+        self._missing_docs = [n for n in _missing if n]
+        self._refresh_header_status()
         # 기존 children 제거
         while self._checklist_chips_layout.count():
             child = self._checklist_chips_layout.takeAt(0)
@@ -3071,7 +3142,7 @@ class GroupCard(GlassFrame):
         self.file_list.clear()
         docs = self.data.get('docs', {})
         all_files = sorted(set(docs.values()), key=self._file_sort_key)
-        ROW_HEIGHT = 36
+        ROW_HEIGHT = 46
         for f in all_files:
             full_path = os.path.join(self.directory, f)
             item = QListWidgetItem()
@@ -3201,7 +3272,11 @@ class GroupCard(GlassFrame):
         ico_wrap.setPixmap(_icpx("File", size=13, color=_CT['fg_2']))
         lay.addWidget(ico_wrap)
 
-        # ③ 파일 이름 (mono, 긴 이름 ellipsize)
+        # ③ 이름 + 메타 두 줄 (긴 파일명이 잘리지 않도록)
+        name_col = QVBoxLayout()
+        name_col.setContentsMargins(0, 0, 0, 0)
+        name_col.setSpacing(1)
+
         lbl_name = QLabel()
         lbl_name.setStyleSheet(f"""
             color: {_CT['fg_0']};
@@ -3229,31 +3304,56 @@ class GroupCard(GlassFrame):
             _orig(ev)
             _f()
         lbl_name.resizeEvent = _on_name_resize
-        lay.addWidget(lbl_name, stretch=1)
+        name_col.addWidget(lbl_name)
 
-        # ④ meta: size · date
+        # 메타 줄: 서류종류 · 크기 · 수정시각
+        _meta_parts = []
+        _dtype = self._doc_type_of(filename)
+        if _dtype:
+            _meta_parts.append(_dtype)
         try:
             st = _os.stat(full_path) if _os.path.exists(full_path) else None
             if st:
                 import datetime as _dt
-                size_kb = max(1, st.st_size // 1024)
-                meta_text = f"{size_kb} KB · {_dt.datetime.fromtimestamp(st.st_mtime).strftime('%Y-%m-%d %H:%M')}"
-            else:
-                meta_text = ""
+                _meta_parts.append(f"{max(1, st.st_size // 1024)} KB")
+                _meta_parts.append(_dt.datetime.fromtimestamp(st.st_mtime).strftime('%m-%d %H:%M'))
         except Exception:
-            meta_text = ""
-        if meta_text:
-            lbl_meta = QLabel(meta_text)
-            lbl_meta.setStyleSheet(f"""
-                color: {_CT['fg_3']};
-                font-family: 'JetBrains Mono','Consolas',monospace;
-                font-size: 8.5pt;
-                background: transparent;
-                border: none;
-            """)
-            lay.addWidget(lbl_meta)
+            pass
+        lbl_meta = QLabel(" · ".join(_meta_parts))
+        lbl_meta.setStyleSheet(f"""
+            color: {_CT['fg_3']};
+            font-size: 8.5pt;
+            background: transparent;
+            border: none;
+        """)
+        name_col.addWidget(lbl_meta)
+        lay.addLayout(name_col, stretch=1)
 
         return row
+
+    def _doc_type_of(self, filename: str) -> str:
+        """파일명에서 서류 종류 추출 (메타 줄 표시용, _file_sort_key와 동일 기준)."""
+        fn = filename or ""
+        if "자금정산서" in fn or "정산서" in fn:
+            return "자금정산서"
+        if "수입신고필증" in fn:
+            return "수입신고필증"
+        if "수출신고필증" in fn:
+            return "수출신고필증"
+        if "반송신고필증" in fn:
+            return "반송신고필증"
+        if "납부고지서" in fn or "납부영수증" in fn:
+            return "납부고지서"
+        if "수입세금계산서" in fn:
+            return "수입세금계산서"
+        if "수수료계산서" in fn:
+            return "수수료계산서"
+        for kw in ("선박운임", "해상운임", "항공운임", "운송료", "보세운송", "창고료", "보관료", "운송", "보험료"):
+            if kw in fn:
+                return "비용계산서"
+        if "계산서" in fn or "청구서" in fn:
+            return "계산서"
+        return "기타 서류"
 
     def _fl_context_menu(self, pos):
         """파일 목록 우클릭 메뉴"""
@@ -4140,6 +4240,8 @@ class GroupCard(GlassFrame):
             if not has_expense:
                 self._warning_frame.hide()
                 self._validation_status = None
+                self._amount_sev = None
+                self._refresh_header_status()
                 if hasattr(self, 'lbl_badge'):
                     self._update_status_badge()
                 return
@@ -4162,6 +4264,8 @@ class GroupCard(GlassFrame):
         if not has_expense_items:
             self._warning_frame.hide()
             self._validation_status = 'no_items'
+            self._amount_sev = None
+            self._refresh_header_status()
             if hasattr(self, 'lbl_badge'):
                 self._update_status_badge()
             return

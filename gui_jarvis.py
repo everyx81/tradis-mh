@@ -583,14 +583,7 @@ class JarvisGUI(QMainWindow):
         mk1_layout.setContentsMargins(0, 0, 0, 0)
         mk1_layout.setSpacing(0)
 
-        # Claude Design warm dark 3컬럼 — sidebar / main / targets 각각 다른 톤
-        _sidebar_style = f"""
-            QFrame#SidebarPanel {{
-                background-color: {CT["bg_1"]};
-                border: none;
-                border-right: 1px solid {CT["border_soft"]};
-            }}
-        """
+        # Claude Design warm dark 2컬럼 — main / targets (사이드바 제거, 내용은 중앙 헤더로 이동)
         _main_style = f"""
             QFrame#MainPanel {{
                 background-color: {CT["bg_0"]};
@@ -605,11 +598,8 @@ class JarvisGUI(QMainWindow):
             }}
         """
 
-        self.left_panel = QFrame()
-        self.left_panel.setObjectName("SidebarPanel")
-        self.left_panel.setStyleSheet(_sidebar_style)
+        # 호환용 숨김 위젯 + 로그 영역 생성 (구 사이드바 잔여 역할)
         self.setup_left_panel()
-        mk1_layout.addWidget(self.left_panel)
 
         self.middle_panel = QFrame()
         self.middle_panel.setObjectName("MainPanel")
@@ -1662,225 +1652,15 @@ class JarvisGUI(QMainWindow):
             self.file_manager.reposition_search_panel()
 
     def setup_left_panel(self):
-        """Claude Design handoff_2 centered variant 사이드바.
-        brand(T 로고 = 감시 토글, 감시 중 글로우) + statusbar(chips) + floating logs."""
-        from gui.claude_icons import pixmap as _icpx
-        from PyQt6.QtCore import QSize as _QSize
-        from PyQt6.QtGui import QIcon as _QIcon
-
-        self.left_panel.setFixedWidth(280)
-        layout = QVBoxLayout(self.left_panel)
-        layout.setContentsMargins(20, 28, 20, 20)
-        layout.setSpacing(0)
+        """(구 사이드바) 호환용 숨김 위젯 + 로그 영역만 생성.
+        T 로고 토글·AI·Logs 칩은 setup_middle_panel 헤더로 이동했다."""
         _mono = "'JetBrains Mono','Consolas',monospace"
 
         # 오늘 통계 (처리/대기/오류) — emit_log/renamer 콜백으로 갱신
         self._today_stats = {"processed": 0, "pending": 0, "errors": 0}
 
         # ═══════════════════════════════════════
-        # 1) HERO CENTER — brand + toggle + state + stats (세로 중앙 정렬)
-        # ═══════════════════════════════════════
-        hero_center = QVBoxLayout()
-        hero_center.setSpacing(22)
-        hero_center.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-        # 위쪽 stretch (내용물을 하단 statusbar와 함께 중앙으로)
-        hero_center.addStretch(1)
-
-        # ── BRAND hero ──
-        brand_col = QVBoxLayout()
-        brand_col.setSpacing(6)
-        brand_col.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-
-        # T 로고 = 감시 시작/중지 토글 (클릭 시 아이언맨 눈처럼 점화)
-        from PyQt6.QtWidgets import QGraphicsDropShadowEffect as _QShadow
-        from PyQt6.QtGui import QColor as _QColor
-
-        self.brand_mark = QLabel("T")
-        brand_mark = self.brand_mark
-        brand_mark.setFixedSize(64, 64)
-        brand_mark.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        brand_mark.setCursor(Qt.CursorShape.PointingHandCursor)
-        # 꺼짐: 어두운 강판 느낌 (도르만트) — 점화 대비를 위해 무광
-        self._brand_css_off = f"""
-            background: qlineargradient(
-                x1:0, y1:0, x2:1, y2:1,
-                stop:0 {CT['bg_3']},
-                stop:1 {CT['bg_1']}
-            );
-            color: {CT['fg_2']};
-            border: 1px solid {CT['border']};
-            font-weight: 700;
-            font-size: 22pt;
-            border-radius: 16px;
-            letter-spacing: -0.6px;
-        """
-        # 켜짐: 흰빛에 가까운 발광 타일 + 짙은 파랑 T
-        self._brand_css_on = """
-            background: qlineargradient(
-                x1:0, y1:0, x2:1, y2:1,
-                stop:0 #e6f7ff,
-                stop:1 #6cbcff
-            );
-            color: #0a3b6e;
-            border: 1px solid #bfe6ff;
-            font-weight: 700;
-            font-size: 22pt;
-            border-radius: 16px;
-            letter-spacing: -0.6px;
-        """
-        brand_mark.setStyleSheet(self._brand_css_off)
-
-        # 글로우 이펙트 (점화 시 흰빛-하늘색 발광)
-        self._brand_glow = _QShadow(brand_mark)
-        self._brand_glow.setBlurRadius(60)
-        self._brand_glow.setOffset(0, 0)
-        self._brand_glow.setColor(_QColor(170, 225, 255, 0))
-        brand_mark.setGraphicsEffect(self._brand_glow)
-        self._brand_anim = None
-
-        def _brand_click(ev):
-            if ev.button() == Qt.MouseButton.LeftButton:
-                self._on_circle_toggle()
-        brand_mark.mousePressEvent = _brand_click
-        self._monitor_on = False
-        _bm_wrap = QHBoxLayout()
-        _bm_wrap.addStretch()
-        _bm_wrap.addWidget(brand_mark)
-        _bm_wrap.addStretch()
-        brand_col.addLayout(_bm_wrap)
-
-        lbl_brand = QLabel("TRADIS")
-        lbl_brand.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lbl_brand.setStyleSheet(f"""
-            color: {CT['fg_0']};
-            font-size: 16pt;
-            font-weight: 700;
-            letter-spacing: 4px;
-            background: transparent;
-        """)
-        brand_col.addWidget(lbl_brand)
-
-        lbl_brand_tag = QLabel("Intelligent Auto Renamer")
-        lbl_brand_tag.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lbl_brand_tag.setStyleSheet(f"color: {CT['fg_3']}; font-size: 8.5pt; background: transparent;")
-        brand_col.addWidget(lbl_brand_tag)
-
-        lbl_brand_author = QLabel("by M.H. Choi")
-        lbl_brand_author.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lbl_brand_author.setStyleSheet(
-            f"color: {CT['fg_3']}; font-size: 8pt; background: transparent; "
-            f"font-style: italic; letter-spacing: 1px;"
-        )
-        brand_col.addWidget(lbl_brand_author)
-        hero_center.addLayout(brand_col)
-
-        # 아래쪽 stretch (상/하 대칭으로 세로 중앙 정렬)
-        hero_center.addStretch(1)
-
-        layout.addLayout(hero_center, stretch=1)
-
-        # ═══════════════════════════════════════
-        # 2) BOTTOM STATUS BAR (chips)
-        # ═══════════════════════════════════════
-        _sb_sep = QFrame()
-        _sb_sep.setFixedHeight(1)
-        _sb_sep.setStyleSheet(f"background-color: {CT['border_soft']}; border: none;")
-        layout.addSpacing(12)
-        layout.addWidget(_sb_sep)
-        layout.addSpacing(12)
-
-        # ── Watch folder chip (full width) ──
-        _chip_css = f"""
-            QPushButton#heroChip {{
-                background-color: {CT['bg_1']};
-                color: {CT['fg_1']};
-                border: 1px solid {CT['border_soft']};
-                border-radius: 8px;
-                padding: 7px 10px;
-                font-size: 9pt;
-                text-align: left;
-            }}
-            QPushButton#heroChip:hover {{
-                background-color: {CT['bg_2']};
-                color: {CT['fg_0']};
-            }}
-            QPushButton#heroChip:checked {{
-                background-color: {CT['accent_bg']};
-                color: {CT['accent_hi']};
-                border: 1px solid {CT['accent_border']};
-            }}
-        """
-
-        self.btn_watch_chip = QPushButton("  Watch folder")
-        self.btn_watch_chip.setObjectName("heroChip")
-        self.btn_watch_chip.setIcon(_QIcon(_icpx("Folder", size=13, color=CT['fg_2'])))
-        self.btn_watch_chip.setIconSize(_QSize(13, 13))
-        self.btn_watch_chip.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_watch_chip.setMinimumHeight(32)
-        self.btn_watch_chip.setStyleSheet(_chip_css)
-        self.btn_watch_chip.clicked.connect(self.browse_directory)
-        layout.addWidget(self.btn_watch_chip)
-
-        # ── AI chip + Logs chip (한 줄) ──
-        chips_row = QHBoxLayout()
-        chips_row.setSpacing(6)
-
-        # AI chip (실제 동작: 클릭 시 API 설정)
-        self.btn_ai_chip = QPushButton()
-        self.btn_ai_chip.setObjectName("heroChip")
-        self.btn_ai_chip.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_ai_chip.setMinimumHeight(32)
-        self.btn_ai_chip.setStyleSheet(_chip_css)
-        self.btn_ai_chip.clicked.connect(self.open_api_settings)
-        # 내부 레이아웃 (dot + label + version)
-        _ai_inner = QHBoxLayout(self.btn_ai_chip)
-        _ai_inner.setContentsMargins(10, 4, 10, 4)
-        _ai_inner.setSpacing(7)
-        self._ai_dot = QLabel()
-        self._ai_dot.setFixedSize(6, 6)
-        self._ai_dot.setStyleSheet(f"background-color: {CT['fg_3']}; border-radius: 3px;")
-        _ai_inner.addWidget(self._ai_dot)
-        self.lbl_api_status = QLabel("AI Offline")
-        self.lbl_api_status.setStyleSheet(f"color: {CT['fg_1']}; font-size: 9pt; background: transparent;")
-        _ai_inner.addWidget(self.lbl_api_status)
-        _ai_inner.addStretch()
-        self._ai_version_tag = QLabel(f"v{__version__}")
-        self._ai_version_tag.setStyleSheet(
-            f"color: {CT['fg_3']}; font-family: {_mono}; font-size: 8pt; background: transparent;"
-        )
-        _ai_inner.addWidget(self._ai_version_tag)
-        chips_row.addWidget(self.btn_ai_chip, stretch=1)
-
-        # Logs chip (클릭 시 floating panel 토글)
-        self.btn_logs_chip = QPushButton()
-        self.btn_logs_chip.setObjectName("heroChip")
-        self.btn_logs_chip.setCheckable(True)
-        self.btn_logs_chip.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_logs_chip.setMinimumHeight(32)
-        self.btn_logs_chip.setStyleSheet(_chip_css)
-        self.btn_logs_chip.clicked.connect(self._toggle_log_float)
-        _lg_inner = QHBoxLayout(self.btn_logs_chip)
-        _lg_inner.setContentsMargins(10, 4, 10, 4)
-        _lg_inner.setSpacing(7)
-        _lg_ico = QLabel()
-        _lg_ico.setFixedSize(14, 14)
-        _lg_ico.setPixmap(_icpx("Inbox", size=13, color=CT['fg_2']))
-        _lg_inner.addWidget(_lg_ico)
-        _lg_lbl = QLabel("Logs")
-        _lg_lbl.setStyleSheet(f"color: {CT['fg_1']}; font-size: 9pt; background: transparent;")
-        _lg_inner.addWidget(_lg_lbl)
-        _lg_inner.addStretch()
-        self.lbl_log_count = QLabel("0")
-        self.lbl_log_count.setStyleSheet(
-            f"color: {CT['fg_3']}; font-family: {_mono}; font-size: 8pt; background: transparent;"
-        )
-        _lg_inner.addWidget(self.lbl_log_count)
-        chips_row.addWidget(self.btn_logs_chip)
-
-        layout.addLayout(chips_row)
-
-        # ═══════════════════════════════════════
-        # 3) HIDDEN COMPATIBILITY WIDGETS
+        # HIDDEN COMPATIBILITY WIDGETS
         # (기존 코드 호환을 위한 더미 - 레이아웃에 추가하지 않음)
         # ═══════════════════════════════════════
         self.line_path = QLineEdit()
@@ -1929,12 +1709,6 @@ class JarvisGUI(QMainWindow):
         # Floating log panel (hidden by default)
         self._log_float_panel = None
 
-        # 초기 API 상태
-        from core.config import get_api_key
-        self.update_api_status(bool(get_api_key()))
-
-        # 초기 watch folder chip 텍스트는 load_settings 에서 _update_watch_chip() 호출로 갱신됨
-
     # ─────────────────────────────────────────
     # 사이드바 이벤트 핸들러 (handoff_2)
     # ─────────────────────────────────────────
@@ -1946,15 +1720,9 @@ class JarvisGUI(QMainWindow):
             self.start_monitoring()
 
     def _update_watch_chip(self, path: str):
-        """watch folder chip 의 라벨을 경로로 갱신."""
-        if not hasattr(self, 'btn_watch_chip'):
-            return
-        short = path if path else "Watch folder"
-        # 너무 길면 ellipsize (뒤쪽을 보여주려면 왼쪽을 ...)
-        if short and len(short) > 28:
-            short = "..." + short[-25:]
-        self.btn_watch_chip.setText("  " + short)
-        self.btn_watch_chip.setToolTip(path or "")
+        """감시 폴더 경로 표시 갱신 — 중앙 헤더의 경로 라벨."""
+        if hasattr(self, 'lbl_location') and path:
+            self.lbl_location.setText(path)
 
     def _brand_glow_set(self, v):
         """T 로고 글로우 알파값 적용."""
@@ -1979,7 +1747,7 @@ class JarvisGUI(QMainWindow):
 
         ignite = QVariantAnimation(seq)
         ignite.setDuration(150)
-        ignite.setStartValue(0)
+        ignite.setStartValue(getattr(self, '_BRAND_STANDBY_ALPHA', 0))
         ignite.setEndValue(255)
         ignite.setEasingCurve(QEasingCurve.Type.OutQuad)
         ignite.valueChanged.connect(self._brand_glow_set)
@@ -2010,17 +1778,28 @@ class JarvisGUI(QMainWindow):
         self._brand_anim = seq
 
     def _update_state_ui(self, monitoring: bool):
-        """감시 상태 → T 로고 점등/소등."""
+        """감시 상태 → T 타일 점등/소등 + 워드마크·상태 줄 연동."""
         self._monitor_on = monitoring
         if not hasattr(self, 'brand_mark'):
             return
+        from PyQt6.QtGui import QColor as _QColor
         if monitoring:
             self.brand_mark.setStyleSheet(self._brand_css_on)
+            if hasattr(self, 'lbl_brand'):
+                self.lbl_brand.setText(self._wordmark_html_on)
+                self._wordmark_glow.setColor(_QColor(94, 189, 255, 130))
+            if hasattr(self, 'lbl_brand_status'):
+                self.lbl_brand_status.setText(self._status_html_on)
             self._brand_ignite()
         else:
             self._brand_anim_stop()
-            self._brand_glow_set(0)
+            self._brand_glow_set(getattr(self, '_BRAND_STANDBY_ALPHA', 0))
             self.brand_mark.setStyleSheet(self._brand_css_off)
+            if hasattr(self, 'lbl_brand'):
+                self.lbl_brand.setText(self._wordmark_html_off)
+                self._wordmark_glow.setColor(_QColor(94, 189, 255, 0))
+            if hasattr(self, 'lbl_brand_status'):
+                self.lbl_brand_status.setText(self._status_html_off)
 
     def _update_stats_ui(self):
         """통계 카운터 UI 반영."""
@@ -2042,12 +1821,14 @@ class JarvisGUI(QMainWindow):
             self._create_log_float_panel()
         if self._log_float_panel.isVisible():
             self._log_float_panel.hide()
-            self.btn_logs_chip.setChecked(False)
+            if hasattr(self, 'btn_logs_chip'):
+                self.btn_logs_chip.setChecked(False)
         else:
             self._position_log_float_panel()
             self._log_float_panel.show()
             self._log_float_panel.raise_()
-            self.btn_logs_chip.setChecked(True)
+            if hasattr(self, 'btn_logs_chip'):
+                self.btn_logs_chip.setChecked(True)
 
     def _create_log_float_panel(self):
         """Floating 로그 패널 생성 (사이드바 우측에 오버레이)."""
@@ -2142,18 +1923,17 @@ class JarvisGUI(QMainWindow):
         self._log_float_panel.hide()
 
     def _position_log_float_panel(self):
-        """Floating 로그 패널 위치 계산 — 사이드바 우측으로 플로팅."""
+        """Floating 로그 패널 위치 계산 — 헤더 Logs 칩 아래로 플로팅."""
         if self._log_float_panel is None:
             return
-        # 사이드바(self.left_panel) 오른쪽에 띄우기
-        # JarvisGUI 내부 좌표계 기준
+        # Logs 칩 아래에 띄우기 (JarvisGUI 내부 좌표계 기준)
         try:
             panel_w = 380
             panel_h = 360
-            # 사이드바의 top-right 좌표
-            tl = self.left_panel.mapTo(self, QPoint(self.left_panel.width(), 0))
-            x = tl.x() + 8
-            y = tl.y() + 80
+            # 중앙 패널 우상단 기준으로 배치
+            tr = self.middle_panel.mapTo(self, QPoint(self.middle_panel.width(), 0))
+            x = tr.x() - panel_w - 16
+            y = tr.y() + 70
             # 화면 너머로 나가지 않도록 clamp
             if x + panel_w > self.width() - 20:
                 x = self.width() - panel_w - 20
@@ -2224,7 +2004,115 @@ class JarvisGUI(QMainWindow):
 
         _mono = "'JetBrains Mono','Consolas',monospace"
 
-        # ── 1) HEADER ROW — 경로 + 그룹 수 + 뷰 전환 + 재스캔 (한 줄) ──
+        # ── 1) BRAND BAR — T 토글(점화) + TRADIS 워드마크 + 상태 + AI/Logs ──
+        brand_row = QHBoxLayout()
+        brand_row.setSpacing(14)
+        brand_row.setContentsMargins(0, 0, 0, 0)
+
+        from PyQt6.QtWidgets import QGraphicsDropShadowEffect as _QShadow
+        from PyQt6.QtGui import QColor as _QColor
+
+        # T 타일 — 평상시 딥블루 대기 전력, 클릭 시 점화
+        self._BRAND_STANDBY_ALPHA = 55
+        self.brand_mark = QLabel("T")
+        brand_mark = self.brand_mark
+        brand_mark.setFixedSize(52, 52)
+        brand_mark.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        brand_mark.setCursor(Qt.CursorShape.PointingHandCursor)
+        # 꺼짐: 딥블루 그라데이션 (대기 전력이 흐르는 느낌)
+        self._brand_css_off = """
+            background: qlineargradient(
+                x1:0, y1:0, x2:1, y2:1,
+                stop:0 #2e5f96,
+                stop:1 #16324f
+            );
+            color: #cfe6ff;
+            border: 1px solid rgba(94, 189, 255, 90);
+            font-weight: 700;
+            font-size: 24pt;
+            border-radius: 14px;
+            letter-spacing: -0.6px;
+        """
+        # 켜짐: 흰빛에 가까운 발광 타일 + 짙은 파랑 T
+        self._brand_css_on = """
+            background: qlineargradient(
+                x1:0, y1:0, x2:1, y2:1,
+                stop:0 #e6f7ff,
+                stop:1 #6cbcff
+            );
+            color: #0a3b6e;
+            border: 1px solid #bfe6ff;
+            font-weight: 700;
+            font-size: 24pt;
+            border-radius: 14px;
+            letter-spacing: -0.6px;
+        """
+        brand_mark.setStyleSheet(self._brand_css_off)
+
+        self._brand_glow = _QShadow(brand_mark)
+        self._brand_glow.setBlurRadius(46)
+        self._brand_glow.setOffset(0, 0)
+        self._brand_glow.setColor(_QColor(170, 225, 255, self._BRAND_STANDBY_ALPHA))
+        brand_mark.setGraphicsEffect(self._brand_glow)
+        self._brand_anim = None
+
+        def _brand_click(ev):
+            if ev.button() == Qt.MouseButton.LeftButton:
+                self._on_circle_toggle()
+        brand_mark.mousePressEvent = _brand_click
+        self._monitor_on = False
+        brand_row.addWidget(brand_mark)
+
+        # 워드마크 (TRADIS) + 상태 줄
+        _wm_col = QVBoxLayout()
+        _wm_col.setSpacing(2)
+        _wm_col.setContentsMargins(0, 0, 0, 0)
+
+        self._wordmark_html_off = (
+            f'<span style="color:{CT["accent_hi"]};">T</span>'
+            f'<span style="color:{CT["fg_0"]};">RADIS</span>'
+        )
+        self._wordmark_html_on = f'<span style="color:{CT["accent_hi"]};">TRADIS</span>'
+        self.lbl_brand = QLabel(self._wordmark_html_off)
+        self.lbl_brand.setTextFormat(Qt.TextFormat.RichText)
+        self.lbl_brand.setStyleSheet("font-size: 15pt; font-weight: 700; background: transparent;")
+        _wm_font = self.lbl_brand.font()
+        _wm_font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 4.0)
+        self.lbl_brand.setFont(_wm_font)
+        # 감시 중일 때 워드마크에 은은한 파란 글로우
+        self._wordmark_glow = _QShadow(self.lbl_brand)
+        self._wordmark_glow.setBlurRadius(18)
+        self._wordmark_glow.setOffset(0, 0)
+        self._wordmark_glow.setColor(_QColor(94, 189, 255, 0))
+        self.lbl_brand.setGraphicsEffect(self._wordmark_glow)
+        _wm_col.addWidget(self.lbl_brand)
+
+        self._status_html_off = (
+            f'<span style="color:{CT["fg_3"]};">● 감시 중지됨 · by M.H. Choi</span>'
+        )
+        self._status_html_on = (
+            f'<span style="color:{CT["accent_hi"]};">● 감시 중</span>'
+            f'<span style="color:{CT["fg_3"]};"> · by M.H. Choi</span>'
+        )
+        self.lbl_brand_status = QLabel(self._status_html_off)
+        self.lbl_brand_status.setTextFormat(Qt.TextFormat.RichText)
+        self.lbl_brand_status.setStyleSheet("font-size: 8.5pt; background: transparent;")
+        _wm_col.addWidget(self.lbl_brand_status)
+
+        brand_row.addLayout(_wm_col)
+        brand_row.addStretch()
+        # (AI/Logs 칩은 아래에서 생성 후 brand_row 오른쪽에 추가됨)
+        layout.addLayout(brand_row)
+
+        # 브랜드 바 ↔ 도구 줄 구분선
+        layout.addSpacing(12)
+        _brand_sep = QFrame()
+        _brand_sep.setFixedHeight(1)
+        _brand_sep.setStyleSheet(f"background-color: {CT['border_soft']}; border: none;")
+        layout.addWidget(_brand_sep)
+        layout.addSpacing(10)
+
+        # ── 2) TOOL ROW — 경로 + 그룹 수 + 뷰 전환 + 재스캔 ──
         title_row = QHBoxLayout()
         title_row.setSpacing(10)
         title_row.setContentsMargins(0, 0, 0, 0)
@@ -2263,6 +2151,54 @@ class JarvisGUI(QMainWindow):
         self.lbl_section_hint.setStyleSheet(f"color: {CT['fg_3']}; font-size: 9pt; font-weight: 500; background: transparent;")
         title_row.addWidget(self.lbl_section_hint)
         title_row.addStretch()
+
+        # ── AI 상태 칩 + 로그 칩 (브랜드 바 오른쪽, 테두리 없는 조용한 스타일) ──
+        _chip_css = f"""
+            QPushButton#headerChip {{
+                background-color: transparent;
+                color: {CT['fg_1']};
+                border: 1px solid transparent;
+                border-radius: 8px;
+                padding: 5px 10px;
+                font-size: 9pt;
+                text-align: left;
+            }}
+            QPushButton#headerChip:hover {{
+                background-color: {CT['bg_2']};
+                color: {CT['fg_0']};
+            }}
+            QPushButton#headerChip:checked {{
+                background-color: {CT['accent_bg']};
+                color: {CT['accent_hi']};
+            }}
+        """
+
+        # AI chip (클릭 시 API 설정)
+        self.btn_ai_chip = QPushButton()
+        self.btn_ai_chip.setObjectName("headerChip")
+        self.btn_ai_chip.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_ai_chip.setFixedHeight(30)
+        self.btn_ai_chip.setMinimumWidth(160)
+        self.btn_ai_chip.setStyleSheet(_chip_css)
+        self.btn_ai_chip.clicked.connect(self.open_api_settings)
+        _ai_inner = QHBoxLayout(self.btn_ai_chip)
+        _ai_inner.setContentsMargins(10, 3, 10, 3)
+        _ai_inner.setSpacing(7)
+        self._ai_dot = QLabel()
+        self._ai_dot.setFixedSize(6, 6)
+        self._ai_dot.setStyleSheet(f"background-color: {CT['fg_3']}; border-radius: 3px;")
+        _ai_inner.addWidget(self._ai_dot)
+        self.lbl_api_status = QLabel("AI Offline")
+        self.lbl_api_status.setStyleSheet(f"color: {CT['fg_1']}; font-size: 9pt; background: transparent;")
+        _ai_inner.addWidget(self.lbl_api_status)
+        self._ai_version_tag = QLabel(f"v{__version__}")
+        self._ai_version_tag.setStyleSheet(
+            f"color: {CT['fg_3']}; font-family: {_mono}; font-size: 8pt; background: transparent;"
+        )
+        _ai_inner.addWidget(self._ai_version_tag)
+        brand_row.addWidget(self.btn_ai_chip)
+
+        # (로그 칩은 제거됨 — 로그는 하단 로그 영역/파일에서 확인)
 
         # ── 중앙 뷰 전환: [그룹] 카드 / [파일] 브라우저 ──
         seg = QFrame()
@@ -2340,6 +2276,10 @@ class JarvisGUI(QMainWindow):
         self.lbl_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lbl_hint.setStyleSheet(f"color: {CT['fg_3']}; font-size: 11pt; padding: 40px;")
         self.merge_layout.addWidget(self.lbl_hint)
+
+        # 초기 API 상태 (AI 칩 생성 후)
+        from core.config import get_api_key
+        self.update_api_status(bool(get_api_key()))
 
     def _set_center_view(self, mode):
         """중앙 패널 뷰 전환: 'groups'=그룹 카드, 'files'=파일 브라우저"""
@@ -2815,13 +2755,13 @@ class JarvisGUI(QMainWindow):
             return
         # 점(dot)은 별도 self._ai_dot 위젯 — 여기서는 텍스트와 점 색상만 갱신
         if connected:
-            self.lbl_api_status.setText("AI Connected")
+            self.lbl_api_status.setText("AI 연결됨")
             if hasattr(self, '_ai_dot'):
-                self._ai_dot.setStyleSheet(f"background-color: {CT['green']}; border-radius: 4px; border: none;")
+                self._ai_dot.setStyleSheet(f"background-color: {CT['green']}; border-radius: 3px; border: none;")
         else:
-            self.lbl_api_status.setText("API Key Required")
+            self.lbl_api_status.setText("API 키 필요")
             if hasattr(self, '_ai_dot'):
-                self._ai_dot.setStyleSheet(f"background-color: {CT['red']}; border-radius: 4px; border: none;")
+                self._ai_dot.setStyleSheet(f"background-color: {CT['red']}; border-radius: 3px; border: none;")
         self.lbl_api_status.setStyleSheet(
             f"color: {CT['fg_1']}; font-size: 9.5pt; font-weight: 500; background: transparent; border: none;"
         )

@@ -198,15 +198,33 @@ def is_similar_id(id1: str, id2: str, threshold: float = 0.75) -> bool:
     
     prefix1, suffix1 = split_id(n1)
     prefix2, suffix2 = split_id(n2)
-    
+
     # 숫자 접미어가 다르면 다른 ID (연번 B/L 보호)
     if suffix1 != suffix2:
         return False
-    
+
     # 접두어가 없으면 (순수 숫자 ID) 완전 일치만 허용
     if not prefix1 or not prefix2:
         return n1 == n2
-    
+
+    # 숫자열 완전 일치 필수 — 유사도 허용은 영문 오인식(I/L 누락 등)만.
+    # 연번 문자로 끝나는 ID 는 숫자 전체가 접두어로 분리되므로 이 검사가 없으면
+    # GSPC26024E852A vs GSPC26025E853A (다른 필증) 가 유사도 84%로 같은 건 처리됨.
+    # 정규화(O→0, I→1)가 영문 오인식을 숫자로 바꿀 수 있으므로
+    # 원본/정규화 중 한쪽이라도 숫자열이 일치하면 통과.
+    import re as _re
+    _digits = lambda s: _re.sub(r'[^0-9]', '', s)
+    if _digits(u1) != _digits(u2) and _digits(n1) != _digits(n2):
+        return False
+
+    # 영문열 비교 — 숫자가 같아도 선사코드가 명백히 다르면 다른 건
+    # (MAEU267065552A vs HDMU267065552A). 한쪽이 영문 없는 경우(선사코드 누락)는 허용.
+    letters1 = _re.sub(r'[^A-Z]', '', prefix1)
+    letters2 = _re.sub(r'[^A-Z]', '', prefix2)
+    if letters1 and letters2 and letters1 != letters2:
+        if SequenceMatcher(None, letters1, letters2).ratio() < threshold:
+            return False
+
     # 접두어 유사도 비교
     if abs(len(prefix1) - len(prefix2)) > 3:
         return False

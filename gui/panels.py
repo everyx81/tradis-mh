@@ -1074,6 +1074,79 @@ class FileManagerWidget(QWidget):
 
         self._refresh_monthly_companies_list()
 
+        # === 회사명 별칭 사전 섹션 ===
+        t4_layout.addSpacing(20)
+        lbl_alias_header = QLabel("회사명 별칭 사전")
+        lbl_alias_header.setMinimumHeight(24)
+        lbl_alias_header.setStyleSheet(
+            f"color: {CT['fg_0']}; font-weight: 600; letter-spacing: 0.2px; "
+            f"background: transparent; border: none;"
+        )
+        t4_layout.addWidget(lbl_alias_header)
+
+        lbl_alias_desc = QLabel(
+            "병합 확정 시 자동 학습되는 회사명 표기(영문 등) ↔ 한글 상호 매핑입니다.\n"
+            "서류 자동 매칭에 사용됩니다. 잘못 학습된 항목은 여기서 삭제하세요."
+        )
+        lbl_alias_desc.setStyleSheet(
+            f"color: {CT['fg_3']}; font-size: 9pt; background: transparent; border: none;"
+        )
+        lbl_alias_desc.setWordWrap(True)
+        lbl_alias_desc.setMinimumHeight(40)
+        t4_layout.addWidget(lbl_alias_desc)
+
+        self.list_company_aliases = QListWidget()
+        self.list_company_aliases.setStyleSheet(f"""
+            QListWidget {{
+                background-color: {CT['bg_2']};
+                color: {CT['fg_1']};
+                border: 1px solid {CT['border_soft']};
+                border-radius: 8px;
+                padding: 4px;
+                outline: 0;
+                font-size: 10pt;
+            }}
+            QListWidget::item {{
+                padding: 6px 10px;
+                border-radius: 6px;
+                margin: 1px 0;
+            }}
+            QListWidget::item:hover {{ background-color: {CT['bg_3']}; }}
+            QListWidget::item:selected {{
+                background-color: {CT['accent_bg']};
+                color: {CT['fg_0']};
+            }}
+        """)
+        self.list_company_aliases.setMaximumHeight(140)
+        self.list_company_aliases.setMinimumHeight(80)
+        self.list_company_aliases.itemDoubleClicked.connect(self._on_remove_alias_item)
+        _sc_del_a = _QShortcut(_QKeySequence(Qt.Key.Key_Delete), self.list_company_aliases)
+        _sc_del_a.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        _sc_del_a.activated.connect(self._on_remove_alias_selected)
+        t4_layout.addWidget(self.list_company_aliases)
+
+        self.btn_remove_alias = QPushButton("선택 별칭 삭제")
+        self.btn_remove_alias.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_remove_alias.setFixedHeight(32)
+        self.btn_remove_alias.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {CT['red']};
+                border: 1px solid {CT['border_soft']};
+                border-radius: 6px;
+                padding: 4px 10px;
+                font-size: 9pt;
+            }}
+            QPushButton:hover {{
+                background-color: rgba(250, 104, 99, 30);
+                border: 1px solid rgba(250, 104, 99, 120);
+            }}
+        """)
+        self.btn_remove_alias.clicked.connect(self._on_remove_alias_selected)
+        t4_layout.addWidget(self.btn_remove_alias)
+
+        self._refresh_alias_list()
+
         # === 한비로 메일 설정 섹션 ===
         t4_layout.addSpacing(20)
         lbl_mail_header = QLabel("한비로 메일 설정")
@@ -3106,6 +3179,50 @@ class FileManagerWidget(QWidget):
         except Exception as e:
             self.emit_log(f"[오류] 월납업체 삭제 실패: {e}")
         self._refresh_monthly_companies_list()
+
+    # ─────────────────────────────────────────────
+    # 회사명 별칭 사전 관리 (병합 확정 시 자동 학습)
+    # ─────────────────────────────────────────────
+    def _refresh_alias_list(self):
+        try:
+            from core.match_memory import get_aliases
+            aliases = get_aliases()
+        except Exception:
+            aliases = {}
+        self.list_company_aliases.clear()
+        for alias in sorted(aliases.keys()):
+            entry = aliases[alias]
+            if not isinstance(entry, dict):
+                continue
+            canonicals = ", ".join(sorted(entry.keys()))
+            suffix = "  (⚠ 중복 — 매칭 미사용)" if len(entry) > 1 else ""
+            item = QListWidgetItem(f"{alias}  →  {canonicals}{suffix}")
+            item.setData(Qt.ItemDataRole.UserRole, alias)
+            self.list_company_aliases.addItem(item)
+
+    def _remove_alias_names(self, aliases):
+        try:
+            from core.match_memory import remove_alias
+            for a in aliases:
+                remove_alias(a)
+                self.emit_log(f"[설정] 회사명 별칭 삭제: '{a}'")
+        except Exception as e:
+            self.emit_log(f"[오류] 별칭 삭제 실패: {e}")
+        self._refresh_alias_list()
+
+    def _on_remove_alias_item(self, item):
+        if item is None:
+            return
+        alias = item.data(Qt.ItemDataRole.UserRole)
+        if alias:
+            self._remove_alias_names([alias])
+
+    def _on_remove_alias_selected(self):
+        items = self.list_company_aliases.selectedItems()
+        aliases = [i.data(Qt.ItemDataRole.UserRole) for i in items]
+        aliases = [a for a in aliases if a]
+        if aliases:
+            self._remove_alias_names(aliases)
 
     def _show_naming_dialog(self):
         """파일 네이밍 설정 다이얼로그 (Frosted Glass 스타일)"""

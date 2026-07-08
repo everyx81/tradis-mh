@@ -2259,8 +2259,10 @@ class JarvisGUI(QMainWindow):
 
             groups = report.get('groups', {})
             unclassified = report.get('unclassified', [])
+            suggested = report.get('suggested', [])
             directory = report.get('directory', '')
-            self.emit_log(f"Scan Report: {len(groups)} Groups, {len(unclassified)} Unclassified")
+            self.emit_log(f"Scan Report: {len(groups)} Groups, {len(unclassified)} Unclassified"
+                          + (f", {len(suggested)} Suggested" if suggested else ""))
 
             if directory: self._update_watch_chip(directory)
 
@@ -2291,6 +2293,8 @@ class JarvisGUI(QMainWindow):
             # 2차 패스: 최종 unclassified 가 확정된 후 카드 생성
             for text_id, data in cardable_groups.items():
                 try:
+                    # 금액-only 매칭 제안을 해당 카드에 전달 (노란 제안 행으로 표시)
+                    data['suggested'] = [sg for sg in suggested if sg.get('bl') == text_id]
                     card = GroupCard(self, self.renamer, directory, text_id, data, unclassified)
                     self.merge_layout.addWidget(card)
                     self.group_cards.append(card)

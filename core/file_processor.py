@@ -380,6 +380,107 @@ class AutoRenamer:
         # 카드 그룹에 포함하지 않는 문서 유형
         _EXCLUDE_DOC_TYPES = {"수입신고서", "자금청구서"}
 
+        import re as _re
+        import json as _json
+        from core.validator import parse_amount as _parse_amount, build_search_kws as _build_search_kws
+        from .constants import ANCHOR_DOC_TYPES
+        _GENERIC_COMPANIES = {"Unknown", "알수없는상호", "알수없는", "미상", ""}
+        _FIXED_SLOT = {"수입세금계산서", "납부고지서", "자금정산서", "정산서",
+                        "수입신고필증", "수출신고필증", "반송신고필증"}
+        _SETTLEMENT_KEYS = ("자금정산서", "정산서")
+
+        # ── OCR 캐시 1회 로드 (파일×그룹 조합마다 디스크 JSON 재파싱 방지) ──
+        _cache_map = None
+
+        def _cache_lookup(fn):
+            nonlocal _cache_map
+            if _cache_map is None:
+                try:
+                    with open(gemini_ocr._get_cache_path(dr), 'r', encoding='utf-8') as _cf:
+                        _cache_map = _json.load(_cf)
+                except Exception:
+                    _cache_map = {}
+            entry = _cache_map.get(fn)
+            if isinstance(entry, dict):
+                res = entry.get('result')
+                if isinstance(res, dict):
+                    return res
+            return None
+
+        # ── 별칭 사전 + 사용자 결정 1회 로드 ──
+        try:
+            from core import match_memory as _mm
+            _aliases = _mm.get_aliases()
+            _decisions = _mm.get_decisions()
+        except Exception:
+            _mm = None
+            _aliases = {}
+            _decisions = {}
+
+        def _alias_canon(name):
+            """별칭 표기 → 한글 상호. 1:N 별칭은 판별력 없음 → None."""
+            entry = _aliases.get(name)
+            if isinstance(entry, dict) and len(entry) == 1:
+                return next(iter(entry))
+            return None
+
+        def _accepted_bl(f):
+            pref = f + '|'
+            for k, a in _decisions.items():
+                if a == 'accept' and k.startswith(pref):
+                    return k.split('|', 1)[1]
+            return None
+
+        def _is_rejected(f, bl):
+            return _decisions.get(f + '|' + bl) == 'reject'
+
+        # ── 사업자등록번호 신호 ──
+        def _norm_biz(no):
+            digits = _re.sub(r'\D', '', str(no or ''))
+            return digits if len(digits) == 10 else ""
+
+        _group_biz_memo = {}
+
+        def _card_business_no(bl_id, bl_data):
+            """카드의 신원 번호 = 신고필증의 납세의무자 사업자번호."""
+            if bl_id not in _group_biz_memo:
+                no = ""
+                for dk, fn in bl_data.get('docs', {}).items():
+                    if "신고필증" in dk:
+                        res = _cache_lookup(fn)
+                        if res:
+                            no = _norm_biz(res.get('business_no', ''))
+                            if no:
+                                break
+                _group_biz_memo[bl_id] = no
+            return _group_biz_memo[bl_id]
+
+        def _file_business_no(fn):
+            """파일의 신원 번호 = 공급받는자 사업자번호.
+            공급자 번호와 동일하면 오추출로 보고 무시."""
+            res = _cache_lookup(fn)
+            if not res:
+                return ""
+            b = _norm_biz(res.get('buyer_business_no', ''))
+            s_no = _norm_biz(res.get('supplier_business_no', ''))
+            if b and b == s_no:
+                return ""
+            return b
+
+        # ═══════════════════════════════════════════════
+        # ID 신뢰 모델:
+        # 괄호 안 ID는 문서 종류에 따라 신뢰도가 다르다.
+        #  - 앵커 문서 (신고필증·정산서·납부고지서·세금계산서 등): BL이 공식 기재됨
+        #    → 이 문서들의 ID만 그룹(카드) 생성 근거로 신뢰
+        #  - 비용 계산서류: 검사기관 접수번호·주문번호 등 BL이 아닌 번호가
+        #    ID 자리에 들어올 수 있음 (OCR 오추출)
+        #    → 앵커 그룹과 ID 일치 시에만 편입, 불일치 시 회사명+금액 매칭으로 재배정
+        # ═══════════════════════════════════════════════
+
+        def _is_anchor_doc(d):
+            return bool(d) and (d in ANCHOR_DOC_TYPES or "신고필증" in d)
+
+        parsed_with_id = []
         for f in files:
             # 독립 문서 (이체증 등) → 파일명 앞부분으로 판별
             _indie_matched = False
@@ -400,42 +501,71 @@ class AutoRenamer:
                 if d and d in _EXCLUDE_DOC_TYPES:
                     uncl.append(f)
                     continue
-                # 1차: 기존 유사도 매칭 (suffix 일치 필수)
-                fk = next((k for k in groups if is_similar_id(k, i)), None)
-                # 2차: prefix 포함 매칭 (정확 매칭 실패 시, 후보가 1개일 때만)
-                if fk is None:
-                    prefix_candidates = [k for k in groups if is_prefix_match_id(k, i)]
-                    fk = prefix_candidates[0] if len(prefix_candidates) == 1 else i
-                # 신고필증의 B/L이 가장 정확하므로 그룹 키를 교체
-                if fk != i and "신고필증" in (d or "") and fk in groups:
-                    groups[i] = groups.pop(fk)
-                    fk = i
-                if fk not in groups:
-                    groups[fk] = {'company_set': set(), 'docs': {}}
-                if c and c != 'Unknown':
-                    clean_c = cleanup_company_name(c)
-                    groups[fk]['company_set'].add(clean_c)
-                # 같은 문서 유형이 이미 있으면 suffix를 포함한 고유 키 사용
-                doc_key = d
-                if d in groups[fk]['docs']:
-                    # suffix가 있으면 포함 (예: "운송료(1)"), 없으면 카운터 추가
-                    if s:
-                        doc_key = f"{d}{s}"
-                    else:
-                        counter = 1
-                        while doc_key in groups[fk]['docs']:
-                            doc_key = f"{d}({counter})"
-                            counter += 1
-                groups[fk]['docs'][doc_key] = f
+                parsed_with_id.append((f, c, i, d, s))
             else:
                 uncl.append(f)
-        for k, v in groups.items():
-            cs = v['company_set']  # 매칭에 재사용하기 위해 유지 (pop 대신)
-            v['company'] = ", ".join(sorted(list(cs))[:2]) if cs else "Unknown"
+
+        def _find_group_key(i):
+            """기존 그룹 중 ID가 일치(유사/prefix)하는 그룹 키 반환. 없으면 None."""
+            # 1차: 기존 유사도 매칭 (suffix 일치 필수)
+            fk = next((k for k in groups if is_similar_id(k, i)), None)
+            # 2차: prefix 포함 매칭 (정확 매칭 실패 시, 후보가 1개일 때만)
+            if fk is None:
+                prefix_candidates = [k for k in groups if is_prefix_match_id(k, i)]
+                fk = prefix_candidates[0] if len(prefix_candidates) == 1 else None
+            return fk
+
+        def _add_to_group(fk, f, c, d, s, trusted_company=True):
+            # 회사명 신뢰 원칙: 매칭 기준(company_set)은 앵커 문서의 회사명만.
+            # 비용 계산서의 회사명은 정산업체·지불대행사일 수 있으므로
+            # 표시용(display_company_set)으로만 수집한다.
+            if fk not in groups:
+                groups[fk] = {'company_set': set(), 'display_company_set': set(), 'docs': {}}
+            if c and c != 'Unknown':
+                _ckey = 'company_set' if trusted_company else 'display_company_set'
+                groups[fk][_ckey].add(cleanup_company_name(c))
+            # 같은 문서 유형이 이미 있으면 suffix를 포함한 고유 키 사용
+            doc_key = d
+            if d in groups[fk]['docs']:
+                # suffix가 있으면 포함 (예: "운송료(1)"), 없으면 카운터 추가
+                if s:
+                    doc_key = f"{d}{s}"
+                else:
+                    counter = 1
+                    while doc_key in groups[fk]['docs']:
+                        doc_key = f"{d}({counter})"
+                        counter += 1
+            groups[fk]['docs'][doc_key] = f
+
+        # ── 1차: 앵커 문서로 그룹 생성 ──
+        pending_costs = []
+        for f, c, i, d, s in parsed_with_id:
+            if not _is_anchor_doc(d):
+                pending_costs.append((f, c, i, d, s))
+                continue
+            fk = _find_group_key(i)
+            if fk is None:
+                fk = i
+            # 신고필증의 B/L이 가장 정확하므로 그룹 키를 교체
+            if fk != i and "신고필증" in (d or "") and fk in groups:
+                groups[i] = groups.pop(fk)
+                fk = i
+            _add_to_group(fk, f, c, d, s)
+
+        # ── 2차: 비용 계산서류 — 앵커 그룹과 ID 일치 시에만 편입 ──
+        # BL 일치가 회사명보다 우선: 회사명이 정산업체·영문이어도 BL 이 맞으면 편입
+        unanchored_costs = []
+        for f, c, i, d, s in pending_costs:
+            fk = _find_group_key(i)
+            if fk is not None:
+                _add_to_group(fk, f, c, d, s, trusted_company=False)
+            else:
+                unanchored_costs.append((f, c, i, d, s))
 
         # ═══════════════════════════════════════════════
-        # 미분류_{doctype}_{company}_{amount}.pdf 파일을
-        # 회사명 (+ 비용계산서는 금액도) 매칭으로 BL 그룹에 자동 할당
+        # 회사명 + 정산서 데이터 기반 그룹 매칭 (공용 매처)
+        # 대상: 미분류_{doctype}_{company}_{amount}.pdf 파일,
+        #       앵커 미일치 ID를 가진 비용 계산서
         #
         # 분류 전략 (v1.1.8):
         #  - 고정 슬롯 (FIXED_SLOT): 1 BL 당 1개씩만 있는 문서
@@ -447,12 +577,6 @@ class AutoRenamer:
         #  - company_set 전체 순회 ([:2] 축약본 대신)
         #  - placeholder (Unknown/알수없는상호) 는 매칭 제외
         # ═══════════════════════════════════════════════
-        import re as _re
-        from core.validator import parse_amount as _parse_amount, build_search_kws as _build_search_kws
-        _GENERIC_COMPANIES = {"Unknown", "알수없는상호", "알수없는", "미상", ""}
-        _FIXED_SLOT = {"수입세금계산서", "납부고지서", "자금정산서", "정산서",
-                        "수입신고필증", "수출신고필증", "반송신고필증"}
-        _SETTLEMENT_KEYS = ("자금정산서", "정산서")
         _uncl_moved = []
 
         def _find_settlement_cached(bl_data):
@@ -460,10 +584,7 @@ class AutoRenamer:
             for sk in _SETTLEMENT_KEYS:
                 if sk in bl_data.get('docs', {}):
                     settlement_fn = bl_data['docs'][sk]
-                    try:
-                        cached = gemini_ocr._get_cached_result(os.path.join(dr, settlement_fn))
-                    except Exception:
-                        cached = None
+                    cached = _cache_lookup(settlement_fn)
                     # 정산서는 비용 항목을 merge_info.expense_items 에 저장 (billing_items 가 아님).
                     # 하위호환 위해 billing_items 도 fallback 으로 확인.
                     items = []
@@ -479,41 +600,35 @@ class AutoRenamer:
             return any(kw in doctype for kw in REQUIREMENT_DOC_KEYWORDS)
 
         def _company_match(bl_data, file_company):
+            # 별칭 사전 조회: 학습된 영문 표기 등을 한글 상호로 확장해 비교
+            names = {file_company}
+            canon = _alias_canon(file_company)
+            if canon:
+                cc = cleanup_company_name(canon)
+                if cc:
+                    names.add(cc)
             for bc in bl_data.get('company_set', set()):
                 bc_clean = cleanup_company_name(bc)
                 if not bc_clean or bc_clean in _GENERIC_COMPANIES:
                     continue
-                if file_company in bc_clean or bc_clean in file_company:
-                    return True
+                for nm in names:
+                    if nm in bc_clean or bc_clean in nm:
+                        return True
             return False
 
-        for f in list(uncl):
-            if not f.startswith("미분류_"):
-                continue
-            m = _re.match(r'^미분류_([^_]+)_(.+?)_(\d+|확인필요|[^_]+)\.pdf$', f, _re.IGNORECASE)
-            if not m:
-                continue
-            file_doctype = m.group(1).strip()
-            file_company_raw = m.group(2).strip()
-            file_suffix = m.group(3).strip()
-            if not file_company_raw:
-                continue
-            file_company = cleanup_company_name(file_company_raw)
-            if not file_company or file_company in _GENERIC_COMPANIES:
-                continue
-            try:
-                file_amount = int(file_suffix)
-            except (TypeError, ValueError):
-                file_amount = 0
+        def _tier_match_group(file_doctype, file_company, file_amount, file_biz_no=""):
+            """회사명·사업자번호 + 정산서 데이터로 파일이 속할 그룹 탐색. (chosen_bl, tier) 반환.
 
+            신원 신호: 회사명(별칭 포함) 일치 OR 사업자번호 일치 → comp_ok
+            Tier1: 엄격 (신원+데이터 검증 통과)
+            Tier2: 차선 (신원만 OK 인데 정산서 데이터 부족)
+            Tier3: 금액-only (신원은 안 맞지만 금액+항목이 유일하게 매칭)
+                   단, 양쪽 사업자번호가 확인되고 서로 다르면 후보 제외 (타사 차단)
+            각 tier 에서 후보가 정확히 1개일 때만 채택. 실패 시 (None, None).
+            """
             is_fixed = file_doctype in _FIXED_SLOT
             is_req = _is_requirement_doc(file_doctype)
-            category = "FIXED" if is_fixed else ("REQ" if is_req else "COST")
 
-            # 카테고리별 후보 수집
-            # Tier1: 엄격 (회사+데이터 검증 통과)
-            # Tier2: 차선 (회사만 OK 인데 정산서 데이터 부족)
-            # Tier3: 금액-only (회사명은 안 맞지만 금액+항목이 유일하게 매칭)
             tier1 = []  # strict
             tier2 = []  # loose (settlement data missing)
             tier3 = []  # amount-only fallback (company inconsistent)
@@ -522,7 +637,10 @@ class AutoRenamer:
                 # [Plan B] 슬롯 이미 채워짐 체크 제거 —
                 # AI 가 doctype 을 잘못 분류한 경우에도 회사+금액 유일성으로 매칭 시도 가능.
                 # 매칭 확정 시 counter 키 (예: 통관수수료계산서(1)) 로 저장.
-                comp_ok = _company_match(bl_data, file_company)
+                card_biz = _card_business_no(bl_id, bl_data)
+                biz_ok = bool(file_biz_no) and file_biz_no == card_biz
+                biz_conflict = bool(file_biz_no) and bool(card_biz) and file_biz_no != card_biz
+                comp_ok = biz_ok or _company_match(bl_data, file_company)
 
                 # FIXED: 회사명만
                 if is_fixed:
@@ -590,48 +708,153 @@ class AutoRenamer:
                         tier1.append(bl_id)
                         continue
 
-                # 회사 불일치지만 금액이 일치하면 tier3 (영문/한글 이명 케이스 커버)
-                if not comp_ok and file_amount > 0 and file_amount in matching_amts:
+                # 신원 불일치지만 금액이 일치하면 tier3
+                # 단, 사업자번호가 양쪽 확인되고 서로 다르면 다른 회사 건 → 제외
+                if not comp_ok and not biz_conflict and file_amount > 0 and file_amount in matching_amts:
                     tier3.append(bl_id)
                     continue
 
                 # 회사는 맞지만 금액이 안 맞음 → 매칭 안 함 (tier 에 포함 X)
 
             # Tier 선택: 1 > 2 > 3, 각 tier 에서 정확히 1개일 때만
-            chosen = None
-            chosen_tier = None
             if len(tier1) == 1:
-                chosen, chosen_tier = tier1[0], "tier1"
-            elif len(tier1) == 0 and len(tier2) == 1:
-                chosen, chosen_tier = tier2[0], "tier2"
-            elif len(tier1) == 0 and len(tier2) == 0 and len(tier3) == 1:
-                chosen, chosen_tier = tier3[0], "tier3"
+                return tier1[0], "tier1"
+            if len(tier1) == 0 and len(tier2) == 1:
+                return tier2[0], "tier2"
+            if len(tier1) == 0 and len(tier2) == 0 and len(tier3) == 1:
+                return tier3[0], "tier3"
+            return None, None
 
+        def _assign_with_counter(chosen, file_doctype, f):
+            # [Plan B] 슬롯 이미 채워졌으면 counter 키로 저장
+            #   예: 첫 파일 → "통관수수료계산서", 둘째 → "통관수수료계산서(1)"
+            docs = groups[chosen].setdefault('docs', {})
+            doc_key = file_doctype
+            counter = 1
+            while doc_key in docs:
+                doc_key = f"{file_doctype}({counter})"
+                counter += 1
+            docs[doc_key] = f
+            return doc_key
+
+        # ── 3차: 앵커 미일치 ID 비용 계산서 재배정 ──
+        # 검사기관 접수번호 등 미검증 ID가 파일명에 박힌 경우,
+        # ID 를 버리고 회사명·사업자번호+금액(OCR 캐시)으로 올바른 카드를 찾는다.
+        # 이 시점의 groups 는 앵커 기반 그룹뿐이므로 미검증 카드끼리 잘못 묶이지 않음.
+        _suggestions = []
+        _fallback_costs = []
+        for f, c, i, d, s in unanchored_costs:
+            # 사용자가 이전에 승인한 (파일, 카드) 매칭 최우선 적용
+            acc = _accepted_bl(f)
+            if acc:
+                fk_acc = acc if acc in groups else _find_group_key(acc)
+                if fk_acc:
+                    doc_key = _assign_with_counter(fk_acc, d or "문서", f)
+                    self.log(f" -> [수동 확정] {fk_acc} / {doc_key}: {f}")
+                    continue
+
+            chosen, chosen_tier = None, None
+            file_company = cleanup_company_name(c) if c and c != 'Unknown' else ""
+            if d and file_company and file_company not in _GENERIC_COMPANIES:
+                file_amount = 0
+                cached = _cache_lookup(f)
+                if cached:
+                    file_amount = _parse_amount(cached.get('total_amount', 0))
+                chosen, chosen_tier = _tier_match_group(d, file_company, file_amount,
+                                                        _file_business_no(f))
+                if chosen_tier == "tier3":
+                    # 금액-only 매칭은 자동 편입하지 않고 사용자 확인 제안으로
+                    if not _is_rejected(f, chosen):
+                        _suggestions.append({'file': f, 'bl': chosen, 'doctype': d})
+                    chosen, chosen_tier = None, None
+                elif chosen_tier == "tier2":
+                    # ID 보유 파일에 tier2 (신원만 일치, 데이터 검증 없음) 를 허용하면
+                    # BL 이 올바르게 적힌 계산서가 같은 회사의 다른 건 카드로
+                    # 흡수될 위험 → 기존 동작(자기 그룹) 유지
+                    chosen, chosen_tier = None, None
             if chosen:
-                # [Plan B] 슬롯 이미 채워졌으면 counter 키로 저장
-                #   예: 첫 파일 → "통관수수료계산서", 둘째 → "통관수수료계산서(1)"
-                docs = groups[chosen].setdefault('docs', {})
-                doc_key = file_doctype
-                counter = 1
-                while doc_key in docs:
-                    doc_key = f"{file_doctype}({counter})"
-                    counter += 1
-                docs[doc_key] = f
+                doc_key = _assign_with_counter(chosen, d, f)
+                self.log(f" -> [ID 재배정/{chosen_tier}] 미검증 ID '{i}' → {chosen} / {doc_key}: {f}")
+            else:
+                _fallback_costs.append((f, c, i, d, s))
+
+        # 재배정 실패 파일은 기존 동작대로 자기 ID로 그룹 생성
+        # (앵커 문서 없이 비용 계산서만 있는 건, BL이 정확히 적힌 계산서 선도착 등)
+        for f, c, i, d, s in _fallback_costs:
+            fk = _find_group_key(i)
+            if fk is None:
+                fk = i
+            _add_to_group(fk, f, c, d, s, trusted_company=False)
+
+        for k, v in groups.items():
+            # 매칭 기준은 앵커 회사명(company_set), 표시는 없으면 display 로 보충
+            cs = v['company_set'] or v.get('display_company_set', set())
+            v['company'] = ", ".join(sorted(list(cs))[:2]) if cs else "Unknown"
+
+        # ── 미분류_{doctype}_{company}_{amount}.pdf 파일 자동 매칭 ──
+        for f in list(uncl):
+            if not f.startswith("미분류_"):
+                continue
+            # 사용자가 이전에 승인한 매칭 최우선 적용
+            acc = _accepted_bl(f)
+            if acc:
+                fk_acc = acc if acc in groups else _find_group_key(acc)
+                if fk_acc:
+                    _doc_guess = f[len("미분류_"):].split("_")[0] or "문서"
+                    doc_key = _assign_with_counter(fk_acc, _doc_guess, f)
+                    _uncl_moved.append(f)
+                    self.log(f" -> [수동 확정] {fk_acc} / {doc_key}: {f}")
+                    continue
+
+            m = _re.match(r'^미분류_([^_]+)_(.+?)_(\d+|확인필요|[^_]+)\.pdf$', f, _re.IGNORECASE)
+            if not m:
+                continue
+            file_doctype = m.group(1).strip()
+            file_company_raw = m.group(2).strip()
+            file_suffix = m.group(3).strip()
+            if not file_company_raw:
+                continue
+            file_company = cleanup_company_name(file_company_raw)
+            if not file_company or file_company in _GENERIC_COMPANIES:
+                continue
+            try:
+                file_amount = int(file_suffix)
+            except (TypeError, ValueError):
+                file_amount = 0
+
+            chosen, chosen_tier = _tier_match_group(file_doctype, file_company, file_amount,
+                                                    _file_business_no(f))
+            if chosen_tier == "tier3":
+                # 금액-only 매칭은 자동 편입하지 않고 사용자 확인 제안으로
+                if not _is_rejected(f, chosen):
+                    _suggestions.append({'file': f, 'bl': chosen, 'doctype': file_doctype})
+                chosen, chosen_tier = None, None
+            if chosen:
+                doc_key = _assign_with_counter(chosen, file_doctype, f)
                 _uncl_moved.append(f)
                 self.log(f" -> [자동 매칭/{chosen_tier}] 미분류 → {chosen} / {doc_key}: {f}")
 
         # 매칭이 끝나면 company_set 정리 (UI 기대 스키마 유지)
         for k, v in groups.items():
             v.pop('company_set', None)
+            v.pop('display_company_set', None)
 
         # 매칭된 파일은 uncl에서 제거
         for f in _uncl_moved:
             if f in uncl:
                 uncl.remove(f)
 
+        # 폴더에서 사라진 파일의 승인/거부 기록 청소
+        if _mm is not None:
+            try:
+                _mm.prune_decisions(files)
+            except Exception:
+                pass
+
         if self.merge_request_callback:
             self.merge_request_callback({'directory': dr, 'groups': groups, 'unclassified': uncl,
-                                        'independent': independent_groups})
+                                        'independent': independent_groups,
+                                        'suggested': _suggestions})
 
     def _determine_merge_order(self, dr, sf, dm, mo, an=None, ti=None, pdf_files_cache=None):
         # 디렉토리 PDF 목록 캐싱 (함수 내 재사용)
@@ -696,6 +919,17 @@ class AutoRenamer:
                             or is_prefix_match_id(f_id, normalized_ti_main)
                             or is_similar_id(f_id_raw, ti)):
                         allp.append(f)
+
+        # 그룹핑(카드)에서 편입이 확정된 문서는 파일명 ID가 달라도 병합 후보에 포함
+        # (비용계산서에 검사기관 접수번호 등 미검증 ID가 박힌 경우, 미분류_ 파일 등
+        #  파일명 ID 매칭만으로는 누락되는 카드 소속 문서 커버)
+        if dm:
+            for _fn in dm.values():
+                if not _fn or _fn in af or _fn in allp or _fn not in _all_dir_pdfs:
+                    continue
+                if "청구서" in _fn and "계산서" not in _fn:
+                    continue
+                allp.append(_fn)
 
         syns = EXPENSE_SYNONYMS
 
@@ -1101,21 +1335,41 @@ class AutoRenamer:
         if not fo:
             return False
 
+        from .constants import ANCHOR_DOC_TYPES
         target_id = ""
+        decl_id = ""
+        anchor_id = ""
         declaration_company = ""
 
         for f in fo:
             c, i, d, s = parse_renamed_filename(f)
             if i:
                 target_id = i
-                if "신고필증" in d:
+                if "신고필증" in (d or ""):
+                    decl_id = i
                     if c and c != "Unknown":
                         declaration_company = c
+                elif d in ANCHOR_DOC_TYPES:
+                    anchor_id = anchor_id or i
+
+        # 폴더명/병합 파일명에 쓸 ID 는 앵커 문서 우선 (신고필증 > 정산서 등 > 기타)
+        # — 미검증 ID 가 박힌 비용계산서가 목록 마지막에 있어도 이름이 오염되지 않도록
+        if decl_id:
+            target_id = decl_id
+        elif anchor_id:
+            target_id = anchor_id
 
         final_company = (declaration_company if declaration_company else of.split('(')[0]).replace(" ", "")
         folder_name = f"{final_company}_{target_id}"
         archive_dir = os.path.join(dr, folder_name)
         os.makedirs(archive_dir, exist_ok=True)
+
+        # 병합 확정 = "이 파일들은 같은 건" 확정 라벨 → 회사명 별칭 학습
+        # (파일 이동 전에 실행해야 OCR 캐시 검증이 가능)
+        try:
+            self._learn_company_aliases(dr, fo, final_company, target_id)
+        except Exception as e:
+            self.log(f" -> [별칭 학습 건너뜀] {e}")
 
         try:
             if not archive_only and len(fo) >= 2:
@@ -1368,6 +1622,42 @@ class AutoRenamer:
             print(f"병합 실행 오류: {e}")
             return False
 
+
+    def _learn_company_aliases(self, dr, fo, canonical, target_id):
+        """병합 확정 파일들의 회사명 표기를 카드의 한글 상호와 짝지어 학습.
+
+        오학습 방어 (BL 우선 원칙):
+        - 학습 소스는 파일명 BL 이 카드 BL 과 일치하는 강증거 파일만
+          (금액-only 로 사용자가 승인한 파일 등은 제외)
+        - 발행처(supplier) 표기와 동일하면 정산업체·검사기관 이름이므로 학습 금지
+        - 2글자 이하 표기는 부분포함 매칭과 결합 시 과매칭 위험 → 제외
+        """
+        import re as _re
+        if not canonical or not target_id or not fo:
+            return
+        canonical = cleanup_company_name(canonical).replace(" ", "")
+        if not canonical or not _re.search(r'[가-힣]', canonical):
+            return  # 표준명은 한글 상호만
+        from core.match_memory import learn_alias
+        for f in fo:
+            if not f:
+                continue
+            c, i, d, s = parse_renamed_filename(f)
+            if not i:
+                continue
+            if not (is_similar_id(i, target_id) or is_prefix_match_id(i, target_id)):
+                continue
+            cached = gemini_ocr._get_cached_result(os.path.join(dr, f))
+            if not cached:
+                continue
+            alias = cleanup_company_name(cached.get('company_name', '') or '').replace(" ", "")
+            supplier = cleanup_company_name(cached.get('supplier_name', '') or '').replace(" ", "")
+            if not alias or len(alias) <= 2 or alias == canonical or alias == "Unknown":
+                continue
+            if supplier and alias == supplier:
+                continue
+            learn_alias(alias, canonical)
+            self.log(f" -> [별칭 학습] '{alias}' → '{canonical}'")
 
     def _collect_related_items(self, dr, archive_dir, target_id, exclude_names=None):
         """송품장번호가 포함된 파일/폴더를 정리 폴더로 자동 수집"""

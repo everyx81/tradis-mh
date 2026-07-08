@@ -3210,10 +3210,105 @@ class GroupCard(GlassFrame):
             row = self._make_file_row_widget(f, full_path)
             self.file_list.setItemWidget(item, row)
 
+        # ── 금액-only 매칭 제안 행 (노란 도트 + [포함]/[아님], 사용자 승인 필요) ──
+        for sug in self.data.get('suggested', []) or []:
+            sug_fn = sug.get('file', '')
+            if not sug_fn:
+                continue
+            sug_path = os.path.join(self.directory, sug_fn)
+            item = QListWidgetItem()
+            item.setData(Qt.ItemDataRole.UserRole, sug_path)
+            item.setText("")
+            item.setSizeHint(_QSize(0, ROW_HEIGHT))
+            self.file_list.addItem(item)
+            self.file_list.setItemWidget(item, self._make_suggestion_row_widget(sug_fn, sug_path))
+
         # 높이 자동 조정
         count = self.file_list.count()
         h = max(count * (ROW_HEIGHT + 4) + 4, ROW_HEIGHT)
         self.file_list.setFixedHeight(min(h, 360))
+
+    def _make_suggestion_row_widget(self, filename: str, full_path: str):
+        """금액-only 매칭 제안 행: 노란 도트 ● + 파일명 + 제안 태그 + [포함][아님]"""
+        from .claude_theme import C as _CT
+        w = QWidget()
+        w.setStyleSheet("background: transparent;")
+        lay = QHBoxLayout(w)
+        lay.setContentsMargins(10, 0, 8, 0)
+        lay.setSpacing(8)
+
+        dot = QLabel("●")
+        dot.setStyleSheet(f"color: {_CT['amber']}; font-size: 8pt; background: transparent; border: none;")
+        lay.addWidget(dot)
+
+        lbl = QLabel(filename)
+        lbl.setStyleSheet(
+            f"color: {_CT['fg_2']}; font-size: 9.5pt; background: transparent; border: none;"
+        )
+        lbl.setToolTip("정산서 금액과 일치해 이 건의 서류로 추정됩니다.\n"
+                       "회사명은 확인되지 않았으니 포함 여부를 선택해 주세요.\n"
+                       "(더블 클릭으로 파일 열기)")
+        lay.addWidget(lbl, 1)
+
+        tag = QLabel("금액 일치 · 제안")
+        tag.setStyleSheet(f"""
+            color: {_CT['amber']};
+            background-color: rgba(233, 171, 43, 26);
+            border: 1px solid rgba(233, 171, 43, 90);
+            border-radius: 5px;
+            padding: 1px 6px;
+            font-size: 8pt;
+            font-weight: 600;
+        """)
+        lay.addWidget(tag)
+
+        _btn_css = f"""
+            QPushButton {{
+                background-color: {_CT['bg_2']};
+                color: {_CT['fg_1']};
+                border: 1px solid {_CT['border_soft']};
+                border-radius: 6px;
+                padding: 2px 9px;
+                font-size: 8pt;
+                font-weight: 500;
+            }}
+            QPushButton:hover {{
+                background-color: {_CT['bg_3']};
+                color: {_CT['fg_0']};
+                border: 1px solid {_CT['border']};
+            }}
+        """
+        btn_yes = QPushButton("포함")
+        btn_yes.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_yes.setStyleSheet(_btn_css)
+        btn_yes.clicked.connect(lambda _, fn=filename: self._on_suggestion_decision(fn, True))
+        lay.addWidget(btn_yes)
+
+        btn_no = QPushButton("아님")
+        btn_no.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_no.setStyleSheet(_btn_css)
+        btn_no.clicked.connect(lambda _, fn=filename: self._on_suggestion_decision(fn, False))
+        lay.addWidget(btn_no)
+
+        return w
+
+    def _on_suggestion_decision(self, filename: str, accept: bool):
+        """제안 승인/거부 → 결정 영속화 후 재스캔으로 카드 갱신"""
+        try:
+            from core.match_memory import record_decision
+            record_decision(filename, self.text_id, accept)
+        except Exception as e:
+            self.parent_widget.emit_log(f"[제안 처리 오류] {e}")
+            return
+        self.parent_widget.emit_log(
+            f"[제안 {'승인' if accept else '제외'}] {filename} → {self.text_id}")
+        try:
+            if hasattr(self.parent_widget, '_debounced_refresh'):
+                self.parent_widget._debounced_refresh()
+            else:
+                self.renamer.trigger_intelligent_merge(self.directory)
+        except Exception as e:
+            self.parent_widget.emit_log(f"[재스캔 오류] {e}")
 
     def _get_levy_info(self):
         """수입신고필증 캐시에서 (징수형태, 관세+부가세>0 여부) 반환.

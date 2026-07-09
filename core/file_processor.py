@@ -383,7 +383,7 @@ class AutoRenamer:
         import re as _re
         import json as _json
         from core.validator import parse_amount as _parse_amount, build_search_kws as _build_search_kws
-        from .constants import ANCHOR_DOC_TYPES
+        from .constants import ANCHOR_DOC_TYPES, REQUIREMENT_FEE_SPECIFIC, REQUIREMENT_FEE_GENERIC
         _GENERIC_COMPANIES = {"Unknown", "알수없는상호", "알수없는", "미상", ""}
         _FIXED_SLOT = {"수입세금계산서", "납부고지서", "자금정산서", "정산서",
                         "수입신고필증", "수출신고필증", "반송신고필증"}
@@ -660,11 +660,15 @@ class AutoRenamer:
                         tier2.append(bl_id)
                         continue
                     # doctype 에 포함된 요건 키워드가 정산서 항목명에 존재?
+                    # generic "요건수수료/요건대행" 으로 묶여 청구된 건은 서류 종류가
+                    # 항목명에 안 드러나므로, 요건 계열 수수료가 하나라도 있으면 인정
                     req_kws_in_doc = [k for k in REQUIREMENT_DOC_KEYWORDS if k in file_doctype]
+                    req_fee_kws = list(REQUIREMENT_FEE_SPECIFIC.keys()) + list(REQUIREMENT_FEE_GENERIC)
                     found_kw = False
                     for bi in items:
-                        bi_name = bi.get('name', '')
-                        if any(k in bi_name for k in req_kws_in_doc):
+                        bi_name = bi.get('name', '').replace(' ', '')
+                        if any(k in bi_name for k in req_kws_in_doc) \
+                                or any(k in bi_name for k in req_fee_kws):
                             found_kw = True
                             break
                     if found_kw:
@@ -1316,54 +1320,100 @@ class AutoRenamer:
                         m[idx]['matched_by_amount'] = True
                         af.append(matching_files[0])
 
-        # ── 4단계: 나머지 미분류 서류 ──
+        # ── 5단계 준비: 요건 증빙서류 요구사항 분석 (등급형) ──
+        # 정산서 수수료가 주는 정보량만큼만 검증:
+        #  등급1 종류 특정 수수료(식물검역수수료, 요건수수료(전파) 등) → 종류별 체크 항목
+        #  등급2 generic 수수료(요건수수료/요건대행 한 줄) → "요건서류 1건 이상" 통합 체크
+        #  등급3 요건 수수료 없음 → 체크 항목 생성 안 함 (기존 동작)
+        # 파일이 없어도 항목을 생성해 체크리스트에 누락으로 표시되게 한다.
+        from core.constants import REQUIREMENT_FEE_SPECIFIC, REQUIREMENT_FEE_GENERIC
+        _req_specific = []   # 등급1 요구 목록 [{'label', 'kws'}]
+        _req_generic = False
+        if an and isinstance(an, dict):
+            for item_data in expense_list:
+                if not item_data:
+                    continue
+                item_name = item_data.get("name", "") if isinstance(item_data, dict) else str(item_data)
+                item_clean = item_name.replace(" ", "")
+                matched_specific = False
+                for fee_kw, spec in REQUIREMENT_FEE_SPECIFIC.items():
+                    if fee_kw in item_clean:
+                        if all(r['label'] != spec['label'] for r in _req_specific):
+                            _req_specific.append(spec)
+                        matched_specific = True
+                if not matched_specific and any(g in item_clean for g in REQUIREMENT_FEE_GENERIC):
+                    _req_generic = True
+
+        # 요건 서류 후보 수집 (요구사항이 있을 때만):
+        #  - 미분류_ 파일: 요건 키워드 + 수입자 일치
+        #  - BL 리네임된 파일: allp(같은 건) 안의 요건 키워드 파일
+        _req_candidates = []
+        if _req_specific or _req_generic:
+            _group_company = cleanup_company_name(
+                (an or {}).get("company_name", "")).replace(" ", "")
+            for f in _all_dir_pdfs:
+                if f in af or f in _req_candidates:
+                    continue
+                fname_clean = f.replace(" ", "")
+                if not any(kw in fname_clean for kw in REQUIREMENT_DOC_KEYWORDS):
+                    continue
+                if f.startswith("미분류_"):
+                    parts = f[len("미분류_"):-4].split("_")
+                    if len(parts) < 2:
+                        continue
+                    uncl_company = cleanup_company_name(parts[1]).replace(" ", "")
+                    if not _group_company or _group_company == "Unknown" or not uncl_company:
+                        continue
+                    if uncl_company not in _group_company and _group_company not in uncl_company:
+                        continue
+                    _req_candidates.append(f)
+                elif f in allp:
+                    _req_candidates.append(f)
+
+        # ── 4단계: 나머지 미분류 서류 (요건 후보는 5단계에서 [요건] 라벨로 처리) ──
         for pdf in allp:
-            if pdf not in af:
+            if pdf not in af and pdf not in _req_candidates:
                 m.append({'label': '[추가] 미분류 서류', 'filename': pdf})
                 af.append(pdf)
 
-        # ── 5단계: 요건 증빙서류 매칭 (맨 마지막 페이지) ──
-        # 정산서에 요건 수수료가 있고 수입자가 같은 미분류 요건 서류를 자동 매칭
-        if an and isinstance(an, dict):
-            group_company = cleanup_company_name(an.get("company_name", "")).replace(" ", "")
+        # ── 5단계: 요건 증빙서류 체크 + 매칭 (맨 마지막 페이지) ──
+        if _req_specific or _req_generic:
+            def _req_display_name(f):
+                if f.startswith("미분류_"):
+                    parts = f[len("미분류_"):-4].split("_")
+                    return parts[0] if parts and parts[0] else "요건서류"
+                _c0, _i0, _d0, _s0 = parse_renamed_filename(f)
+                return _d0 if _d0 else "요건서류"
 
-            if group_company and group_company != "Unknown":
-                has_req_keywords = set()
-                for item_data in expense_list:
-                    if not item_data:
-                        continue
-                    item_name = item_data.get("name", "") if isinstance(item_data, dict) else str(item_data)
-                    item_clean = item_name.replace(" ", "")
-                    for kw in REQUIREMENT_DOC_KEYWORDS:
-                        if kw in item_clean:
-                            has_req_keywords.add(kw)
+            # 등급1: 종류별 매칭 — 파일 없으면 누락 항목으로 표시
+            for spec in _req_specific:
+                picked_req = None
+                for f in _req_candidates:
+                    fc = f.replace(" ", "")
+                    if any(kw in fc for kw in spec['kws']):
+                        picked_req = f
+                        break
+                if picked_req:
+                    _req_candidates.remove(picked_req)
+                    af.append(picked_req)
+                    m.append({'label': f"[요건] {spec['label']}",
+                              'filename': picked_req, 'requirement_doc': True})
+                else:
+                    m.append({'label': f"[요건] {spec['label']}",
+                              'filename': '', 'requirement_doc': True})
 
-                if has_req_keywords:
-                    try:
-                        for f in _all_dir_pdfs:
-                            if not f.startswith("미분류_"):
-                                continue
-                            if f in af:
-                                continue
-
-                            name_body = f[len("미분류_"):-4]
-                            parts = name_body.split("_")
-                            if len(parts) < 2:
-                                continue
-
-                            uncl_doc = parts[0]
-                            uncl_company = parts[1]
-
-                            if cleanup_company_name(uncl_company).replace(" ", "") != group_company:
-                                continue
-
-                            for kw in has_req_keywords:
-                                if kw in uncl_doc:
-                                    m.append({'label': f'[요건] {uncl_doc}', 'filename': f, 'requirement_doc': True})
-                                    af.append(f)
-                                    break
-                    except OSError:
-                        pass
+            # 등급2: generic — 남은 요건 서류 전부 편입.
+            # 종류·개수를 알 수 없으므로 "1건 이상" 만 보장 (0건이면 누락 표시)
+            if _req_generic:
+                if _req_candidates:
+                    for f in list(_req_candidates):
+                        _req_candidates.remove(f)
+                        af.append(f)
+                        m.append({'label': f"[요건] {_req_display_name(f)}",
+                                  'filename': f, 'requirement_doc': True})
+                else:
+                    m.append({'label': "[요건] 요건서류 (1건 이상 필요)",
+                              'filename': '', 'requirement_doc': True})
 
         return m
 

@@ -192,10 +192,12 @@ class LocalScheduleManager:
         """일정 수정"""
         data = self._load_data()
         
+        # 구버전 데이터에 키가 없어도 갱신 가능해야 하는 필드
+        _KNOWN_KEYS = {"title", "datetime", "note", "alerts", "repeat", "completed", "snooze_until"}
         for schedule in data["schedules"]:
             if schedule["id"] == schedule_id:
                 for key, value in kwargs.items():
-                    if key in schedule:
+                    if key in schedule or key in _KNOWN_KEYS:
                         if key == "datetime" and isinstance(value, datetime):
                             schedule[key] = value.isoformat()
                             schedule["reminded_alerts"] = []
@@ -384,17 +386,27 @@ class LocalScheduleManager:
                     repeat = schedule.get("repeat", "None")
                     if repeat != "None":
                         next_dt = schedule_dt
-                        
-                        if repeat == "Every30Min": delta = timedelta(minutes=30)
-                        elif repeat == "Hourly": delta = timedelta(hours=1)
-                        elif repeat == "Every3Hours": delta = timedelta(hours=3)
-                        elif repeat == "Daily": delta = timedelta(days=1)
-                        elif repeat == "Weekly": delta = timedelta(weeks=1)
-                        elif repeat == "Monthly": delta = timedelta(days=30)
-                        else: delta = timedelta(days=1)
-                        
-                        while next_dt <= now:
-                            next_dt += delta
+
+                        if repeat == "Monthly":
+                            # 매월 반복은 30일 고정이 아니라 실제 월 단위로 이동
+                            # (매달 5일 일정이 밀리지 않도록, 월말은 해당 월 말일로 보정)
+                            import calendar as _cal
+                            anchor_day = next_dt.day
+                            while next_dt <= now:
+                                month = next_dt.month % 12 + 1
+                                year = next_dt.year + (1 if next_dt.month == 12 else 0)
+                                day = min(anchor_day, _cal.monthrange(year, month)[1])
+                                next_dt = next_dt.replace(year=year, month=month, day=day)
+                        else:
+                            if repeat == "Every30Min": delta = timedelta(minutes=30)
+                            elif repeat == "Hourly": delta = timedelta(hours=1)
+                            elif repeat == "Every3Hours": delta = timedelta(hours=3)
+                            elif repeat == "Daily": delta = timedelta(days=1)
+                            elif repeat == "Weekly": delta = timedelta(weeks=1)
+                            else: delta = timedelta(days=1)
+
+                            while next_dt <= now:
+                                next_dt += delta
                             
                         schedule["datetime"] = next_dt.isoformat()
                         schedule["reminded_alerts"] = []

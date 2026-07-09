@@ -332,6 +332,11 @@ def get_toast_handler():
         app = QApplication.instance()
         if app:
             _toast_handler = ToastSignalHandler()
+            # 최초 호출이 백그라운드 스레드(알림 루프)에서 일어나면 핸들러가
+            # 그 스레드 소속이 되어 슬롯(토스트 생성)이 실행되지 않음
+            # → 반드시 메인(GUI) 스레드로 소속 이동
+            if _toast_handler.thread() is not app.thread():
+                _toast_handler.moveToThread(app.thread())
     return _toast_handler
 
 def show_custom_toast(title: str, message: str, duration: int = 10, position: str = "bottom-center",

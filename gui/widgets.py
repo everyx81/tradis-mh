@@ -358,7 +358,8 @@ class DropListWidget(QListWidget):
             base_name, ext = os.path.splitext(old_name)
         else:
             base_name, ext = old_name, ""
-        new_base, ok = QInputDialog.getText(self, "이름 변경", "새 이름을 입력하세요:", text=base_name)
+        from .dialogs import JarvisInputDialog
+        new_base, ok = JarvisInputDialog.get_text(self, "이름 변경", "새 이름을 입력하세요:", text=base_name)
         if ok and new_base:
             new_name = new_base + ext
             new_path = os.path.join(os.path.dirname(path), new_name)
@@ -739,7 +740,8 @@ class DraggableTreeView(QTreeView):
             base_name, ext = os.path.splitext(basename)
         else:
             base_name, ext = basename, ""
-        new_base, ok = QInputDialog.getText(self, "이름 변경", "새 이름:", text=base_name)
+        from .dialogs import JarvisInputDialog
+        new_base, ok = JarvisInputDialog.get_text(self, "이름 변경", "새 이름:", text=base_name)
         if ok and new_base:
             new_name = new_base + ext
             new_path = os.path.join(os.path.dirname(path), new_name)

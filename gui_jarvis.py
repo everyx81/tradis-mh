@@ -1540,7 +1540,8 @@ class JarvisGUI(QMainWindow):
             for name, val in (("메모장", memo_input.text().strip()),
                               ("보내기 트레이", tray_input.text().strip())):
                 if val and self._parse_hotkey_combo(val) is None:
-                    QMessageBox.warning(
+                    from gui.dialogs import JarvisMessageBox
+                    JarvisMessageBox.warning(
                         dlg, "단축키 오류",
                         f"'{val}' 은(는) 사용할 수 없는 {name} 단축키입니다.\n"
                         "Ctrl 또는 Alt를 포함한 조합(예: ctrl+g, ctrl+shift+m, alt+t)이나 "
@@ -2571,7 +2572,8 @@ class JarvisGUI(QMainWindow):
     def start_monitoring(self):
         from core.config import get_api_key
         if not get_api_key():
-            QMessageBox.critical(self, "API 키 누락", "모니터링을 사용하려면 API 키가 필요합니다.")
+            from gui.dialogs import JarvisMessageBox
+            JarvisMessageBox.critical(self, "API 키 누락", "모니터링을 사용하려면 API 키가 필요합니다.")
             return
         path = self.line_path.text()
         if not path: return
@@ -2627,7 +2629,8 @@ class JarvisGUI(QMainWindow):
         if hasattr(self, 'is_analyzing') and self.is_analyzing: return
         from core.config import get_api_key
         if not get_api_key():
-            QMessageBox.critical(self, "API 키 누락", "API 키가 필요합니다.")
+            from gui.dialogs import JarvisMessageBox
+            JarvisMessageBox.critical(self, "API 키 누락", "API 키가 필요합니다.")
             return
         path = self.line_path.text()
         if not path: return
@@ -3347,7 +3350,8 @@ if __name__ == "__main__":
     instance_socket = check_single_instance()
     if not instance_socket:
         temp_app = QApplication(sys.argv)
-        QMessageBox.warning(None, "중복 실행", "TRADIS MH가 이미 실행 중입니다.")
+        from gui.dialogs import JarvisMessageBox
+        JarvisMessageBox.warning(None, "중복 실행", "TRADIS MH가 이미 실행 중입니다.")
         sys.exit(0)
 
     app = QApplication(sys.argv)

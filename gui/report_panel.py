@@ -125,7 +125,7 @@ class ReportPanel(QWidget):
         date_row.addWidget(self.date_edit)
 
         self.btn_load_excel = QPushButton("  Excel")
-        self.btn_load_excel.setIcon(QIcon(pixmap("Folder", size=14, color=CT['fg_2'])))
+        self.btn_load_excel.setIcon(QIcon(pixmap("Folder", size=14, color=CT['fg_1'])))
         self.btn_load_excel.setIconSize(QSize(14, 14))
         self.btn_load_excel.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_load_excel.setStyleSheet(self._secondary_btn_css())
@@ -177,15 +177,17 @@ class ReportPanel(QWidget):
         recv_header_row.addWidget(recv_label)
         recv_header_row.addStretch()
         btn_add_r = QPushButton("+")
+        btn_add_r.setToolTip("행 추가")
         btn_add_r.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_add_r.setStyleSheet(self._small_btn_css())
-        btn_add_r.setFixedSize(28, 22)
+        btn_add_r.setFixedSize(32, 24)
         btn_add_r.clicked.connect(lambda: self._add_row(self.table_receivables))
         recv_header_row.addWidget(btn_add_r)
-        btn_del_r = QPushButton("-")
+        btn_del_r = QPushButton("−")
+        btn_del_r.setToolTip("선택 행 삭제")
         btn_del_r.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_del_r.setStyleSheet(self._small_btn_css())
-        btn_del_r.setFixedSize(28, 22)
+        btn_del_r.setFixedSize(32, 24)
         btn_del_r.clicked.connect(lambda: self._del_row(self.table_receivables))
         recv_header_row.addWidget(btn_del_r)
         scroll_layout.addLayout(recv_header_row)
@@ -202,22 +204,25 @@ class ReportPanel(QWidget):
 
         # Google Sheets에서 가져오기 버튼
         btn_sheets = QPushButton("가져오기")
+        btn_sheets.setToolTip("Google Sheets에서 대납금 목록 가져오기")
         btn_sheets.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_sheets.setStyleSheet(self._small_btn_css())
-        btn_sheets.setFixedSize(80, 22)
+        btn_sheets.setFixedSize(84, 24)
         btn_sheets.clicked.connect(self._load_advances_from_sheets)
         adv_header_row.addWidget(btn_sheets)
 
         btn_add_a = QPushButton("+")
+        btn_add_a.setToolTip("행 추가")
         btn_add_a.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_add_a.setStyleSheet(self._small_btn_css())
-        btn_add_a.setFixedSize(28, 22)
+        btn_add_a.setFixedSize(32, 24)
         btn_add_a.clicked.connect(lambda: self._add_row(self.table_advances))
         adv_header_row.addWidget(btn_add_a)
-        btn_del_a = QPushButton("-")
+        btn_del_a = QPushButton("−")
+        btn_del_a.setToolTip("선택 행 삭제")
         btn_del_a.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_del_a.setStyleSheet(self._small_btn_css())
-        btn_del_a.setFixedSize(28, 22)
+        btn_del_a.setFixedSize(32, 24)
         btn_del_a.clicked.connect(lambda: self._del_row(self.table_advances))
         adv_header_row.addWidget(btn_del_a)
         scroll_layout.addLayout(adv_header_row)
@@ -280,7 +285,7 @@ class ReportPanel(QWidget):
         btn_layout.setSpacing(10)
         
         self.btn_generate_pdf = QPushButton("  PDF 저장")
-        self.btn_generate_pdf.setIcon(QIcon(pixmap("Download", size=14, color=CT['fg_2'])))
+        self.btn_generate_pdf.setIcon(QIcon(pixmap("Download", size=14, color=CT['fg_1'])))
         self.btn_generate_pdf.setIconSize(QSize(14, 14))
         self.btn_generate_pdf.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_generate_pdf.setStyleSheet(self._secondary_btn_css())
@@ -339,19 +344,21 @@ class ReportPanel(QWidget):
     def _small_btn_css(self) -> str:
         return f"""
             QPushButton {{
-                background-color: {CT['bg_2']};
-                border: 1px solid {CT['border_soft']};
+                background-color: {CT['bg_3']};
+                border: 1px solid {CT['border']};
                 border-radius: 6px;
                 padding: 0px;
-                color: {CT['fg_1']};
+                color: {CT['fg_0']};
+                font-size: 10pt;
                 font-weight: 600;
             }}
             QPushButton:hover {{
-                background-color: {CT['bg_3']};
+                background-color: {CT['bg_4']};
+                border: 1px solid {CT['accent_border']};
                 color: {CT['fg_0']};
             }}
             QPushButton:pressed {{
-                background-color: {CT['bg_4']};
+                background-color: {CT['bg_2']};
             }}
         """
 
@@ -377,7 +384,7 @@ class ReportPanel(QWidget):
         return f"""
             QPushButton {{
                 background-color: transparent;
-                border: 1px solid transparent;
+                border: 1px solid rgba(250, 104, 99, 90);
                 border-radius: 8px;
                 padding: 6px 12px;
                 color: {CT['red']};
@@ -385,6 +392,10 @@ class ReportPanel(QWidget):
             }}
             QPushButton:hover {{
                 background-color: rgba(250, 104, 99, 30);
+                border: 1px solid rgba(250, 104, 99, 150);
+            }}
+            QPushButton:pressed {{
+                background-color: rgba(250, 104, 99, 50);
             }}
         """
 
@@ -399,6 +410,17 @@ class ReportPanel(QWidget):
             }}
             QLineEdit:focus, QSpinBox:focus, QDateEdit:focus, QTextEdit:focus {{
                 border: 1px solid {CT['accent_border']};
+            }}
+            QDateEdit::drop-down {{
+                border: none;
+                width: 22px;
+            }}
+            QDateEdit::down-arrow {{
+                image: none;
+                border-left: 4px solid transparent;
+                border-right: 4px solid transparent;
+                border-top: 5px solid {CT['fg_1']};
+                margin-right: 6px;
             }}
         """
 
@@ -425,6 +447,18 @@ class ReportPanel(QWidget):
             }}
             QSpinBox::up-button:hover, QSpinBox::down-button:hover {{
                 background-color: {CT['bg_4']};
+            }}
+            QSpinBox::up-arrow {{
+                image: none;
+                border-left: 4px solid transparent;
+                border-right: 4px solid transparent;
+                border-bottom: 5px solid {CT['fg_1']};
+            }}
+            QSpinBox::down-arrow {{
+                image: none;
+                border-left: 4px solid transparent;
+                border-right: 4px solid transparent;
+                border-top: 5px solid {CT['fg_1']};
             }}
         """)
         spin.valueChanged.connect(self._schedule_update)
@@ -871,7 +905,7 @@ class ReportPanel(QWidget):
             total_amount = sum(int(item.get('amount', 0)) for item in data['advances'])
             
             # BL 번호 있으면 빈 셀 하나 더 추가
-            bl_empty_td = '<td style="{STYLE_TD_CENTER} border-bottom: none;"></td>' if any('bl_no' in item for item in data['advances']) else ''
+            bl_empty_td = f'<td style="{STYLE_TD_CENTER} border-bottom: none;"></td>' if any('bl_no' in item for item in data['advances']) else ''
             
             rows += f"""
             <tr style="background-color: #f7fafc; font-weight: bold;">
@@ -1288,25 +1322,18 @@ class ReportPanel(QWidget):
     def _remove_confirmed_items(self) -> int:
         """체크된(입금 확인된) 항목 삭제 후 삭제된 개수 반환"""
         removed_count = 0
-        
-        # 미수금 테이블에서 체크된 항목 삭제 (역순으로 삭제)
-        for row in range(self.table_receivables.rowCount() - 1, -1, -1):
-            widget = self.table_receivables.cellWidget(row, 3)
-            if widget:
-                chk = widget.findChild(QCheckBox)
-                if chk and chk.isChecked():
-                    self.table_receivables.removeRow(row)
-                    removed_count += 1
-        
-        # 대납금 테이블에서 체크된 항목 삭제 (역순으로 삭제)
-        for row in range(self.table_advances.rowCount() - 1, -1, -1):
-            widget = self.table_advances.cellWidget(row, 3)
-            if widget:
-                chk = widget.findChild(QCheckBox)
-                if chk and chk.isChecked():
-                    self.table_advances.removeRow(row)
-                    removed_count += 1
-        
+
+        # 확인 체크박스는 항상 마지막 열 (대납금 테이블은 BL 열이 있어 5열)
+        for table in (self.table_receivables, self.table_advances):
+            chk_col = table.columnCount() - 1
+            for row in range(table.rowCount() - 1, -1, -1):
+                widget = table.cellWidget(row, chk_col)
+                if widget:
+                    chk = widget.findChild(QCheckBox)
+                    if chk and chk.isChecked():
+                        table.removeRow(row)
+                        removed_count += 1
+
         return removed_count
     
     def _clear_all(self):

@@ -145,18 +145,13 @@ class HUDStyleCalendar(QCalendarWidget):
         from PyQt6.QtGui import QTextCharFormat
         from PyQt6.QtCore import Qt
 
+        # iOS 캘린더: 요일 헤더는 전부 동일한 흐린 회색 (색은 날짜 숫자에만)
         fmt_weekday = QTextCharFormat()
-        fmt_weekday.setForeground(QColor(CT['fg_2']))
-        for day in (Qt.DayOfWeek.Monday, Qt.DayOfWeek.Tuesday, Qt.DayOfWeek.Wednesday, Qt.DayOfWeek.Thursday, Qt.DayOfWeek.Friday):
+        fmt_weekday.setForeground(QColor(CT['fg_3']))
+        for day in (Qt.DayOfWeek.Monday, Qt.DayOfWeek.Tuesday, Qt.DayOfWeek.Wednesday,
+                    Qt.DayOfWeek.Thursday, Qt.DayOfWeek.Friday,
+                    Qt.DayOfWeek.Saturday, Qt.DayOfWeek.Sunday):
             self.setWeekdayTextFormat(day, fmt_weekday)
-
-        fmt_sat = QTextCharFormat()
-        fmt_sat.setForeground(QColor(CT['accent'])) # 파란색
-        self.setWeekdayTextFormat(Qt.DayOfWeek.Saturday, fmt_sat)
-
-        fmt_sun = QTextCharFormat()
-        fmt_sun.setForeground(QColor(CT['red'])) # 빨간색
-        self.setWeekdayTextFormat(Qt.DayOfWeek.Sunday, fmt_sun)
         
     def _force_square_cells(self):
         """모든 셀을 CELL_WIDTH x CELL_HEIGHT 직사각형으로 강제 (배치 처리)"""
@@ -194,136 +189,102 @@ class HUDStyleCalendar(QCalendarWidget):
         from PyQt6.QtGui import QColor, QPen, QBrush, QFont
         
         painter.save()
-        
+
         # 각 날짜별 렌더링된 사각형 영역을 저장(드래그앤드롭 계산용)
         self._cell_rects[date] = rect
-        
-        # 기본 배경 투명 (큰 레이아웃 자체 배경)
+
+        # ── iOS 캘린더 문법 ──
+        # 셀 박스 없음(숫자만), 오늘 = 꽉 찬 액센트 원 + 흰 숫자,
+        # 선택일 = 꽉 찬 흰 원 + 반전 숫자(다크모드 iOS 동일), 일정 = 숫자 아래 회색 점
         painter.fillRect(rect, Qt.GlobalColor.transparent)
-        
+
         is_selected = (date == self.selectedDate())
         is_today = (date == QDate.currentDate())
         has_event = (date in self.event_dates)
-        
+        is_current_month = (date.month() == self.monthShown())
+
         painter.setRenderHint(painter.RenderHint.Antialiasing)
-        
-        # --- 1. 셀 내부에 둥근 직사각형 배경 박스 그리기 ---
-        padding_x = max(2, int(rect.width() * 0.03))
-        padding_y = max(2, int(rect.height() * 0.03))
-        bg_width = rect.width() - (padding_x * 2)
-        bg_height = rect.height() - (padding_y * 2)
-        
-        bg_rect = QRect(0, 0, bg_width, bg_height)
-        bg_rect.moveCenter(rect.center())
-        
-        if date.month() == self.monthShown():
-            holiday = is_holiday(date)
-            if date.dayOfWeek() == 6:
-                base_bg_color = QColor(35, 45, 62)  # 약간 푸른빛 바탕 (토요일)
-            elif date.dayOfWeek() == 7 or holiday:
-                base_bg_color = QColor(56, 38, 40)  # 약간 붉은빛 바탕 (일요일/공휴일)
-            else:
-                base_bg_color = QColor(CT['bg_3'])  # 기본 짙은 회색 바탕
 
-            if has_event:
-                # 일정이 있는 날짜는 격자 바탕이 조금 투명해지도록 (알파값 조정)
-                base_bg_color.setAlpha(150)
-        else:
-            base_bg_color = QColor(CT['bg_2'])  # 더 투명하게
-            base_bg_color.setAlpha(60)
-            
-        painter.setBrush(QBrush(base_bg_color))
-        painter.setPen(Qt.PenStyle.NoPen)
-        radius = max(6, int(min(bg_width, bg_height) * 0.15))  # 셀 크기에 비례한 둥근 모서리
-        painter.drawRoundedRect(bg_rect, radius, radius)
-        
-        # --- 2. 셀 하이라이트/선택 표시 ---
+        bg_width = rect.width()
+        bg_height = rect.height()
+        bg_rect = QRect(rect)
+
+        # 숫자 위치: 셀 상단 쪽 (아래는 일정 점 공간)
+        text_rect = QRect(bg_rect.x(), bg_rect.y(), bg_rect.width(), int(bg_rect.height() * 0.75))
+
+        # --- 1. 오늘/선택 하이라이트 (숫자를 감싸는 꽉 찬 원) ---
+        circle_size = int(min(bg_width, bg_height) * 0.64)
+        circle_rect = QRect(0, 0, circle_size, circle_size)
+        circle_rect.moveCenter(text_rect.center())
+
         if is_today:
-            # [오늘] 액센트 반투명 원형 배경 (높이 기준 원, 조금 더 큼직하게 80%)
-            circle_size = int(min(bg_width, bg_height) * 0.8)
-            circle_rect = QRect(0, 0, circle_size, circle_size)
-            circle_rect.moveCenter(bg_rect.center())
-
-            today_color = QColor(CT['accent'])
-            today_color.setAlpha(56)
-            painter.setBrush(QBrush(today_color))
-            today_pen = QPen(QColor(CT['accent']))
-            today_pen.setWidth(1)
-            painter.setPen(today_pen)
+            painter.setBrush(QBrush(QColor(CT['accent'])))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawEllipse(circle_rect)
+        elif is_selected and is_current_month:
+            painter.setBrush(QBrush(QColor(CT['fg_0'])))
+            painter.setPen(Qt.PenStyle.NoPen)
             painter.drawEllipse(circle_rect)
 
-        elif is_selected:
-            # [선택됨] 얇은 액센트 외곽선 (배경 박스보다 1px 바깥쪽에 여유롭게 그림)
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            pen = QPen(QColor(CT['accent']))
-            pen.setWidth(2)
-            painter.setPen(pen)
-
-            sel_rect = bg_rect.adjusted(-1, -1, 1, 1)
-            painter.drawRoundedRect(sel_rect, radius, radius)
-            
-        # --- 3. 날짜 텍스트 렌더링 ---
+        # --- 2. 날짜 텍스트 ---
         font = painter.font()
-        font_size = max(9, int(min(bg_width, bg_height) * 0.35))
+        font_size = max(9, int(min(bg_width, bg_height) * 0.32))
         font.setPixelSize(font_size)
         font.setFamily("Segoe UI")
-        font.setWeight(QFont.Weight.Light) # 얇은 폰트 적용
-
-        # 이벤트 있는 날짜는 볼드 처리 (이미지처럼)
-        if has_event and date.month() == self.monthShown():
-            font.setBold(True)
-        else:
-            font.setBold(False)
-
+        font.setWeight(QFont.Weight.Normal)
         painter.setFont(font)
 
-        # 글자 색상
-        if date.month() != self.monthShown():
+        if is_today:
+            text_color = QColor("#ffffff")            # 액센트 원 위 흰 숫자
+        elif is_selected and is_current_month:
+            text_color = QColor(CT['bg_1'])           # 흰 원 위 반전 숫자
+        elif not is_current_month:
             text_color = QColor(CT['fg_3'])
-        elif is_today:
-            text_color = QColor(CT['accent_hi'])
-        elif date.dayOfWeek() == 6:
-            text_color = QColor(CT['accent'])
         elif date.dayOfWeek() == 7 or is_holiday(date):
-            text_color = QColor(CT['red'])
+            text_color = QColor(CT['red'])            # 일요일/공휴일 빨강 (한국 iOS 동일)
+        elif date.dayOfWeek() == 6:
+            text_color = QColor(CT['accent'])         # 토요일 파랑 (업무 관행 유지)
         else:
-            text_color = QColor(CT['fg_1'])
-            
+            text_color = QColor(CT['fg_0'])
+
         painter.setPen(text_color)
-        
-        # 텍스트를 최상단 쪽에 가깝게 배치하여 아래쪽에 여백(점 찍을 공간)을 시원하게 줌
-        text_rect = QRect(bg_rect.x(), bg_rect.y() - 2, bg_rect.width(), int(bg_rect.height() * 0.75))
         painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, str(date.day()))
-        
-        # --- 4. 일정 인디케이터 (작은 점) ---
+
+        # --- 3. 일정 인디케이터 (숫자 아래 작은 점) ---
         if has_event:
-            dot_color = QColor(CT['accent']) if is_today else QColor(CT['fg_2'])
+            if is_today:
+                dot_color = QColor(CT['accent_hi'])
+            elif not is_current_month:
+                dot_color = QColor(CT['fg_3'])
+            else:
+                dot_color = QColor(CT['fg_2'])
             painter.setBrush(QBrush(dot_color))
             painter.setPen(Qt.PenStyle.NoPen)
-            
-            dot_size = max(3, int(min(bg_width, bg_height) * 0.08))
+
+            dot_size = max(4, int(min(bg_width, bg_height) * 0.09))
             dot_x = int(bg_rect.center().x() - (dot_size / 2))
             dot_y = int(bg_rect.y() + bg_height * 0.78)
-            
+
             painter.drawEllipse(dot_x, dot_y, dot_size, dot_size)
-            
+
         painter.restore()
 
 class ScheduleEditDialog(QDialog):
     """일정 상세 편집 다이얼로그 (갤럭시 리마인더 스타일 팝업)"""
-    def __init__(self, schedule: dict, parent=None):
+    def __init__(self, schedule: dict, parent=None, is_new=False):
         super().__init__(parent)
         self.schedule = schedule
+        self.is_new = is_new
         self.result_data = None
         self.init_ui()
-        
+
     def init_ui(self):
-        from PyQt6.QtWidgets import (QDateEdit, QTimeEdit, QCheckBox, 
+        from PyQt6.QtWidgets import (QDateEdit, QTimeEdit, QCheckBox,
                                      QGroupBox, QGridLayout)
         from datetime import datetime
-        
-        self.setWindowTitle("리마인더 상세 편집")
-        self.setFixedSize(380, 520)
+
+        self.setWindowTitle("새 리마인더" if self.is_new else "리마인더 상세 편집")
+        self.setFixedSize(380, 560)
         self.setStyleSheet(f"""
             QDialog {{ background-color: {CT['bg_1']}; border: 1px solid {CT['border']}; border-radius: 12px; }}
             QLabel {{ color: {CT['fg_1']}; font-size: 10pt; }}
@@ -384,17 +345,40 @@ class ScheduleEditDialog(QDialog):
         self.time_edit = QTimeEdit(QTime(dt_obj.hour, dt_obj.minute))
         time_layout.addWidget(QLabel("시간:"), 1, 0)
         time_layout.addWidget(self.time_edit, 1, 1)
-        
+
+        # 시간 프리셋 원클릭 버튼 (자주 쓰는 시각)
+        preset_row = QHBoxLayout()
+        preset_row.setSpacing(6)
+        _preset_css = f"""
+            QPushButton {{
+                background-color: {CT['bg_2']}; color: {CT['fg_1']};
+                border: 1px solid {CT['border_soft']}; border-radius: 6px;
+                padding: 3px 0px; font-size: 8.5pt; font-weight: normal;
+            }}
+            QPushButton:hover {{
+                background-color: {CT['bg_3']}; color: {CT['fg_0']};
+                border: 1px solid {CT['accent_border']};
+            }}
+        """
+        for label, h in (("오전 9시", 9), ("정오", 12), ("오후 2시", 14), ("오후 6시", 18)):
+            btn = QPushButton(label)
+            btn.setStyleSheet(_preset_css)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setFixedHeight(24)
+            btn.clicked.connect(lambda _, hh=h: self.time_edit.setTime(QTime(hh, 0)))
+            preset_row.addWidget(btn)
+        time_layout.addLayout(preset_row, 2, 1)
+
         self.repeat_combo = QComboBox()
         self.repeat_combo.addItems(["반복 없음", "매 30분", "매 1시간", "매 3시간", "매일", "매주", "매월"])
         repeat_map_rev = {
-            "None": 0, "Every30Min": 1, "Hourly": 2, "Every3Hours": 3, 
+            "None": 0, "Every30Min": 1, "Hourly": 2, "Every3Hours": 3,
             "Daily": 4, "Weekly": 5, "Monthly": 6
         }
         self.repeat_combo.setCurrentIndex(repeat_map_rev.get(self.schedule.get("repeat", "None"), 0))
-        time_layout.addWidget(QLabel("반복:"), 2, 0)
-        time_layout.addWidget(self.repeat_combo, 2, 1)
-        
+        time_layout.addWidget(QLabel("반복:"), 3, 0)
+        time_layout.addWidget(self.repeat_combo, 3, 1)
+
         layout.addWidget(time_group)
         
         # 3. 사전 알림(Alerts) 다중 선택 그룹
@@ -435,20 +419,25 @@ class ScheduleEditDialog(QDialog):
         self.btn_del = QPushButton("삭제")
         self.btn_del.setObjectName("btnDelete")
         self.btn_del.clicked.connect(self.on_delete)
-        
+        if self.is_new:
+            self.btn_del.hide()  # 새 일정 추가 팝업에는 삭제 버튼 불필요
+
         self.btn_save = QPushButton("저장")
         self.btn_save.clicked.connect(self.on_save)
-        
+
         self.btn_cancel = QPushButton("취소")
         self.btn_cancel.setObjectName("btnCancel")
         self.btn_cancel.clicked.connect(self.reject)
-        
+
         btn_layout.addWidget(self.btn_del)
         btn_layout.addStretch()
         btn_layout.addWidget(self.btn_cancel)
         btn_layout.addWidget(self.btn_save)
-        
+
         layout.addLayout(btn_layout)
+
+        # 열리자마자 제목부터 입력 가능하도록
+        self.title_edit.setFocus()
         
     def get_alerts(self):
         res = []
@@ -698,20 +687,18 @@ class MK3ScheduleOnlyWidget(QWidget):
         self.btn_next_month.setFixedSize(30, 30)
         left_group.addWidget(self.btn_next_month)
         
-        # 2. 중앙 타이틀 ("2026년 3월")
+        # 2. 타이틀 ("2026년 3월") — 애플 캘린더 문법: 타이틀 왼쪽, 컨트롤 오른쪽
         self.lbl_cal_title = QLabel()
-        self.lbl_cal_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_cal_title.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self.lbl_cal_title.setStyleSheet(f"""
             color: {CT['fg_0']}; font-size: 20pt; font-weight: bold;
             font-family: 'Segoe UI', sans-serif;
         """)
-        
-        # 3. 양옆 여백으로 중앙 조절
-        nav_layout.addLayout(left_group)
-        nav_layout.addStretch()
+
         nav_layout.addWidget(self.lbl_cal_title)
         nav_layout.addStretch()
-        
+        nav_layout.addLayout(left_group)
+
         # + 버튼 (Plus 글리프 ghost 버튼)
         self.btn_add_schedule = QPushButton("")
         self.btn_add_schedule.setIcon(QIcon(pixmap("Plus", size=16, color=CT['fg_2'])))
@@ -772,7 +759,35 @@ class MK3ScheduleOnlyWidget(QWidget):
         list_header.addWidget(self.btn_show_all)
         
         right_layout.addLayout(list_header)
-        
+
+        # === 빠른 일정 추가 (자연어 한 줄 입력, Enter로 즉시 등록) ===
+        self.quick_add_input = QLineEdit()
+        self.quick_add_input.setPlaceholderText("＋ 예: 내일 14시 검역 서류 확인 · 금요일 9시 전화 — Enter로 추가")
+        self.quick_add_input.setMinimumHeight(36)
+        self.quick_add_input.setClearButtonEnabled(True)
+        self.quick_add_input.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {CT['bg_2']};
+                border: 1px solid {CT['border_soft']};
+                border-radius: 10px;
+                color: {CT['fg_0']};
+                padding: 6px 12px;
+                font-size: 10.5pt;
+            }}
+            QLineEdit:focus {{ border: 1px solid {CT['accent_border']}; }}
+        """)
+        self.quick_add_input.textChanged.connect(self._update_quick_preview)
+        self.quick_add_input.returnPressed.connect(self._on_quick_add)
+        right_layout.addWidget(self.quick_add_input)
+
+        # 실시간 파싱 미리보기 ("→ 7월 10일 (목) 14:00 · 검역 서류 확인")
+        self.quick_preview = QLabel("")
+        self.quick_preview.setStyleSheet(
+            f"color: {CT['fg_3']}; font-size: 9pt; background: transparent; padding-left: 6px;"
+        )
+        self.quick_preview.hide()
+        right_layout.addWidget(self.quick_preview)
+
         # 리스트 위젯 껍데기 투명화 (애플 스타일의 줄바꿈 선만 유지)
         self.schedule_list = QListWidget()
         self.schedule_list.setStyleSheet(f"""
@@ -892,9 +907,13 @@ class MK3ScheduleOnlyWidget(QWidget):
     def _on_calendar_activated(self, date):
         """달력 특정 날짜 더블클릭/엔터: 빈 해당 일자 일정 추가 팝업 띄우기"""
         from datetime import datetime as dt
-        # 새 빈 스케줄 더미 생성
+        # 새 빈 스케줄 더미 생성 — 기본 시간: 오늘이면 다음 정시, 다른 날이면 09:00
         now = dt.now()
-        dummy_dt = dt(date.year(), date.month(), date.day(), now.hour, 0)
+        if (date.year(), date.month(), date.day()) == (now.year, now.month, now.day):
+            default_hour = min(now.hour + 1, 23)
+        else:
+            default_hour = 9
+        dummy_dt = dt(date.year(), date.month(), date.day(), default_hour, 0)
         
         dummy_schedule = {
             "title": "",
@@ -902,8 +921,8 @@ class MK3ScheduleOnlyWidget(QWidget):
             "repeat": "None",
             "alerts": [0]
         }
-        
-        dialog = ScheduleEditDialog(dummy_schedule, self)
+
+        dialog = ScheduleEditDialog(dummy_schedule, self, is_new=True)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             data = dialog.result_data
             if data["action"] == "save":
@@ -927,6 +946,55 @@ class MK3ScheduleOnlyWidget(QWidget):
         """+ 버튼 클릭: 현재 선택된 날짜에 일정 추가"""
         date = self.calendar.selectedDate()
         self._on_calendar_activated(date)
+
+    # ── 빠른 일정 추가 (자연어 한 줄 입력) ──
+    def _quick_base_date(self):
+        """빠른 입력의 기본 날짜 = 달력에서 필터 중인 날짜 (없으면 None=오늘)"""
+        from datetime import date as _date
+        if self.current_filter_date:
+            d = self.current_filter_date
+            return _date(d.year(), d.month(), d.day())
+        return None
+
+    def _update_quick_preview(self, text):
+        """입력 중 실시간 파싱 결과 미리보기 — 모호한 입력도 결과를 보고 확인 가능"""
+        from core.schedule_parser import parse_quick_schedule
+        if not text.strip():
+            self.quick_preview.hide()
+            return
+        parsed = parse_quick_schedule(text, base_date=self._quick_base_date())
+        if parsed:
+            dt = parsed['datetime']
+            weekdays = ["월", "화", "수", "목", "금", "토", "일"]
+            wd = weekdays[dt.weekday()]
+            self.quick_preview.setText(
+                f"→  {dt.month}월 {dt.day}일 ({wd}) {dt.strftime('%H:%M')}  ·  {parsed['title']}"
+            )
+            self.quick_preview.setStyleSheet(
+                f"color: {CT['accent_hi']}; font-size: 9pt; background: transparent; padding-left: 6px;"
+            )
+        else:
+            self.quick_preview.setText("제목을 입력하세요 (예: 내일 14시 검역 서류 확인)")
+            self.quick_preview.setStyleSheet(
+                f"color: {CT['fg_3']}; font-size: 9pt; background: transparent; padding-left: 6px;"
+            )
+        self.quick_preview.show()
+
+    def _on_quick_add(self):
+        """Enter로 빠른 일정 등록"""
+        from core.schedule_parser import parse_quick_schedule
+        text = self.quick_add_input.text()
+        parsed = parse_quick_schedule(text, base_date=self._quick_base_date())
+        if not parsed:
+            return
+        self.schedule_manager.add_schedule(
+            title=parsed['title'],
+            dt=parsed['datetime'],
+            alerts=[0],
+        )
+        self.quick_add_input.clear()
+        self.quick_preview.hide()
+        self.refresh_schedules()
         
     def _on_schedule_item_clicked(self, item):
         """더미 핸들러: 카드 내에서 자체 처리하므로 리스트 더블클릭은 Edit을 바로 띄우도록 우회"""
@@ -1232,10 +1300,10 @@ class MK3MemoOnlyWidget(QWidget):
     
     def _rename_tab(self, index: int):
         """탭 이름 변경 (더블클릭)"""
-        from PyQt6.QtWidgets import QInputDialog
-        
+        from .dialogs import JarvisInputDialog
+
         current_name = self.tab_widget.tabText(index)
-        new_name, ok = QInputDialog.getText(
+        new_name, ok = JarvisInputDialog.get_text(
             self, "메모 이름 변경", "새 이름:", text=current_name
         )
         

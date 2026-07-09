@@ -2727,7 +2727,7 @@ class FileManagerWidget(QWidget):
             print(f"[메일 보내기 오류] {e}")
             import traceback
             traceback.print_exc()
-            QMessageBox.critical(self, "오류", f"메일 보내기 처리 중 오류:\n{e}")
+            JarvisMessageBox.critical(self, "오류", f"메일 보내기 처리 중 오류:\n{e}")
 
     def _do_mail_send(self, file_path: str):
         import re
@@ -2743,7 +2743,7 @@ class FileManagerWidget(QWidget):
         # 파일명에서 B/L, 업체명 파싱: {company}({bl_id})정산서.pdf
         match = re.search(r'^(.+?)\(([^)]+)\)', filename)
         if not match:
-            QMessageBox.warning(self, "오류", f"파일명에서 B/L 번호를 추출할 수 없습니다.\n{filename}")
+            JarvisMessageBox.warning(self, "오류", f"파일명에서 B/L 번호를 추출할 수 없습니다.\n{filename}")
             return
         company = match.group(1).strip()
         bl_id = match.group(2).strip()
@@ -2764,7 +2764,7 @@ class FileManagerWidget(QWidget):
         password = keyring.get_password("TRADIS_MH", "email_password") or ''
 
         if not email_addr or not password:
-            QMessageBox.warning(self, "메일 설정 필요", "SETTINGS 탭에서 메일 설정을 먼저 해주세요.")
+            JarvisMessageBox.warning(self, "메일 설정 필요", "SETTINGS 탭에서 메일 설정을 먼저 해주세요.")
             return
 
         email_config = EmailConfig(
@@ -2829,7 +2829,7 @@ class FileManagerWidget(QWidget):
             print(f"[메일 다이얼로그 오류] {e}")
             import traceback
             traceback.print_exc()
-            QMessageBox.critical(self, "오류", f"메일 다이얼로그 오류:\n{e}")
+            JarvisMessageBox.critical(self, "오류", f"메일 다이얼로그 오류:\n{e}")
 
     def _do_show_mail_thread_dialog(self, company, bl_id, file_path, threads, my_email):
         import datetime
@@ -2960,7 +2960,8 @@ class FileManagerWidget(QWidget):
         if not os.path.exists(old_path):
             return
             
-        new_name, ok = QInputDialog.getText(self, "이름 변경", f"'{folder_name}'의 새 이름을 입력하세요:", text=folder_name)
+        from .dialogs import JarvisInputDialog
+        new_name, ok = JarvisInputDialog.get_text(self, "이름 변경", f"'{folder_name}'의 새 이름을 입력하세요:", text=folder_name)
         if ok and new_name and new_name != folder_name:
             new_path = os.path.join(base_path, new_name)
             try:

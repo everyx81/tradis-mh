@@ -2851,10 +2851,19 @@ class GroupCard(GlassFrame):
         except (RuntimeError, TypeError): pass
         self.btn_toggle.clicked.connect(self.toggle_view)
         
-        # 기존 레이아웃 정리
-        while self.mapping_layout.count():
-            child = self.mapping_layout.takeAt(0)
-            if child.widget(): child.widget().deleteLater()
+        # 기존 레이아웃 정리 — 중첩 레이아웃(하단 버튼 행 addLayout)까지 재귀 삭제.
+        # 위젯만 지우면 버튼 행의 "행 추가/합치기 실행" 버튼이 화면에 남아
+        # 행 추가 후 재빌드 시 합치기 버튼이 중복으로 보이는 버그 발생.
+        def _clear_layout(layout):
+            while layout.count():
+                child = layout.takeAt(0)
+                w = child.widget()
+                if w is not None:
+                    w.deleteLater()
+                elif child.layout() is not None:
+                    _clear_layout(child.layout())
+                    child.layout().deleteLater()
+        _clear_layout(self.mapping_layout)
         
         # 파일 매핑 리스트 (▲/▼ 버튼으로 파일 교환)
         self.combo_list = []  # 콤보박스 참조 저장
@@ -3856,25 +3865,52 @@ class GroupCard(GlassFrame):
             JarvisMessageBox.warning(self, "오류", "썸네일 생성에 실패했습니다.")
             return
         
+        from .claude_theme import C as _CT
         popup = QDialog(self)
         popup.setWindowTitle(f"미리보기: {filename}")
         popup.setWindowFlags(Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
-        popup.setStyleSheet("background-color: #0d1117; border: 2px solid #00ffff; border-radius: 10px;")
-        
+        popup.setStyleSheet(f"""
+            QDialog {{
+                background-color: {_CT['bg_1']};
+                border: 1px solid {_CT['border']};
+                border-radius: 12px;
+            }}
+        """)
+
         layout = QVBoxLayout(popup)
         layout.setContentsMargins(10, 10, 10, 10)
-        
+
         lbl_img = QLabel()
         lbl_img.setPixmap(pixmap)
         lbl_img.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl_img.setStyleSheet("background: transparent; border: none;")
         layout.addWidget(lbl_img)
-        
+
         lbl_name = QLabel(filename)
-        lbl_name.setStyleSheet("color: #00ffff; font-size: 9pt; padding: 5px;")
+        lbl_name.setStyleSheet(
+            f"color: {_CT['fg_2']}; font-size: 9pt; padding: 5px; background: transparent; border: none;"
+        )
         lbl_name.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(lbl_name)
-        
-        btn_close = NeonButton("닫기", color="cyan")
+
+        btn_close = QPushButton("닫기")
+        btn_close.setFixedHeight(32)
+        btn_close.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_close.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {_CT['bg_3']};
+                border: 1px solid {_CT['border']};
+                border-radius: 8px;
+                color: {_CT['fg_1']};
+                padding: 5px 16px;
+                font-size: 9.5pt;
+                font-weight: 500;
+            }}
+            QPushButton:hover {{
+                background-color: {_CT['bg_4']};
+                color: {_CT['fg_0']};
+            }}
+        """)
         btn_close.clicked.connect(popup.close)
         layout.addWidget(btn_close)
         
@@ -4465,15 +4501,16 @@ class FileFolderPickerDialog(QDialog):
                                      QAbstractItemView, QHeaderView)
         from PyQt6.QtGui import QFont, QFileSystemModel
 
-        # 컨테이너 (Frosted Glass)
+        # 컨테이너 (Claude Design — 팝업 통일)
+        from .claude_theme import C as _CT
         container = QWidget(self)
         container.setObjectName("ff_picker_dlg")
-        container.setStyleSheet("""
-            #ff_picker_dlg {
-                background-color: rgba(45, 50, 60, 235);
-                border: 1px solid rgba(100, 110, 120, 0.5);
-                border-radius: 16px;
-            }
+        container.setStyleSheet(f"""
+            #ff_picker_dlg {{
+                background-color: {_CT['bg_2']};
+                border: 1px solid {_CT['border']};
+                border-radius: 12px;
+            }}
         """)
         shadow = QGraphicsDropShadowEffect(self)
         shadow.setBlurRadius(25)
@@ -4493,8 +4530,9 @@ class FileFolderPickerDialog(QDialog):
         # 타이틀
         lbl_title = QLabel("추가할 파일 또는 폴더 선택  (Ctrl/Shift 다중 선택 가능)")
         lbl_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lbl_title.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
-        lbl_title.setStyleSheet("color: #ffffff; background: transparent;")
+        lbl_title.setStyleSheet(
+            f"color: {_CT['fg_0']}; font-size: 12pt; font-weight: 700; background: transparent;"
+        )
         layout.addWidget(lbl_title)
 
         # 현재 경로 표시 + 상위 폴더 버튼
@@ -4503,17 +4541,18 @@ class FileFolderPickerDialog(QDialog):
         self.btn_up = QPushButton("⬆ 상위 폴더")
         self.btn_up.setFixedHeight(28)
         self.btn_up.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_up.setStyleSheet("""
-            QPushButton { background-color: rgba(70,75,85,180); border: 1px solid rgba(120,125,135,0.4);
-                border-radius: 6px; color: #fff; padding: 4px 10px; font-size: 9pt; }
-            QPushButton:hover { background-color: rgba(90,95,105,200); }
+        self.btn_up.setStyleSheet(f"""
+            QPushButton {{ background-color: {_CT['bg_3']}; border: 1px solid {_CT['border']};
+                border-radius: 6px; color: {_CT['fg_1']}; padding: 4px 10px; font-size: 9pt; }}
+            QPushButton:hover {{ background-color: {_CT['bg_4']}; color: {_CT['fg_0']}; }}
         """)
         self.btn_up.clicked.connect(self._go_up)
         path_row.addWidget(self.btn_up)
 
         self.lbl_path = QLabel(self.start_dir)
-        self.lbl_path.setFont(QFont("Segoe UI", 9))
-        self.lbl_path.setStyleSheet("color: rgba(255,255,255,0.6); background: transparent; padding: 4px 8px;")
+        self.lbl_path.setStyleSheet(
+            f"color: {_CT['fg_2']}; font-size: 9pt; background: transparent; padding: 4px 8px;"
+        )
         path_row.addWidget(self.lbl_path, stretch=1)
         layout.addLayout(path_row)
 
@@ -4525,19 +4564,19 @@ class FileFolderPickerDialog(QDialog):
         self.tree.setModel(self.model)
         self.tree.setRootIndex(self.model.index(self.start_dir))
         self.tree.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-        self.tree.setStyleSheet("""
-            QTreeView {
-                background-color: rgba(20, 25, 35, 220);
-                color: #fff;
-                border: 1px solid #555;
+        self.tree.setStyleSheet(f"""
+            QTreeView {{
+                background-color: {_CT['bg_1']};
+                color: {_CT['fg_0']};
+                border: 1px solid {_CT['border_soft']};
                 border-radius: 8px;
                 font-size: 9.5pt;
-            }
-            QTreeView::item { padding: 3px; }
-            QTreeView::item:hover { background-color: rgba(0, 212, 255, 30); }
-            QTreeView::item:selected { background-color: rgba(0, 212, 255, 80); color: #fff; }
-            QHeaderView::section { background-color: rgba(40,45,55,200); color: #ccc; padding: 4px;
-                border: none; border-right: 1px solid rgba(100,100,100,0.3); }
+            }}
+            QTreeView::item {{ padding: 3px; }}
+            QTreeView::item:hover {{ background-color: {_CT['bg_3']}; }}
+            QTreeView::item:selected {{ background-color: {_CT['accent_bg']}; color: {_CT['fg_0']}; }}
+            QHeaderView::section {{ background-color: {_CT['bg_3']}; color: {_CT['fg_2']}; padding: 4px;
+                border: none; border-right: 1px solid {_CT['border_soft']}; }}
         """)
         # 불필요 칼럼 숨김 (Size, Type, Date)
         for col in (1, 2, 3):
@@ -4553,10 +4592,10 @@ class FileFolderPickerDialog(QDialog):
         btn_cancel = QPushButton("취소")
         btn_cancel.setFixedSize(100, 36)
         btn_cancel.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_cancel.setStyleSheet("""
-            QPushButton { background-color: rgba(100,105,115,180); border: 1px solid rgba(150,155,165,0.5);
-                border-radius: 8px; color: #fff; padding: 6px 16px; font-size: 10pt; }
-            QPushButton:hover { background-color: rgba(120,125,135,200); }
+        btn_cancel.setStyleSheet(f"""
+            QPushButton {{ background-color: {_CT['bg_3']}; border: 1px solid {_CT['border']};
+                border-radius: 8px; color: {_CT['fg_1']}; padding: 6px 16px; font-size: 9.5pt; font-weight: 500; }}
+            QPushButton:hover {{ background-color: {_CT['bg_4']}; color: {_CT['fg_0']}; }}
         """)
         btn_cancel.clicked.connect(self.reject)
         btn_row.addWidget(btn_cancel)
@@ -4564,10 +4603,11 @@ class FileFolderPickerDialog(QDialog):
         btn_ok = QPushButton("선택")
         btn_ok.setFixedSize(100, 36)
         btn_ok.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_ok.setStyleSheet("""
-            QPushButton { background-color: rgba(30,35,45,200); border: 2px solid #00d4ff;
-                border-radius: 8px; color: #00d4ff; padding: 6px 16px; font-size: 10pt; font-weight: 500; }
-            QPushButton:hover { background-color: rgba(0,212,255,40); border-color: #00ffff; color: #00ffff; }
+        btn_ok.setStyleSheet(f"""
+            QPushButton {{ background-color: {_CT['accent']}; border: 1px solid {_CT['accent_hi']};
+                border-radius: 8px; color: #ffffff; padding: 6px 16px; font-size: 9.5pt; font-weight: 600; }}
+            QPushButton:hover {{ background-color: {_CT['accent_hi']}; }}
+            QPushButton:pressed {{ background-color: {_CT['accent_lo']}; }}
         """)
         btn_ok.setDefault(True)
         btn_ok.setAutoDefault(True)
@@ -4609,14 +4649,14 @@ class FileFolderPickerDialog(QDialog):
 
 
 class JarvisMessageBox(QDialog):
-    """iOS 스타일 커스텀 메시지 박스 (Frosted Glass)"""
-    
+    """통일 메시지 박스 (Claude Design — 카드와 동일한 문법)"""
+
     # 아이콘 타입 상수
     Information = "info"
     Warning = "warning"
     Critical = "critical"
     Question = "question"
-    
+
     def __init__(self, parent=None, title="Notification", message="", icon_type="info"):
         super().__init__(parent)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
@@ -4628,24 +4668,24 @@ class JarvisMessageBox(QDialog):
         self.title_text = title
         self.message_text = message
         self.buttons = []
-        
+
         self.init_ui()
-        
+
     def init_ui(self):
         from PyQt6.QtWidgets import QGraphicsDropShadowEffect
-        from PyQt6.QtGui import QFont
-        
-        # 메인 컨테이너 (iOS Frosted Glass 스타일)
+        from .claude_theme import C as _CT
+
+        # 메인 컨테이너 (Claude Design 카드)
         self.container = QWidget(self)
-        self.container.setObjectName("ios_alert_container")
-        self.container.setStyleSheet("""
-            #ios_alert_container {
-                background-color: rgba(45, 50, 60, 230);
-                border: 1px solid rgba(100, 110, 120, 0.5);
-                border-radius: 20px;
-            }
+        self.container.setObjectName("jarvis_alert_container")
+        self.container.setStyleSheet(f"""
+            #jarvis_alert_container {{
+                background-color: {_CT['bg_2']};
+                border: 1px solid {_CT['border']};
+                border-radius: 12px;
+            }}
         """)
-        
+
         # 그림자 효과
         shadow = QGraphicsDropShadowEffect(self)
         shadow.setBlurRadius(30)
@@ -4653,93 +4693,109 @@ class JarvisMessageBox(QDialog):
         shadow.setYOffset(5)
         shadow.setColor(Qt.GlobalColor.black)
         self.container.setGraphicsEffect(shadow)
-        
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
         layout.addWidget(self.container)
-        
+
         inner_layout = QVBoxLayout(self.container)
-        inner_layout.setContentsMargins(24, 28, 24, 20)
-        inner_layout.setSpacing(12)
-        
-        # 타이틀 (중앙 정렬, 굵은 흰색)
+        inner_layout.setContentsMargins(24, 24, 24, 18)
+        inner_layout.setSpacing(10)
+
+        # 타이틀
         lbl_title = QLabel(self.title_text)
         lbl_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lbl_title.setFont(QFont("Segoe UI", 14, QFont.Weight.Bold))
-        lbl_title.setStyleSheet("""
-            color: #ffffff;
+        lbl_title.setStyleSheet(f"""
+            color: {_CT['fg_0']};
+            font-size: 12.5pt;
+            font-weight: 700;
             background: transparent;
         """)
         inner_layout.addWidget(lbl_title)
-        
-        # 메시지 (중앙 정렬, 연한 회색)
+
+        # 메시지
         lbl_message = QLabel(self.message_text)
         lbl_message.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lbl_message.setWordWrap(True)
-        lbl_message.setFont(QFont("Segoe UI", 10))
-        lbl_message.setStyleSheet("""
-            color: rgba(255, 255, 255, 0.7);
+        lbl_message.setStyleSheet(f"""
+            color: {_CT['fg_1']};
+            font-size: 10pt;
             background: transparent;
-            padding: 0 10px;
+            padding: 0 8px;
         """)
         inner_layout.addWidget(lbl_message)
-        
-        inner_layout.addSpacing(10)
-        
+
+        inner_layout.addSpacing(8)
+
         # 버튼 영역
         self.btn_widget = QWidget()
         self.btn_widget.setStyleSheet("background: transparent;")
         self.btn_layout = QHBoxLayout(self.btn_widget)
         self.btn_layout.setContentsMargins(0, 0, 0, 0)
-        self.btn_layout.setSpacing(12)
-        
+        self.btn_layout.setSpacing(8)
+
         inner_layout.addWidget(self.btn_widget)
-        
+
     def add_button(self, text, role="accept", color="cyan"):
-        """iOS 스타일 버튼 추가"""
-        from PyQt6.QtGui import QFont
-        
+        """버튼 추가 (Claude Design).
+
+        color: "cyan"=주요(파랑 채움) / "gray"=보조 / "orange"=주의(앰버 아웃라인)
+        (기존 호출부 호환을 위해 색 이름 인자는 유지)
+        """
+        from .claude_theme import C as _CT
+
         btn = QPushButton(text)
-        btn.setFixedHeight(42)
-        btn.setMinimumWidth(120)
-        btn.setFont(QFont("Segoe UI", 10, QFont.Weight.Medium))
+        btn.setFixedHeight(36)
+        btn.setMinimumWidth(96)
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        
+
         if color == "cyan":
-            # OK 버튼 - 시안 글로우 효과
-            btn.setStyleSheet("""
-                QPushButton {
-                    background-color: rgba(30, 35, 45, 200);
-                    border: 2px solid #00d4ff;
-                    border-radius: 12px;
-                    color: #00d4ff;
-                    padding: 8px 20px;
-                }
-                QPushButton:hover {
-                    background-color: rgba(0, 212, 255, 40);
-                    border: 2px solid #00ffff;
-                    color: #00ffff;
-                }
-                QPushButton:pressed {
-                    background-color: rgba(0, 212, 255, 80);
-                }
+            # 주요 액션 — 액센트 채움 (카드의 '합치기 실행' 버튼과 동일 문법)
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {_CT['accent']};
+                    border: 1px solid {_CT['accent_hi']};
+                    border-radius: 8px;
+                    color: #ffffff;
+                    padding: 6px 16px;
+                    font-size: 9.5pt;
+                    font-weight: 600;
+                }}
+                QPushButton:hover {{ background-color: {_CT['accent_hi']}; }}
+                QPushButton:pressed {{ background-color: {_CT['accent_lo']}; }}
+            """)
+        elif color == "orange":
+            # 주의 액션 — 앰버 아웃라인
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: transparent;
+                    border: 1px solid rgba(233, 171, 43, 120);
+                    border-radius: 8px;
+                    color: {_CT['amber']};
+                    padding: 6px 16px;
+                    font-size: 9.5pt;
+                    font-weight: 600;
+                }}
+                QPushButton:hover {{ background-color: rgba(233, 171, 43, 26); }}
+                QPushButton:pressed {{ background-color: rgba(233, 171, 43, 50); }}
             """)
         else:
-            # Cancel 버튼 - 회색
-            btn.setStyleSheet("""
-                QPushButton {
-                    background-color: rgba(100, 105, 115, 180);
-                    border: 1px solid rgba(150, 155, 165, 0.5);
-                    border-radius: 12px;
-                    color: #ffffff;
-                    padding: 8px 20px;
-                }
-                QPushButton:hover {
-                    background-color: rgba(120, 125, 135, 200);
-                }
-                QPushButton:pressed {
-                    background-color: rgba(80, 85, 95, 200);
-                }
+            # 보조 액션 — 세컨더리
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {_CT['bg_3']};
+                    border: 1px solid {_CT['border']};
+                    border-radius: 8px;
+                    color: {_CT['fg_1']};
+                    padding: 6px 16px;
+                    font-size: 9.5pt;
+                    font-weight: 500;
+                }}
+                QPushButton:hover {{
+                    background-color: {_CT['bg_4']};
+                    color: {_CT['fg_0']};
+                }}
+                QPushButton:pressed {{ background-color: {_CT['bg_2']}; }}
             """)
         
         if role == "accept":
@@ -4793,6 +4849,134 @@ class JarvisMessageBox(QDialog):
         return result == QDialog.DialogCode.Accepted
 
 
+class JarvisInputDialog(QDialog):
+    """통일 텍스트 입력 다이얼로그 (Claude Design — QInputDialog.getText 대체)"""
+
+    def __init__(self, parent=None, title="입력", label="", text=""):
+        super().__init__(parent)
+        from PyQt6.QtWidgets import QGraphicsDropShadowEffect, QLineEdit
+        from .claude_theme import C as _CT
+
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setMinimumWidth(420)
+
+        container = QWidget(self)
+        container.setObjectName("jarvis_input_container")
+        container.setStyleSheet(f"""
+            #jarvis_input_container {{
+                background-color: {_CT['bg_2']};
+                border: 1px solid {_CT['border']};
+                border-radius: 12px;
+            }}
+        """)
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(30)
+        shadow.setXOffset(0)
+        shadow.setYOffset(5)
+        shadow.setColor(Qt.GlobalColor.black)
+        container.setGraphicsEffect(shadow)
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(10, 10, 10, 10)
+        outer.addWidget(container)
+
+        lay = QVBoxLayout(container)
+        lay.setContentsMargins(24, 24, 24, 18)
+        lay.setSpacing(10)
+
+        lbl_title = QLabel(title)
+        lbl_title.setStyleSheet(f"""
+            color: {_CT['fg_0']};
+            font-size: 12.5pt;
+            font-weight: 700;
+            background: transparent;
+        """)
+        lay.addWidget(lbl_title)
+
+        if label:
+            lbl = QLabel(label)
+            lbl.setWordWrap(True)
+            lbl.setStyleSheet(f"color: {_CT['fg_1']}; font-size: 10pt; background: transparent;")
+            lay.addWidget(lbl)
+
+        self.input = QLineEdit(text)
+        self.input.setMinimumHeight(34)
+        self.input.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {_CT['bg_1']};
+                border: 1px solid {_CT['border_soft']};
+                border-radius: 8px;
+                color: {_CT['fg_0']};
+                padding: 6px 10px;
+                font-size: 10pt;
+            }}
+            QLineEdit:focus {{ border: 1px solid {_CT['accent_border']}; }}
+        """)
+        self.input.returnPressed.connect(self.accept)
+        lay.addWidget(self.input)
+
+        lay.addSpacing(6)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+        btn_row.addStretch()
+
+        btn_cancel = QPushButton("취소")
+        btn_cancel.setFixedHeight(36)
+        btn_cancel.setMinimumWidth(96)
+        btn_cancel.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_cancel.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {_CT['bg_3']};
+                border: 1px solid {_CT['border']};
+                border-radius: 8px;
+                color: {_CT['fg_1']};
+                padding: 6px 16px;
+                font-size: 9.5pt;
+                font-weight: 500;
+            }}
+            QPushButton:hover {{
+                background-color: {_CT['bg_4']};
+                color: {_CT['fg_0']};
+            }}
+        """)
+        btn_cancel.clicked.connect(self.reject)
+        btn_row.addWidget(btn_cancel)
+
+        btn_ok = QPushButton("확인")
+        btn_ok.setFixedHeight(36)
+        btn_ok.setMinimumWidth(96)
+        btn_ok.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_ok.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {_CT['accent']};
+                border: 1px solid {_CT['accent_hi']};
+                border-radius: 8px;
+                color: #ffffff;
+                padding: 6px 16px;
+                font-size: 9.5pt;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{ background-color: {_CT['accent_hi']}; }}
+            QPushButton:pressed {{ background-color: {_CT['accent_lo']}; }}
+        """)
+        btn_ok.clicked.connect(self.accept)
+        btn_row.addWidget(btn_ok)
+
+        lay.addLayout(btn_row)
+
+        self.input.setFocus()
+        self.input.selectAll()
+
+    @staticmethod
+    def get_text(parent, title, label, text=""):
+        """QInputDialog.getText 호환: (입력값, 확인 여부) 반환"""
+        dlg = JarvisInputDialog(parent, title, label, text)
+        ok = dlg.exec() == QDialog.DialogCode.Accepted
+        return dlg.input.text(), ok
+
+
 class SendMailDialog(QDialog):
     """메일 발송 다이얼로그"""
     
@@ -4821,31 +5005,32 @@ class SendMailDialog(QDialog):
         from PyQt6.QtWidgets import QFormLayout, QGraphicsDropShadowEffect
         from PyQt6.QtGui import QFont
 
-        # Frosted Glass 컨테이너
+        # Claude Design 컨테이너 (팝업 통일)
+        from .claude_theme import C as _CT
         self.container = QWidget(self)
         self.container.setObjectName("send_mail_container")
-        self.container.setStyleSheet("""
-            #send_mail_container {
-                background-color: rgba(25, 32, 48, 235);
-                border: 1px solid rgba(0, 255, 255, 0.3);
-                border-radius: 16px;
-            }
-            #send_mail_container QLabel {
-                color: #e0e0e0;
+        self.container.setStyleSheet(f"""
+            #send_mail_container {{
+                background-color: {_CT['bg_2']};
+                border: 1px solid {_CT['border']};
+                border-radius: 12px;
+            }}
+            #send_mail_container QLabel {{
+                color: {_CT['fg_1']};
                 font-size: 10pt;
                 background: transparent;
-            }
-            #send_mail_container QLineEdit, #send_mail_container QTextEdit {
-                background-color: rgba(15, 22, 40, 200);
-                border: 1px solid rgba(0, 200, 220, 0.25);
-                border-radius: 6px;
-                color: #ffffff;
+            }}
+            #send_mail_container QLineEdit, #send_mail_container QTextEdit {{
+                background-color: {_CT['bg_1']};
+                border: 1px solid {_CT['border_soft']};
+                border-radius: 8px;
+                color: {_CT['fg_0']};
                 padding: 8px;
                 font-size: 10pt;
-            }
-            #send_mail_container QLineEdit:focus, #send_mail_container QTextEdit:focus {
-                border: 1px solid rgba(0, 255, 255, 0.6);
-            }
+            }}
+            #send_mail_container QLineEdit:focus, #send_mail_container QTextEdit:focus {{
+                border: 1px solid {_CT['accent_border']};
+            }}
         """)
 
         shadow = QGraphicsDropShadowEffect(self)
@@ -4865,8 +5050,9 @@ class SendMailDialog(QDialog):
 
         # 헤더
         header = QLabel("메일 발송")
-        header.setFont(QFont("Segoe UI", 14, QFont.Weight.Bold))
-        header.setStyleSheet("color: #00ffff; background: transparent;")
+        header.setStyleSheet(
+            f"color: {_CT['fg_0']}; font-size: 12.5pt; font-weight: 700; background: transparent;"
+        )
         layout.addWidget(header)
         
         # 폼
@@ -4923,34 +5109,52 @@ class SendMailDialog(QDialog):
         # 첨부 파일 영역
         attach_header = QHBoxLayout()
         attach_label = QLabel("📎 첨부파일:")
-        attach_label.setStyleSheet("color: #00ff88; font-size: 10pt; font-weight: bold; background: transparent;")
+        attach_label.setStyleSheet(
+            f"color: {_CT['fg_1']}; font-size: 10pt; font-weight: 600; background: transparent;"
+        )
         attach_header.addWidget(attach_label)
         attach_header.addStretch()
-        
-        from .widgets import NeonButton
-        
-        btn_add_file = NeonButton("+ 파일 추가", color="cyan")
+
+        btn_add_file = QPushButton("+ 파일 추가")
         btn_add_file.setFixedSize(110, 28)
+        btn_add_file.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_add_file.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {_CT['bg_3']};
+                border: 1px solid {_CT['border']};
+                border-radius: 8px;
+                color: {_CT['fg_1']};
+                font-size: 9pt;
+                font-weight: 500;
+            }}
+            QPushButton:hover {{
+                background-color: {_CT['bg_4']};
+                color: {_CT['fg_0']};
+            }}
+        """)
         btn_add_file.clicked.connect(self._add_attachment)
         attach_header.addWidget(btn_add_file)
-        
+
         layout.addLayout(attach_header)
-        
+
         # 첨부파일 목록 (드래그 앤 드롭 지원)
         from PyQt6.QtWidgets import QListWidget
         self.attach_list = QListWidget()
         self.attach_list.setMaximumHeight(120)
         self.attach_list.setAcceptDrops(True)
-        self.attach_list.setStyleSheet("""
-            QListWidget {
-                background-color: rgba(15, 22, 40, 200);
-                border: 1px solid rgba(0, 200, 220, 0.2);
-                border-radius: 6px;
-                color: #00ff88;
+        self.attach_list.setStyleSheet(f"""
+            QListWidget {{
+                background-color: {_CT['bg_1']};
+                border: 1px solid {_CT['border_soft']};
+                border-radius: 8px;
+                color: {_CT['fg_1']};
                 font-size: 9pt;
-            }
-            QListWidget::item { padding: 4px 8px; }
-            QListWidget::item:selected { background-color: rgba(0, 255, 255, 50); color: #ffffff; }
+            }}
+            QListWidget::item {{ padding: 4px 8px; border-radius: 4px; }}
+            QListWidget::item:selected {{
+                background-color: {_CT['accent_bg']};
+                color: {_CT['fg_0']};
+            }}
         """)
         self.attach_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.attach_list.customContextMenuRequested.connect(self._show_attach_context_menu)
@@ -4964,32 +5168,61 @@ class SendMailDialog(QDialog):
         
         # 드래그 앤 드롭 힌트
         drop_hint = QLabel("💡 파일을 끌어다 놓거나 버튼으로 추가")
-        drop_hint.setStyleSheet("color: rgba(255,255,255,0.35); font-size: 8pt; background: transparent;")
+        drop_hint.setStyleSheet(f"color: {_CT['fg_3']}; font-size: 8pt; background: transparent;")
         layout.addWidget(drop_hint)
-        
+
         # 기존 첨부파일 추가
         for f in self.attachments:
             self.attach_list.addItem(f"📄 {os.path.basename(f)}")
-        
+
         # 버튼
         btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(8)
         btn_layout.addStretch()
-        
-        btn_cancel = NeonButton("취소", color="orange")
-        btn_cancel.setFixedSize(80, 35)
+
+        btn_cancel = QPushButton("취소")
+        btn_cancel.setFixedSize(96, 36)
+        btn_cancel.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_cancel.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {_CT['bg_3']};
+                border: 1px solid {_CT['border']};
+                border-radius: 8px;
+                color: {_CT['fg_1']};
+                font-size: 9.5pt;
+                font-weight: 500;
+            }}
+            QPushButton:hover {{
+                background-color: {_CT['bg_4']};
+                color: {_CT['fg_0']};
+            }}
+        """)
         btn_cancel.clicked.connect(self.reject)
         btn_layout.addWidget(btn_cancel)
-        
-        btn_send = NeonButton("📧 발송", color="cyan")
-        btn_send.setFixedSize(100, 35)
+
+        btn_send = QPushButton("메일 발송")
+        btn_send.setFixedSize(110, 36)
+        btn_send.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_send.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {_CT['accent']};
+                border: 1px solid {_CT['accent_hi']};
+                border-radius: 8px;
+                color: #ffffff;
+                font-size: 9.5pt;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{ background-color: {_CT['accent_hi']}; }}
+            QPushButton:pressed {{ background-color: {_CT['accent_lo']}; }}
+        """)
         btn_send.clicked.connect(self._send_mail)
         btn_layout.addWidget(btn_send)
-        
+
         layout.addLayout(btn_layout)
-        
+
         # 상태
         self.lbl_status = QLabel("")
-        self.lbl_status.setStyleSheet("color: #888; font-size: 9pt;")
+        self.lbl_status.setStyleSheet(f"color: {_CT['fg_3']}; font-size: 9pt;")
         layout.addWidget(self.lbl_status)
     
     def _add_attachment(self):
@@ -5284,12 +5517,12 @@ class SendMailDialog(QDialog):
                 print(f"[메일] 보낸메일함 저장 실패: {e}")  # 발송은 성공
 
             self.lbl_status.setText("✅ 발송 완료!")
-            self.lbl_status.setStyleSheet("color: #00ff88; font-size: 9pt;")
+            self.lbl_status.setStyleSheet("color: #59c886; font-size: 9pt;")
             QTimer.singleShot(1000, self.accept)
 
         except Exception as e:
             self.lbl_status.setText(f"❌ 발송 실패: {str(e)}")
-            self.lbl_status.setStyleSheet("color: #ff6666; font-size: 9pt;")
+            self.lbl_status.setStyleSheet("color: #fa6863; font-size: 9pt;")
 
 
 class MailThreadSelectDialog(QDialog):
@@ -5309,17 +5542,17 @@ class MailThreadSelectDialog(QDialog):
     def _init_ui(self):
         from PyQt6.QtWidgets import QGraphicsDropShadowEffect
         from PyQt6.QtGui import QFont
-        from .widgets import NeonButton
+        from .claude_theme import C as _CT
 
-        # 메인 컨테이너 (Frosted Glass)
+        # 메인 컨테이너 (Claude Design — 팝업 통일)
         self.container = QWidget(self)
         self.container.setObjectName("mail_thread_container")
-        self.container.setStyleSheet("""
-            #mail_thread_container {
-                background-color: rgba(25, 32, 48, 235);
-                border: 1px solid rgba(0, 255, 255, 0.3);
-                border-radius: 16px;
-            }
+        self.container.setStyleSheet(f"""
+            #mail_thread_container {{
+                background-color: {_CT['bg_2']};
+                border: 1px solid {_CT['border']};
+                border-radius: 12px;
+            }}
         """)
 
         shadow = QGraphicsDropShadowEffect(self)
@@ -5339,13 +5572,13 @@ class MailThreadSelectDialog(QDialog):
 
         # 헤더
         header = QLabel(f"B/L: {self.bl_number}")
-        header.setFont(QFont("Segoe UI", 14, QFont.Weight.Bold))
-        header.setStyleSheet("color: #00ffff; background: transparent;")
+        header.setStyleSheet(
+            f"color: {_CT['fg_0']}; font-size: 12.5pt; font-weight: 700; background: transparent;"
+        )
         layout.addWidget(header)
 
         sub = QLabel(f"관련 메일 {len(self.threads)}건  ·  답장할 메일을 선택하세요")
-        sub.setFont(QFont("Segoe UI", 9))
-        sub.setStyleSheet("color: rgba(255,255,255,0.55); background: transparent;")
+        sub.setStyleSheet(f"color: {_CT['fg_2']}; font-size: 9pt; background: transparent;")
         layout.addWidget(sub)
 
         layout.addSpacing(4)
@@ -5362,43 +5595,43 @@ class MailThreadSelectDialog(QDialog):
             self.table.setShowGrid(False)
             self.table.setFont(QFont("Segoe UI", 9))
             self.table.setMinimumHeight(250)
-            self.table.setStyleSheet("""
-                QTableWidget {
-                    background-color: rgba(15, 22, 40, 200);
-                    alternate-background-color: rgba(25, 35, 55, 200);
-                    border: 1px solid rgba(0, 200, 220, 0.2);
+            self.table.setStyleSheet(f"""
+                QTableWidget {{
+                    background-color: {_CT['bg_1']};
+                    alternate-background-color: {_CT['bg_2']};
+                    border: 1px solid {_CT['border_soft']};
                     border-radius: 8px;
-                    color: #e0e0e0;
-                    selection-background-color: rgba(0, 255, 255, 50);
-                    selection-color: #ffffff;
-                }
-                QTableWidget::item {
+                    color: {_CT['fg_1']};
+                    selection-background-color: {_CT['accent_bg']};
+                    selection-color: {_CT['fg_0']};
+                }}
+                QTableWidget::item {{
                     padding: 6px 10px;
-                    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-                }
-                QTableWidget::item:hover {
-                    background-color: rgba(0, 255, 255, 15);
-                }
-                QHeaderView::section {
-                    background-color: rgba(0, 50, 65, 220);
-                    color: #00ddee;
+                    border-bottom: 1px solid {_CT['border_soft']};
+                }}
+                QTableWidget::item:hover {{
+                    background-color: {_CT['bg_3']};
+                }}
+                QHeaderView::section {{
+                    background-color: {_CT['bg_3']};
+                    color: {_CT['fg_2']};
                     border: none;
-                    border-bottom: 2px solid rgba(0, 200, 220, 0.3);
+                    border-bottom: 1px solid {_CT['border']};
                     padding: 7px 10px;
-                    font-weight: bold;
+                    font-weight: 600;
                     font-size: 9pt;
-                }
-                QScrollBar:vertical {
-                    background: rgba(15, 22, 40, 100);
+                }}
+                QScrollBar:vertical {{
+                    background: transparent;
                     width: 8px;
                     border-radius: 4px;
-                }
-                QScrollBar::handle:vertical {
-                    background: rgba(0, 200, 220, 0.3);
+                }}
+                QScrollBar::handle:vertical {{
+                    background: {_CT['border_strong']};
                     border-radius: 4px;
                     min-height: 30px;
-                }
-                QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+                }}
+                QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
             """)
 
             def extract_name(raw: str) -> str:
@@ -5451,8 +5684,9 @@ class MailThreadSelectDialog(QDialog):
             layout.addWidget(self.table)
         else:
             no_result = QLabel("검색 결과가 없습니다.\n새 메일을 작성하시겠습니까?")
-            no_result.setFont(QFont("Segoe UI", 11))
-            no_result.setStyleSheet("color: rgba(255,150,150,0.9); background: transparent;")
+            no_result.setStyleSheet(
+                f"color: {_CT['fg_1']}; font-size: 11pt; background: transparent;"
+            )
             no_result.setAlignment(Qt.AlignmentFlag.AlignCenter)
             layout.addWidget(no_result)
             layout.addStretch()
@@ -5460,24 +5694,58 @@ class MailThreadSelectDialog(QDialog):
 
         layout.addSpacing(4)
 
-        # 버튼
-        btn_layout = QHBoxLayout()
+        # 버튼 (통일 디자인: 주요=액센트 채움, 보조=세컨더리)
+        _btn_secondary = f"""
+            QPushButton {{
+                background-color: {_CT['bg_3']};
+                border: 1px solid {_CT['border']};
+                border-radius: 8px;
+                color: {_CT['fg_1']};
+                font-size: 9.5pt;
+                font-weight: 500;
+            }}
+            QPushButton:hover {{
+                background-color: {_CT['bg_4']};
+                color: {_CT['fg_0']};
+            }}
+        """
+        _btn_primary = f"""
+            QPushButton {{
+                background-color: {_CT['accent']};
+                border: 1px solid {_CT['accent_hi']};
+                border-radius: 8px;
+                color: #ffffff;
+                font-size: 9.5pt;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{ background-color: {_CT['accent_hi']}; }}
+            QPushButton:pressed {{ background-color: {_CT['accent_lo']}; }}
+        """
 
-        btn_new = NeonButton("새 메일 작성", color="green")
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(8)
+
+        btn_new = QPushButton("새 메일 작성")
         btn_new.setFixedSize(120, 34)
+        btn_new.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_new.setStyleSheet(_btn_primary if not self.threads else _btn_secondary)
         btn_new.clicked.connect(lambda: self._finish(None))
         btn_layout.addWidget(btn_new)
 
         btn_layout.addStretch()
 
-        btn_cancel = NeonButton("취소", color="orange")
-        btn_cancel.setFixedSize(80, 34)
+        btn_cancel = QPushButton("취소")
+        btn_cancel.setFixedSize(90, 34)
+        btn_cancel.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_cancel.setStyleSheet(_btn_secondary)
         btn_cancel.clicked.connect(self.reject)
         btn_layout.addWidget(btn_cancel)
 
         if self.threads:
-            btn_select = NeonButton("답장", color="cyan")
-            btn_select.setFixedSize(80, 34)
+            btn_select = QPushButton("답장")
+            btn_select.setFixedSize(90, 34)
+            btn_select.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn_select.setStyleSheet(_btn_primary)
             btn_select.clicked.connect(self._on_select)
             btn_layout.addWidget(btn_select)
 

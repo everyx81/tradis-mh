@@ -1020,6 +1020,42 @@ class AutoRenamer:
                         return _parse_item_amount(bi.get('amount', 0))
             return _get_file_amount(filename)
 
+        def _supplier_key(fn):
+            """공급자 식별 키 — 사업자번호 우선, 없으면 상호"""
+            cached = _ocr_cache.get(fn)
+            if not cached:
+                return ""
+            biz = re.sub(r'\D', '', str(cached.get('supplier_business_no', '') or ''))
+            if len(biz) == 10:
+                return biz
+            return (cached.get('supplier_name', '') or '').replace(' ', '')
+
+        def _find_supplier_bundle(candidates, item_amt):
+            """정산서 항목 금액 = 같은 공급자 계산서들의 합계 인 묶음 탐색.
+
+            포워더가 한 건의 비용을 여러 장(해상운임/부대비용 등)으로 분할 발행하면
+            개별 파일 금액이 정산서 항목과 안 맞음 → 공급자(사업자번호) 단위로 묶어
+            합계를 비교한다. 파일명 doc_type 라벨이 잘못 분류돼 있어도 동작.
+            오매칭 방지: 묶음 중 최소 1개는 키워드 후보(candidates)여야 함.
+            """
+            if item_amt <= 0:
+                return None
+            by_supplier = {}
+            for pdf in allp:
+                if pdf in af:
+                    continue
+                key = _supplier_key(pdf)
+                if key:
+                    by_supplier.setdefault(key, []).append(pdf)
+            cand_set = set(candidates)
+            for key, group_files in by_supplier.items():
+                if len(group_files) < 2 or not any(f in cand_set for f in group_files):
+                    continue
+                if sum(_get_file_amount(f) for f in group_files) == item_amt:
+                    # 키워드 후보를 대표(슬롯 파일)로 앞세움
+                    return sorted(group_files, key=lambda f: (f not in cand_set, f))
+            return None
+
         # ── Step 0: 분리형/묶음형 파일 사전 분류 ──
         # 분리형: 파일의 billing_items 이름이 정산서 expense 이름과 2개 이상 정확 일치
         #         → 한 파일을 여러 expense 가 공유 (예: 운송료계산서 안에 보세운송료+운송료)
@@ -1125,6 +1161,7 @@ class AutoRenamer:
             candidates = _find_keyword_candidates(search_kws, af)
 
             picked = None
+            bundle_rest = []
             item_amt = _parse_item_amount(item_amount)
 
             if candidates:
@@ -1134,6 +1171,12 @@ class AutoRenamer:
                         if _get_comparable_amount(c, search_kws) == item_amt:
                             picked = c
                             break
+                # 개별 금액 불일치 → 같은 공급자 분할 발행 묶음의 합계 비교
+                # (예: 포워더가 해상운임/부대비용을 두 장으로 발행, 정산서엔 합계 한 줄)
+                if not picked:
+                    bundle = _find_supplier_bundle(candidates, item_amt)
+                    if bundle:
+                        picked, bundle_rest = bundle[0], bundle[1:]
                 # 금액 매칭 실패 또는 금액 없음 → 첫 번째 후보
                 if not picked:
                     picked = candidates[0]
@@ -1142,6 +1185,11 @@ class AutoRenamer:
                 m.append({'label': f'비용: {item_name}', 'filename': picked, 'item_amount': item_amount})
                 af.append(picked)
                 matched_kws.append(search_kws)
+                # 묶음 나머지 파일은 "(추가)" 로 바로 뒤에 배치
+                # — 금액 검증기가 (추가) 파일 금액을 부모 항목에 합산 비교함
+                for extra in bundle_rest:
+                    m.append({'label': f'비용: {item_name} (추가)', 'filename': extra, 'item_amount': 0})
+                    af.append(extra)
             else:
                 m.append({'label': f'비용: {item_name}', 'filename': '', 'item_amount': item_amount})
                 matched_kws.append(search_kws)

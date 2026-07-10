@@ -18,9 +18,10 @@ C = {
     "bg_3": "#23262d",      # 엘리베이티드 (oklch 0.27)
     "bg_4": "#2d3038",      # 호버    (oklch 0.31)
 
-    # 보더
-    "border_soft":   "rgba(45, 48, 56, 150)",
-    "border":        "rgba(63, 66, 75, 180)",
+    # 보더 — 불투명 (반투명 보더는 둥근 모서리 이음새가 점으로 도드라짐)
+    # 기존 rgba 값을 배경(bg_1~bg_2)과 미리 합성한 근사치
+    "border_soft":   "#23262d",   # rgba(45,48,56,150) over bg_1
+    "border":        "#343740",   # rgba(63,66,75,180) over bg_2
     "border_strong": "#484b54",
 
     # 전경(텍스트) — 브라우저 oklch 렌더와 매치되도록 sRGB 범위에서 톤업
@@ -34,7 +35,7 @@ C = {
     "accent_hi":     "#5ebdff",   # oklch 0.78
     "accent_lo":     "#3284d0",   # oklch 0.6
     "accent_bg":     "rgba(75, 163, 247, 36)",
-    "accent_border": "rgba(75, 163, 247, 90)",
+    "accent_border": "#2c4d6e",   # rgba(75,163,247,90) over bg_2 — 불투명 (모서리 점 방지)
 
     # 상태
     "green":  "#59c886",     # oklch 0.75 0.14 155

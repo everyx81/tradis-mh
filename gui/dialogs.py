@@ -592,16 +592,19 @@ class IndependentCard(GlassFrame):
         g = lerp(23, 30)
         b = lerp(29, 36)
 
-        # border soft → border
+        # border soft → border — 카드 배경과 미리 합성해 불투명으로 (모서리 점 방지)
         br_r = lerp(45, 63)
         br_g = lerp(48, 66)
         br_b = lerp(56, 75)
-        br_a = lerp(150, 200)
+        br_a = lerp(150, 200) / 255.0
+        obr_r = round(br_r * br_a + r * (1 - br_a))
+        obr_g = round(br_g * br_a + g * (1 - br_a))
+        obr_b = round(br_b * br_a + b * (1 - br_a))
 
         self.setStyleSheet(f"""
             #IndependentCardRoot {{
                 background-color: rgb({r}, {g}, {b});
-                border: 1px solid rgba({br_r}, {br_g}, {br_b}, {br_a});
+                border: 1px solid rgb({obr_r}, {obr_g}, {obr_b});
                 border-radius: 14px;
             }}
         """)
@@ -1204,15 +1207,19 @@ class GroupCard(GlassFrame):
         g = lerp(base_g, hover_g)
         b = lerp(base_b, hover_b)
 
+        # 보더 — 카드 배경과 미리 합성해 불투명으로 (모서리 점 방지)
         br_r = lerp(45, 63)
         br_g = lerp(48, 66)
         br_b = lerp(56, 75)
-        br_a = lerp(150, 200) if not is_open else lerp(200, 230)
+        br_a = (lerp(150, 200) if not is_open else lerp(200, 230)) / 255.0
+        obr_r = round(br_r * br_a + r * (1 - br_a))
+        obr_g = round(br_g * br_a + g * (1 - br_a))
+        obr_b = round(br_b * br_a + b * (1 - br_a))
 
         self.setStyleSheet(f"""
             #GroupCardRoot {{
                 background-color: rgb({r}, {g}, {b});
-                border: 1px solid rgba({br_r}, {br_g}, {br_b}, {br_a});
+                border: 1px solid rgb({obr_r}, {obr_g}, {obr_b});
                 border-radius: 11px;
             }}
         """)
@@ -1313,10 +1320,10 @@ class GroupCard(GlassFrame):
         )
         if _io_is_export:
             _io_txt, _io_fg = "수출", "#d9c6fa"
-            _io_bg, _io_bd = "rgba(180, 141, 244, 30)", "rgba(180, 141, 244, 110)"
+            _io_bg, _io_bd = "rgba(180, 141, 244, 30)", "#594a7a"  # 보더 불투명 (모서리 점 방지)
         else:
             _io_txt, _io_fg = "수입", "#bfe3ff"
-            _io_bg, _io_bd = "rgba(75, 163, 247, 30)", "rgba(75, 163, 247, 110)"
+            _io_bg, _io_bd = "rgba(75, 163, 247, 30)", "#2c537b"  # 보더 불투명 (모서리 점 방지)
         self.lbl_io_tag = QLabel(_io_txt)
         self.lbl_io_tag.setStyleSheet(f"""
             color: {_io_fg};
@@ -2008,31 +2015,32 @@ class GroupCard(GlassFrame):
 
     # 상태별 pill 스타일 — 프리뷰와 일치 (동일 색 계열 통일, 약간 뿌연 반투명 느낌)
     # Claude Design 시안: 기본 pill = bg_3 + fg_0, 상태별 도트 색만 변경 (err만 빨간 틴트)
+    # 보더는 불투명 근사색 사용 — 반투명이면 둥근 모서리 이음새에 점이 도드라짐
     PILL_STYLES = {
         'green': {
             # 완료: 녹색 틴트 (red/yellow와 동일한 패턴)
             'bg':     'rgba(89, 200, 134, 36)',
-            'border': 'rgba(89, 200, 134, 130)',
+            'border': '#377153',       # rgba(89,200,134,130) over bg_1
             'text':   '#a8e8bf',
             'dot':    '#59c886',       # CT green
         },
         'yellow': {
             # 폴더 정리 대기 — 파스텔 옐로 틴트 (red/green과 같은 톤 계열로 조화)
             'bg':     'rgba(234, 197, 79, 36)',
-            'border': 'rgba(234, 197, 79, 130)',
+            'border': '#817037',       # rgba(234,197,79,130) over bg_1
             'text':   '#f3dc94',
             'dot':    '#eac54f',
         },
         'red': {
             # 디자인: .id-pill.r 은 붉은 틴트 배경 + 붉은 보더 + 붉은 텍스트
             'bg':     'rgba(250, 104, 99, 36)',
-            'border': 'rgba(250, 104, 99, 130)',
+            'border': '#894041',       # rgba(250,104,99,130) over bg_1
             'text':   '#f8b8b4',
             'dot':    '#fa6863',       # CT red
         },
         'gray': {
             'bg':     '#23262d',
-            'border': 'rgba(60, 64, 76, 180)',
+            'border': '#30343e',       # rgba(60,64,76,180) over bg_1
             'text':   '#f1f2f5',
             'dot':    '#6b6e78',       # CT fg_3
         },

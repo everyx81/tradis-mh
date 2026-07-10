@@ -102,6 +102,28 @@ def remove_alias(alias):
             _save(ALIAS_FILE, data)
 
 
+def unlearn_alias(alias, canonical):
+    """되돌리기 시 학습 1회 취소 (count 감소, 0이 되면 짝 제거)."""
+    alias = (alias or '').strip()
+    canonical = (canonical or '').strip()
+    if not alias or not canonical:
+        return
+    with _LOCK:
+        data = _load(ALIAS_FILE)
+        entry = data.get(alias)
+        if not isinstance(entry, dict) or canonical not in entry:
+            return
+        rec = entry[canonical]
+        count = int(rec.get('count', 0)) - 1 if isinstance(rec, dict) else 0
+        if count <= 0:
+            del entry[canonical]
+            if not entry:
+                del data[alias]
+        else:
+            rec['count'] = count
+        _save(ALIAS_FILE, data)
+
+
 # ─────────────────────────────────────────────
 # 금액-only 매칭 사용자 결정
 # ─────────────────────────────────────────────

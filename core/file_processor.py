@@ -1462,10 +1462,19 @@ class AutoRenamer:
         archive_dir = os.path.join(dr, folder_name)
         os.makedirs(archive_dir, exist_ok=True)
 
+        # 되돌리기 기록 — 삭제 대신 백업, 이동은 원위치 기록
+        from core import merge_history
+        history = merge_history.new_entry(
+            kind='archive' if archive_only or len(fo) < 2 else 'merge',
+            bl_id=target_id, folder_name=folder_name,
+            work_dir=dr, archive_dir=archive_dir)
+        self.last_history_entry = None
+
         # 병합 확정 = "이 파일들은 같은 건" 확정 라벨 → 회사명 별칭 학습
         # (파일 이동 전에 실행해야 OCR 캐시 검증이 가능)
         try:
-            self._learn_company_aliases(dr, fo, final_company, target_id)
+            for _alias, _canon in self._learn_company_aliases(dr, fo, final_company, target_id):
+                merge_history.record_alias(history, _alias, _canon)
         except Exception as e:
             self.log(f" -> [별칭 학습 건너뜀] {e}")
 
@@ -1509,6 +1518,7 @@ class AutoRenamer:
                         merged_doc.close()
                         try: os.rmdir(archive_dir)
                         except OSError: pass
+                        merge_history.discard_entry(history)
                         return False
 
                     merged_doc.save(output_path)
@@ -1549,6 +1559,7 @@ class AutoRenamer:
                             # 빈 폴더 정리
                             try: os.rmdir(archive_dir)
                             except OSError: pass
+                            merge_history.discard_entry(history)
                             return False
                         # "ignore" → 계속 진행
                         self.log(f" -> [무시] 실패 파일을 보존하고 진행합니다.")
@@ -1558,8 +1569,9 @@ class AutoRenamer:
                     break  # while 루프 종료 (정상 또는 ignore)
 
                 shutil.move(output_path, os.path.join(archive_dir, final_of))
+                history['merged_file'] = final_of
 
-                # 원본 파일 정리 (실패 파일은 보존)
+                # 원본 파일 정리 (실패 파일은 보존, 삭제 대신 되돌리기용 백업)
                 failed_names = {f for f, _ in failed_files} if failed_files else set()
                 for f in fo:
                     if not f or f == final_of: continue
@@ -1573,15 +1585,13 @@ class AutoRenamer:
                         # 실패 파일 또는 신고필증 → 폴더로 보존
                         try:
                             shutil.move(src_path, os.path.join(archive_dir, f))
+                            merge_history.record_move(history, f, dr, archive_dir)
                             if f in failed_names:
                                 self.log(f" -> [보존] 병합 실패 파일: {f}")
                         except Exception:
                             pass
                     else:
-                        try:
-                            os.remove(src_path)
-                        except Exception:
-                            pass
+                        merge_history.backup_file(history, src_path)
 
                 # 같은 ID의 남은 PDF 추가 정리 (기존 안전망)
                 if target_id:
@@ -1594,13 +1604,11 @@ class AutoRenamer:
                             if "신고필증" in (d or ""):
                                 try:
                                     shutil.move(os.path.join(dr, f), os.path.join(archive_dir, f))
+                                    merge_history.record_move(history, f, dr, archive_dir)
                                 except Exception:
                                     pass
                             else:
-                                try:
-                                    os.remove(os.path.join(dr, f))
-                                except Exception:
-                                    pass
+                                merge_history.backup_file(history, os.path.join(dr, f))
             else:
                 # archive_only=True 또는 1개 파일: 병합 없이 원본을 폴더로 이동
                 for f in fo:
@@ -1609,6 +1617,7 @@ class AutoRenamer:
                         dst = os.path.join(archive_dir, f)
                         if os.path.exists(src) and not os.path.exists(dst):
                             shutil.move(src, dst)
+                            merge_history.record_move(history, f, dr, archive_dir)
                 if archive_only:
                     self.log(f" -> [아카이브] {len(fo)}개 파일을 병합 없이 폴더로 이동")
 
@@ -1674,6 +1683,9 @@ class AutoRenamer:
                                         os.remove(src_path)  # 원본 삭제
                                         self.log(f" -> [마킹 이동] {os.path.basename(src_path)}")
                                         moved_marked.add(os.path.basename(src_path))
+                                        merge_history.record_move(
+                                            history, os.path.basename(src_path),
+                                            os.path.dirname(src_path), archive_dir)
                                         marked_count += 1
                                         move_success = True
                                         break
@@ -1711,13 +1723,28 @@ class AutoRenamer:
 
             # 관련 파일/폴더 자동 수집 (merge 대상 폴더 - 이름변경 폴더에서만)
             # 마킹으로 이미 이동된 파일은 제외
-            self._collect_related_items(dr, archive_dir, target_id, exclude_names=moved_marked)
+            self._collect_related_items(dr, archive_dir, target_id,
+                                        exclude_names=moved_marked, history=history)
+
+            # 되돌리기 기록 확정
+            merge_history.save_entry(history)
+            self.last_history_entry = {
+                'id': history['id'],
+                'folder_name': folder_name,
+                'kind': history['kind'],
+                'file_count': merge_history.file_count(history),
+            }
 
             self.log(f" -> [완료] 폴더 정리 완료: {folder_name}")
             return True
         except Exception as e:
             self.log(f"병합 실행 오류: {e}")
             print(f"병합 실행 오류: {e}")
+            # 백업했던 원본은 작업 폴더로 복귀
+            try:
+                merge_history.discard_entry(history)
+            except Exception:
+                pass
             return False
 
 
@@ -1731,11 +1758,12 @@ class AutoRenamer:
         - 2글자 이하 표기는 부분포함 매칭과 결합 시 과매칭 위험 → 제외
         """
         import re as _re
+        learned = []
         if not canonical or not target_id or not fo:
-            return
+            return learned
         canonical = cleanup_company_name(canonical).replace(" ", "")
         if not canonical or not _re.search(r'[가-힣]', canonical):
-            return  # 표준명은 한글 상호만
+            return learned  # 표준명은 한글 상호만
         from core.match_memory import learn_alias
         for f in fo:
             if not f:
@@ -1755,12 +1783,15 @@ class AutoRenamer:
             if supplier and alias == supplier:
                 continue
             learn_alias(alias, canonical)
+            learned.append((alias, canonical))
             self.log(f" -> [별칭 학습] '{alias}' → '{canonical}'")
+        return learned
 
-    def _collect_related_items(self, dr, archive_dir, target_id, exclude_names=None):
+    def _collect_related_items(self, dr, archive_dir, target_id, exclude_names=None, history=None):
         """송품장번호가 포함된 파일/폴더를 정리 폴더로 자동 수집"""
         if not target_id:
             return
+        from core import merge_history as _mh
 
         tid_upper = normalize_id(target_id)
         archive_name = os.path.basename(archive_dir)
@@ -1789,6 +1820,8 @@ class AutoRenamer:
                     if not os.path.exists(dst):
                         try:
                             shutil.move(item_path, dst)
+                            if history is not None:
+                                _mh.record_move(history, item, dr, archive_dir)
                             self.log(f" -> [수집] {item}")
                             collected += 1
                         except Exception as e:
@@ -1814,6 +1847,8 @@ class AutoRenamer:
                                 dst = os.path.join(archive_dir, f)
                                 if not os.path.exists(dst):
                                     shutil.move(src, dst)
+                                    if history is not None:
+                                        _mh.record_move(history, f, item_path, archive_dir)
                                     self.log(f" -> [수집] {f} (from {item}/)")
                                     collected += 1
                         # 빈 폴더 삭제 시도

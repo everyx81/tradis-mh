@@ -60,6 +60,7 @@ class JarvisGUI(QMainWindow):
     shipping_search_signal = pyqtSignal(str, str)  # 선적서류 검색 (bl_number, target_folder)
     merge_verify_signal = pyqtSignal(object)  # 병합 검증 실패 팝업 요청
     move_failed_signal = pyqtSignal(list)  # 파일 이동 실패 알림 [(name, reason)]
+    undo_toast_signal = pyqtSignal(object)  # 정리 완료 → 되돌리기 토스트 {id, folder_name, kind, file_count}
     rename_trigger_signal = pyqtSignal()  # 파일 이름 변경 완료 시 emit (디바운싱 트리거)
     export_update_signal = pyqtSignal(object)  # 수출 자동화 UI 업데이트용
     update_check_done = pyqtSignal(dict)  # 업데이트 확인 완료 시그널
@@ -122,6 +123,7 @@ class JarvisGUI(QMainWindow):
         self.shipping_search_signal.connect(self._on_shipping_search)
         self.merge_verify_signal.connect(self._on_merge_verify_failed)
         self.move_failed_signal.connect(self._on_move_failed)
+        self.undo_toast_signal.connect(self._show_undo_toast)
         self.rename_trigger_signal.connect(self.trigger_debounced_refresh)
         # 메일 모니터링 UI 자동 갱신 (기능 제거됨)
         # self.export_update_signal.connect(self._update_veronica_ui)
@@ -135,6 +137,13 @@ class JarvisGUI(QMainWindow):
         
         # Everything 자동 시작 (검색 기능 활성화) - 비동기 실행으로 프리징 방지
         threading.Thread(target=self._start_everything, daemon=True).start()
+
+        # 되돌리기 백업 자동 정리 (7일 경과분 휴지통 이동, 백그라운드)
+        try:
+            from core.merge_history import cleanup_old_async
+            cleanup_old_async(log=self.emit_log)
+        except Exception:
+            pass
         
         # 메일 모니터링 자동 시작 (기능 제거됨)
         # QTimer.singleShot(2000, self._start_mail_monitoring)
@@ -459,6 +468,48 @@ class JarvisGUI(QMainWindow):
                 background-color: {CT["bg_0"]};
                 border: 1px solid {CT["border_soft"]};
                 border-radius: 14px;
+            }}
+
+            /* 스크롤바 — Claude Design (레거시 네온 그라데이션 오버라이드) */
+            QScrollBar:vertical {{
+                border: none;
+                background: transparent;
+                width: 8px;
+                margin: 0px;
+            }}
+            QScrollBar::handle:vertical {{
+                background: rgba(106, 110, 118, 90);
+                border-radius: 4px;
+                min-height: 36px;
+            }}
+            QScrollBar:vertical:hover {{ background: transparent; }}
+            QScrollBar::handle:vertical:hover {{ background: rgba(158, 161, 168, 140); }}
+            QScrollBar::handle:vertical:pressed {{ background: rgba(158, 161, 168, 180); }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+                height: 0px; background: none;
+            }}
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
+                background: none;
+            }}
+            QScrollBar:horizontal {{
+                border: none;
+                background: transparent;
+                height: 8px;
+                margin: 0px;
+            }}
+            QScrollBar::handle:horizontal {{
+                background: rgba(106, 110, 118, 90);
+                border-radius: 4px;
+                min-width: 36px;
+            }}
+            QScrollBar:horizontal:hover {{ background: transparent; }}
+            QScrollBar::handle:horizontal:hover {{ background: rgba(158, 161, 168, 140); }}
+            QScrollBar::handle:horizontal:pressed {{ background: rgba(158, 161, 168, 180); }}
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
+                width: 0px; background: none;
+            }}
+            QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{
+                background: none;
             }}
         """)
 
@@ -2099,6 +2150,27 @@ class JarvisGUI(QMainWindow):
         btn_rescan.setStyleSheet(self._btn_secondary_css())
         btn_rescan.clicked.connect(self.run_intelligent_merge)
         title_row.addWidget(btn_rescan)
+
+        # 파일 합치기 기록 (합치기/폴더 정리 되돌리기) — 시안대로 파란 액센트
+        btn_history = QPushButton()
+        btn_history.setIcon(QIcon(_icpx("History", size=15, color=CT['accent_hi'])))
+        btn_history.setIconSize(_QSize(15, 15))
+        btn_history.setFixedSize(32, 30)
+        btn_history.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_history.setToolTip("파일 합치기 기록 — 합치기/폴더 정리 되돌리기")
+        btn_history.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {CT['accent_bg']};
+                border: 1px solid {CT['accent_border']};
+                border-radius: 8px;
+            }}
+            QPushButton:hover {{
+                background-color: rgba(75, 163, 247, 90);
+                border: 1px solid {CT['accent_hi']};
+            }}
+        """)
+        btn_history.clicked.connect(self.open_merge_history)
+        title_row.addWidget(btn_history)
         layout.addLayout(title_row)
 
         # ── 2) 구분선 ──
@@ -2323,6 +2395,35 @@ class JarvisGUI(QMainWindow):
         self._debounced_refresh()
         # 백그라운드 메일 프리페치
         self._prefetch_mail_cache()
+
+    def open_merge_history(self):
+        """정리 기록 팝업 (골라서 되돌리기)"""
+        from gui.history_dialog import MergeHistoryDialog
+        dlg = MergeHistoryDialog(self, log=self.emit_log, on_undone=self._on_merge_complete)
+        dlg.exec()
+
+    def _show_undo_toast(self, info):
+        """합치기/폴더 정리 완료 직후 되돌리기 토스트 (메인 스레드)
+
+        현재 비활성화됨 — 되돌리기는 정리 기록 팝업에서만 제공 (2026-07 사용자 결정).
+        다시 켜려면 dialogs.py run_merge/run_archive 성공 지점에서
+        parent.undo_toast_signal.emit(renamer.last_history_entry) 호출을 복원할 것.
+        """
+        if not info or not info.get('id'):
+            return
+        from gui.history_dialog import UndoToast, confirm_undo, run_undo
+        entry_id = info['id']
+        folder_name = info.get('folder_name', '')
+        kind_txt = "합치기" if info.get('kind') == 'merge' else "폴더 정리"
+        sub_text = f"{kind_txt} · 파일 {info.get('file_count', 0)}개"
+
+        def _undo():
+            if not confirm_undo(self, folder_name):
+                return
+            run_undo(self, entry_id, log=self.emit_log, on_done=self._on_merge_complete)
+
+        toast = UndoToast(folder_name, sub_text, _undo)
+        toast.show_toast()
 
     def _on_move_failed(self, failed_list):
         """파일 이동 실패 알림 팝업 (메인 스레드)"""

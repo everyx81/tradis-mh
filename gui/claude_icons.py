@@ -53,6 +53,8 @@ _SVG_SHAPES = {
     "Merge":     '<path d="M6 3v6a6 6 0 0 0 6 6h6"/><path d="M18 3v6"/><path d="m15 12 3 3 3-3"/>',
     "Split":     '<path d="M6 3v6M6 15v6M18 3v6a6 6 0 0 1-6 6H6"/><path d="m3 6 3-3 3 3"/>',
     "Tag":       '<path d="M7 3h7l7 7-10 10L4 13V6a3 3 0 0 1 3-3Z"/><circle cx="9" cy="9" r="1.2" fill="{fill}" stroke="none"/>',
+    "History":   '<path d="M3 12a9 9 0 1 0 2.6-6.4L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3.5 2"/>',
+    "Undo":      '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>',
 }
 
 
@@ -72,18 +74,34 @@ def _svg_for(name: str, color: str = "#c9ccd3", stroke_width: float = 1.6) -> st
 
 
 def pixmap(name: str, size: int = 16, color: str = "#c9ccd3", stroke_width: float = 1.6) -> QPixmap:
-    """이름 + 색상 + 크기로 QPixmap 생성."""
+    """이름 + 색상 + 크기로 QPixmap 생성.
+
+    화면 배율(DPI)에 맞춰 실제 픽셀 해상도로 렌더링 — 확대 화면에서도 선명.
+    """
     svg_str = _svg_for(name, color, stroke_width)
     if not svg_str:
         return QPixmap()
+
+    # 디바이스 픽셀 비율 (150% 화면 = 1.5) — 흐릿한 업스케일 방지
+    dpr = 1.0
+    try:
+        from PyQt6.QtGui import QGuiApplication
+        app = QGuiApplication.instance()
+        if app is not None:
+            dpr = max(1.0, float(app.devicePixelRatio()))
+    except Exception:
+        pass
+
     renderer = QSvgRenderer(QByteArray(svg_str.encode("utf-8")))
-    pm = QPixmap(size, size)
+    px = max(1, round(size * dpr))
+    pm = QPixmap(px, px)
     pm.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pm)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
     painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
     renderer.render(painter)
     painter.end()
+    pm.setDevicePixelRatio(dpr)
     return pm
 
 

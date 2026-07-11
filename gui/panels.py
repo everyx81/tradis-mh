@@ -1464,6 +1464,7 @@ class FileManagerWidget(QWidget):
             dlg.add_button("파일만 꺼내기", "extract", "cyan")
             dlg.exec()
             extract_files = (dlg.result_value == "extract")
+            dlg.deleteLater()  # 닫힌 뒤 부모 자식으로 남지 않게 정리
 
         moved_count = 0
         empty_folders = []  # 파일 꺼낸 후 삭제할 빈 폴더
@@ -1956,10 +1957,12 @@ class FileManagerWidget(QWidget):
         dlg.add_button("새 폴더", "new", "gray")
         dlg.add_button("병합", "merge", "cyan")
         dlg.exec()
+        result = dlg.result_value
+        dlg.deleteLater()
 
-        if dlg.result_value == "merge":
+        if result == "merge":
             return "merge"
-        elif dlg.result_value == "new":
+        elif result == "new":
             return "new"
         else:
             return None
@@ -1979,10 +1982,12 @@ class FileManagerWidget(QWidget):
         dlg.add_button("새 폴더", "new", "gray")
         dlg.add_button("기존 폴더", "existing", "cyan")
         dlg.exec()
+        result = dlg.result_value
+        dlg.deleteLater()
 
-        if dlg.result_value == "existing":
+        if result == "existing":
             return "existing"
-        elif dlg.result_value == "new":
+        elif result == "new":
             return "new"
         else:
             return None
@@ -2371,8 +2376,9 @@ class FileManagerWidget(QWidget):
         dlg.exec()
 
         action = result["action"]
+        selected = [(p, t) for cb, p, t in checkboxes if cb.isChecked()] if action else []
+        dlg.deleteLater()
         if action:
-            selected = [(p, t) for cb, p, t in checkboxes if cb.isChecked()]
             return action, selected
         return None, []
 
@@ -2839,10 +2845,11 @@ class FileManagerWidget(QWidget):
         print(f"[메일 다이얼로그] threads={len(threads)}건, company={company}, bl={bl_id}")
 
         dlg = MailThreadSelectDialog(self, threads=threads, bl_number=bl_id)
-        if dlg.exec() != QDialog.DialogCode.Accepted:
+        accepted = dlg.exec() == QDialog.DialogCode.Accepted
+        selected = dlg.selected_thread if accepted else None
+        dlg.deleteLater()
+        if not accepted:
             return
-
-        selected = dlg.selected_thread
 
         # 시간대별 인사말 (랜덤 선택)
         import random
@@ -2929,6 +2936,7 @@ class FileManagerWidget(QWidget):
             references=references,
         )
         mail_dlg.exec()
+        mail_dlg.deleteLater()
 
     def _show_target_folder_context_menu(self, pos):
         """MOVE TARGET 폴더 우클릭 메뉴"""
@@ -3441,6 +3449,7 @@ class FileManagerWidget(QWidget):
         layout.addLayout(btn_row)
 
         dlg.exec()
+        dlg.deleteLater()
 
     def _update_naming_preview(self):
         """파일 이름 패턴 미리보기 갱신"""
@@ -3683,6 +3692,7 @@ class FileManagerWidget(QWidget):
         btn_close.setFixedHeight(40)
         btn_close.clicked.connect(dlg.accept)
         layout.addWidget(btn_close)
-        
+
         dlg.exec()
+        dlg.deleteLater()
 

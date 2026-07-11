@@ -83,7 +83,9 @@ def confirm_undo(parent, folder_name):
         JarvisMessageBox.Question)
     dlg.add_button("취소", "reject", "gray")
     dlg.add_button("되돌리기", "accept", "cyan")
-    return dlg.exec() == QDialog.DialogCode.Accepted
+    accepted = dlg.exec() == QDialog.DialogCode.Accepted
+    dlg.deleteLater()
+    return accepted
 
 
 class _ElideLabel(QLabel):

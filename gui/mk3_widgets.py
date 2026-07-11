@@ -608,8 +608,10 @@ class ScheduleCardWidget(QFrame):
         
     def open_edit_dialog(self):
         dialog = ScheduleEditDialog(self.schedule, self.window())
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            data = dialog.result_data
+        accepted = dialog.exec() == QDialog.DialogCode.Accepted
+        data = dialog.result_data if accepted else None
+        dialog.deleteLater()
+        if accepted:
             if data["action"] == "delete":
                 self.main_widget.schedule_manager.delete_schedule(self.schedule["id"])
             elif data["action"] == "save":
@@ -923,8 +925,10 @@ class MK3ScheduleOnlyWidget(QWidget):
         }
 
         dialog = ScheduleEditDialog(dummy_schedule, self, is_new=True)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            data = dialog.result_data
+        accepted = dialog.exec() == QDialog.DialogCode.Accepted
+        data = dialog.result_data if accepted else None
+        dialog.deleteLater()
+        if accepted:
             if data["action"] == "save":
                 self.schedule_manager.add_schedule(
                     title=data["title"],

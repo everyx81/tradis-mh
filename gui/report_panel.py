@@ -1088,10 +1088,13 @@ class ReportPanel(QWidget):
             cc=self.last_mail_cc
         )
         
-        if dialog.exec():
+        accepted = bool(dialog.exec())
+        if accepted:
             # 성공 시 사용한 주소 저장
             self.last_mail_to = dialog.input_to.text().strip()
             self.last_mail_cc = dialog.input_cc.text().strip()
+        dialog.deleteLater()
+        if accepted:
             self._save_data()
             
             # Google Sheets 보고일자 업데이트

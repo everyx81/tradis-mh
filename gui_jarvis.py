@@ -404,6 +404,7 @@ class JarvisGUI(QMainWindow):
 
         update_page()
         dlg.exec()
+        dlg.deleteLater()  # 닫힌 뒤 메인 창 자식으로 남지 않게 정리
 
     def _migrate_credentials_to_keyring(self):
         """기존 config.json의 민감정보를 Windows Credential Manager로 이동 (최초 1회)"""
@@ -1644,8 +1645,9 @@ class JarvisGUI(QMainWindow):
         
         btn_layout.addStretch()
         main_layout.addLayout(btn_layout)
-        
+
         dlg.exec()
+        dlg.deleteLater()
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -2391,6 +2393,7 @@ class JarvisGUI(QMainWindow):
         from gui.history_dialog import MergeHistoryDialog
         dlg = MergeHistoryDialog(self, log=self.emit_log, on_undone=self._on_merge_complete)
         dlg.exec()
+        dlg.deleteLater()
 
     def _show_undo_toast(self, info):
         """합치기/폴더 정리 완료 직후 되돌리기 토스트 (메인 스레드)
@@ -2447,6 +2450,7 @@ class JarvisGUI(QMainWindow):
         dlg.exec()
 
         result_holder['action'] = dlg.result_value or "cancel"
+        dlg.deleteLater()
         event.set()  # 백그라운드 스레드 대기 해제
 
     def _on_shipping_search(self, bl_number, target_folder):
@@ -2637,16 +2641,17 @@ class JarvisGUI(QMainWindow):
         screen = QApplication.primaryScreen().geometry()
         dlg.move((screen.width() - dlg.width()) // 2, (screen.height() - dlg.height()) // 2)
         
-        if dlg.exec() == QDialog.DialogCode.Accepted:
-            key = line_key.text().strip()
-            if key:
-                try:
-                    set_api_key(key)
-                    self.update_api_status(True)
-                    JarvisMessageBox.information(self, "성공", "API Key가 저장되었습니다.")
-                except Exception as e:
-                    self.update_api_status(False)
-                    JarvisMessageBox.critical(self, "오류", f"저장 실패: {e}")
+        accepted = dlg.exec() == QDialog.DialogCode.Accepted
+        key = line_key.text().strip() if accepted else ""
+        dlg.deleteLater()
+        if accepted and key:
+            try:
+                set_api_key(key)
+                self.update_api_status(True)
+                JarvisMessageBox.information(self, "성공", "API Key가 저장되었습니다.")
+            except Exception as e:
+                self.update_api_status(False)
+                JarvisMessageBox.critical(self, "오류", f"저장 실패: {e}")
 
     def browse_directory(self):
         d = QFileDialog.getExistingDirectory(self, "Select Target")

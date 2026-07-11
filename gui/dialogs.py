@@ -877,6 +877,7 @@ class IndependentCard(GlassFrame):
         dlg.exec()
         # 확장자 자동 복원
         new_text = input_name.text().strip()
+        dlg.deleteLater()
         if new_text and ext:
             return new_text + ext, result["ok"]
         return new_text, result["ok"]
@@ -3849,6 +3850,7 @@ class GroupCard(GlassFrame):
 
         # 확장자 자동 복원
         new_text = input_name.text().strip()
+        dlg.deleteLater()
         if new_text and ext:
             return new_text + ext, result["ok"]
         return new_text, result["ok"]
@@ -3941,10 +3943,9 @@ class GroupCard(GlassFrame):
         start_dir = export_docs_root if export_docs_root and os.path.exists(export_docs_root) else ""
 
         dlg = FileFolderPickerDialog(self, start_dir=start_dir)
-        if dlg.exec() != QDialog.DialogCode.Accepted:
-            return
-
-        paths = dlg.selected_paths()
+        accepted = dlg.exec() == QDialog.DialogCode.Accepted
+        paths = dlg.selected_paths() if accepted else []
+        dlg.deleteLater()
         if not paths:
             return
 
@@ -4300,6 +4301,7 @@ class GroupCard(GlassFrame):
         layout.addLayout(btn_row)
 
         result = dlg.exec()
+        dlg.deleteLater()
         return result == QDialog.DialogCode.Accepted
 
     def execute_merge(self):
@@ -4930,21 +4932,24 @@ class JarvisMessageBox(QDialog):
         dlg = JarvisMessageBox(parent, title, message, JarvisMessageBox.Information)
         dlg.add_button("OK", "accept", "cyan")
         dlg.exec()
-        
+        dlg.deleteLater()  # 닫힌 뒤 부모(메인 창) 자식으로 남지 않게 정리
+
     @staticmethod
     def warning(parent, title, message):
         """경고 메시지 표시"""
         dlg = JarvisMessageBox(parent, title, message, JarvisMessageBox.Warning)
         dlg.add_button("OK", "accept", "cyan")
         dlg.exec()
-        
+        dlg.deleteLater()
+
     @staticmethod
     def critical(parent, title, message):
         """오류 메시지 표시"""
         dlg = JarvisMessageBox(parent, title, message, JarvisMessageBox.Critical)
         dlg.add_button("OK", "accept", "cyan")
         dlg.exec()
-        
+        dlg.deleteLater()
+
     @staticmethod
     def question(parent, title, message):
         """예/아니오 질문 (True/False 반환)"""
@@ -4952,6 +4957,7 @@ class JarvisMessageBox(QDialog):
         dlg.add_button("Cancel", "reject", "gray")
         dlg.add_button("OK", "accept", "cyan")
         result = dlg.exec()
+        dlg.deleteLater()
         return result == QDialog.DialogCode.Accepted
 
 
@@ -5080,7 +5086,9 @@ class JarvisInputDialog(QDialog):
         """QInputDialog.getText 호환: (입력값, 확인 여부) 반환"""
         dlg = JarvisInputDialog(parent, title, label, text)
         ok = dlg.exec() == QDialog.DialogCode.Accepted
-        return dlg.input.text(), ok
+        value = dlg.input.text()
+        dlg.deleteLater()
+        return value, ok
 
 
 class SendMailDialog(QDialog):

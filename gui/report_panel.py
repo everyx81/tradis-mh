@@ -384,7 +384,7 @@ class ReportPanel(QWidget):
         return f"""
             QPushButton {{
                 background-color: transparent;
-                border: 1px solid rgba(250, 104, 99, 90);
+                border: 1px solid #6a383a;
                 border-radius: 8px;
                 padding: 6px 12px;
                 color: {CT['red']};
@@ -392,7 +392,7 @@ class ReportPanel(QWidget):
             }}
             QPushButton:hover {{
                 background-color: rgba(250, 104, 99, 30);
-                border: 1px solid rgba(250, 104, 99, 150);
+                border: 1px solid #9e4a49;
             }}
             QPushButton:pressed {{
                 background-color: rgba(250, 104, 99, 50);

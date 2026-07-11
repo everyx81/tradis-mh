@@ -272,7 +272,7 @@ class JarvisGUI(QMainWindow):
         container.setStyleSheet("""
             #guide_dlg {
                 background-color: rgba(45, 50, 60, 235);
-                border: 1px solid rgba(100, 110, 120, 0.5);
+                border: 1px solid #40464e;
                 border-radius: 20px;
             }
         """)
@@ -321,7 +321,7 @@ class JarvisGUI(QMainWindow):
         btn_row.setSpacing(10)
 
         _btn_style_gray = """
-            QPushButton { background-color: rgba(100,105,115,180); border: 1px solid rgba(150,155,165,0.5);
+            QPushButton { background-color: rgba(100,105,115,180); border: 1px solid #585c64;
                 border-radius: 12px; color: #fff; padding: 8px 20px; }
             QPushButton:hover { background-color: rgba(120,125,135,200); }
         """
@@ -1940,7 +1940,7 @@ class JarvisGUI(QMainWindow):
                 stop:1 #16324f
             );
             color: #cfe6ff;
-            border: 1px solid rgba(94, 189, 255, 90);
+            border: 1px solid #335671;
             font-weight: 700;
             font-size: 24pt;
             border-radius: 14px;
@@ -3296,7 +3296,7 @@ class JarvisGUI(QMainWindow):
         container.setStyleSheet("""
             #update_dlg {
                 background-color: rgba(45, 50, 60, 230);
-                border: 1px solid rgba(100, 110, 120, 0.5);
+                border: 1px solid #40464e;
                 border-radius: 20px;
             }
         """)
@@ -3352,7 +3352,7 @@ class JarvisGUI(QMainWindow):
         progress.setStyleSheet("""
             QProgressBar {
                 background-color: rgba(30, 35, 45, 200);
-                border: 1px solid rgba(100, 110, 120, 0.5);
+                border: 1px solid #40464e;
                 border-radius: 4px;
             }
             QProgressBar::chunk {

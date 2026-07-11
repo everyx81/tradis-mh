@@ -9,7 +9,7 @@ GLOBAL_STYLESHEET = """
 QToolTip {
     background-color: rgba(30, 50, 75, 240);
     color: #e8f0fa;
-    border: 1px solid rgba(100, 200, 255, 120);
+    border: 1px solid #3d6e8b;
     border-radius: 6px;
     padding: 6px 10px;
     font-family: 'Malgun Gothic';
@@ -33,7 +33,7 @@ QLabel {
 /* Claude Design warm dark (oklch 정확 변환) - 입력/콤보/텍스트 위젯 */
 QLineEdit {
     background-color: rgba(27, 30, 36, 255);
-    border: 1px solid rgba(45, 48, 56, 150);
+    border: 1px solid #262930;
     border-radius: 8px;
     color: #f3f5f9;
     padding: 7px 10px;
@@ -42,18 +42,18 @@ QLineEdit {
     selection-background-color: rgba(75, 163, 247, 80);
 }
 QLineEdit:focus {
-    border: 1px solid rgba(75, 163, 247, 150);
+    border: 1px solid #376ca0;
     background-color: rgba(35, 38, 45, 255);
 }
 QComboBox {
     background-color: rgba(27, 30, 36, 255);
-    border: 1px solid rgba(45, 48, 56, 150);
+    border: 1px solid #262930;
     border-radius: 8px;
     color: #f3f5f9;
     padding: 6px 12px;
 }
 QComboBox:hover {
-    border: 1px solid rgba(75, 163, 247, 150);
+    border: 1px solid #376ca0;
 }
 QComboBox::drop-down {
     border: none;
@@ -64,13 +64,13 @@ QComboBox QAbstractItemView {
     color: #f3f5f9;
     selection-background-color: rgba(75, 163, 247, 60);
     selection-color: #ffffff;
-    border: 1px solid rgba(63, 66, 75, 180);
+    border: 1px solid #343740;
     border-radius: 6px;
     padding: 4px;
 }
 QTextEdit {
     background-color: rgba(27, 30, 36, 255);
-    border: 1px solid rgba(45, 48, 56, 150);
+    border: 1px solid #262930;
     border-radius: 10px;
     color: #c1c4c9;
     font-family: 'JetBrains Mono', 'Consolas', monospace;
@@ -96,7 +96,7 @@ QTabBar::tab {
 QTabBar::tab:selected {
     background-color: rgba(35, 38, 45, 180);
     color: #f3f5f9;
-    border-color: rgba(63, 66, 75, 180);
+    border-color: #343740;  /* rgba(63,66,75,180) 불투명 근사 — 모서리 점 방지 */
 }
 QTabBar::tab:hover:!selected {
     background-color: rgba(27, 30, 36, 150);
@@ -171,7 +171,7 @@ QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
 /* JARVIS 홀로그램 스타일 알림창 */
 QMessageBox, QDialog {
     background-color: rgba(5, 15, 25, 120);
-    border: 2px solid rgba(0, 255, 255, 220);
+    border: 2px solid #04e0e1;
     border-radius: 8px;
 }
 QMessageBox QLabel, QDialog QLabel {
@@ -190,7 +190,7 @@ QMessageBox QLabel#qt_msgboxex_icon_label {
 }
 QMessageBox QPushButton, QDialog QPushButton {
     background-color: rgba(0, 40, 60, 150);
-    border: 2px solid rgba(0, 255, 255, 180);
+    border: 2px solid #08bdbf;
     border-radius: 6px;
     color: #ffffff;
     padding: 10px 25px;
@@ -269,7 +269,7 @@ MENU_STYLESHEET = """
 DROP_LIST_STYLESHEET = """
     QListWidget {
         background: rgba(10, 20, 32, 100);
-        border: 1px solid rgba(100, 160, 200, 35);
+        border: 1px solid #25303b;
         border-radius: 12px;
         color: #c0d0e0;
         font-size: 10pt;
@@ -302,7 +302,7 @@ DROP_LIST_HIGHLIGHT_STYLESHEET = """
     }
     QListWidget::item {
         padding: 8px;
-        border-bottom: 1px solid rgba(0, 255, 255, 10);
+        border-bottom: 1px solid #1a272d;
     }
     QListWidget::item:selected {
         background-color: rgba(0, 255, 255, 40);
@@ -409,12 +409,12 @@ TARGET_LIST_STYLESHEET = """
     }
     QListWidget::item:hover {
         background: rgba(45, 48, 56, 130);
-        border: 1px solid rgba(63, 66, 75, 180);
+        border: 1px solid #343740;
         color: #f3f5f9;
     }
     QListWidget::item:selected {
         background: rgba(75, 163, 247, 40);
-        border: 1px solid rgba(75, 163, 247, 90);
+        border: 1px solid #2c4d6e;
         color: #f3f5f9;
     }
 """

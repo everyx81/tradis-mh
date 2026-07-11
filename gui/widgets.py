@@ -1511,17 +1511,26 @@ class NeonButton(QPushButton):
         def lerp(a, b):
             return int(a + (b - a) * t)
 
+        # 보더는 배경과 미리 합성해 불투명으로 (반투명이면 둥근 모서리에 점 아티팩트)
+        def opaque_border(cr, cg, cb, ca, base):
+            a = ca / 255.0
+            return (round(cr * a + base[0] * (1 - a)),
+                    round(cg * a + base[1] * (1 - a)),
+                    round(cb * a + base[2] * (1 - a)))
+
         if self._is_primary:
             # 프라이머리: 차분한 블루, 살짝만 밝아짐
             bg1_r = lerp(40, 50); bg1_g = lerp(108, 125); bg1_b = lerp(180, 200)
             bg2_r = lerp(28, 38); bg2_g = lerp(88, 105);  bg2_b = lerp(150, 170)
             br_r = lerp(90, 115); br_g = lerp(165, 195); br_b = lerp(220, 245); br_a = lerp(110, 175)
+            _eff = ((bg1_r + bg2_r) // 2, (bg1_g + bg2_g) // 2, (bg1_b + bg2_b) // 2)
+            obr_r, obr_g, obr_b = opaque_border(br_r, br_g, br_b, br_a, _eff)
             self.setStyleSheet(f"""
                 QPushButton {{
                     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                         stop:0 rgba({bg1_r}, {bg1_g}, {bg1_b}, 190),
                         stop:1 rgba({bg2_r}, {bg2_g}, {bg2_b}, 170));
-                    border: 1px solid rgba({br_r}, {br_g}, {br_b}, {br_a});
+                    border: 1px solid rgb({obr_r}, {obr_g}, {obr_b});
                     border-radius: 10px;
                     color: #e8f2ff;
                     font-weight: 600;
@@ -1535,11 +1544,11 @@ class NeonButton(QPushButton):
                     background: rgba(30, 88, 150, 210);
                     padding: 0 18px;
                     margin: 0;
-                    border: 1px solid rgba({br_r}, {br_g}, {br_b}, {br_a});
+                    border: 1px solid rgb({obr_r}, {obr_g}, {obr_b});
                 }}
                 QPushButton:disabled {{
                     background: rgba(40, 55, 75, 90);
-                    border: 1px solid rgba(100, 130, 160, 40);
+                    border: 1px solid #262e37;
                     color: #556070;
                     padding: 0 18px;
                     margin: 0;
@@ -1550,10 +1559,11 @@ class NeonButton(QPushButton):
             # 일반: base rgba(20,35,55,150) → hover 약간 밝아짐
             bg_r = lerp(20, 30);  bg_g = lerp(35, 52);  bg_b = lerp(55, 80);  bg_a = lerp(150, 190)
             br_r = lerp(120, 130); br_g = lerp(200, 225); br_b = lerp(245, 255); br_a = lerp(95, 170)
+            obr_r, obr_g, obr_b = opaque_border(br_r, br_g, br_b, br_a, (bg_r, bg_g, bg_b))
             self.setStyleSheet(f"""
                 QPushButton {{
                     background: rgba({bg_r}, {bg_g}, {bg_b}, {bg_a});
-                    border: 1px solid rgba({br_r}, {br_g}, {br_b}, {br_a});
+                    border: 1px solid rgb({obr_r}, {obr_g}, {obr_b});
                     border-radius: 10px;
                     color: #c0d0e0;
                     font-weight: 600;
@@ -1567,11 +1577,11 @@ class NeonButton(QPushButton):
                     background: rgba(30, 55, 80, 220);
                     padding: 0 16px;
                     margin: 0;
-                    border: 1px solid rgba({br_r}, {br_g}, {br_b}, {br_a});
+                    border: 1px solid rgb({obr_r}, {obr_g}, {obr_b});
                 }}
                 QPushButton:disabled {{
                     background: rgba(30, 40, 55, 80);
-                    border: 1px solid rgba(80, 100, 130, 40);
+                    border: 1px solid #232933;
                     color: #556070;
                     padding: 0 16px;
                     margin: 0;

@@ -80,7 +80,7 @@ class JarvisToast(QWidget):
             QFrame {
                 background-color: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:1, stop:0 #11c0ff, stop:1 #0078ff);
                 border-radius: 23px;
-                border: 1px solid rgba(255, 255, 255, 100);
+                border: 1px solid #6ac3ff;  /* rgba(255,255,255,100) over 파란 그라데이션 — 불투명 (모서리 점 방지) */
             }
         """)
         icon_layout = QVBoxLayout(icon_frame)

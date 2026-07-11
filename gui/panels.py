@@ -951,7 +951,7 @@ class FileManagerWidget(QWidget):
             }}
             QPushButton:hover {{
                 background-color: rgba(250, 104, 99, 30);
-                border: 1px solid rgba(250, 104, 99, 120);
+                border: 1px solid #844142;
             }}
         """)
         self.btn_remove_skip_keyword.clicked.connect(self._on_remove_skip_keyword_selected)
@@ -1066,7 +1066,7 @@ class FileManagerWidget(QWidget):
             }}
             QPushButton:hover {{
                 background-color: rgba(250, 104, 99, 30);
-                border: 1px solid rgba(250, 104, 99, 120);
+                border: 1px solid #844142;
             }}
         """)
         self.btn_remove_monthly.clicked.connect(self._on_remove_monthly_selected)
@@ -1139,7 +1139,7 @@ class FileManagerWidget(QWidget):
             }}
             QPushButton:hover {{
                 background-color: rgba(250, 104, 99, 30);
-                border: 1px solid rgba(250, 104, 99, 120);
+                border: 1px solid #844142;
             }}
         """)
         self.btn_remove_alias.clicked.connect(self._on_remove_alias_selected)
@@ -2270,7 +2270,7 @@ class FileManagerWidget(QWidget):
         container.setStyleSheet("""
             #shipping_dlg {
                 background-color: rgba(45, 50, 60, 230);
-                border: 1px solid rgba(100, 110, 120, 0.5);
+                border: 1px solid #40464e;
                 border-radius: 20px;
             }
         """)
@@ -2352,7 +2352,7 @@ class FileManagerWidget(QWidget):
                 btn.setStyleSheet("""
                     QPushButton {
                         background-color: rgba(100, 105, 115, 180);
-                        border: 1px solid rgba(150, 155, 165, 0.5); border-radius: 12px;
+                        border: 1px solid #585c64; border-radius: 12px;
                         color: #ffffff; padding: 8px 20px;
                     }
                     QPushButton:hover { background-color: rgba(120, 125, 135, 200); }
@@ -2785,7 +2785,7 @@ class FileManagerWidget(QWidget):
         loading_lbl.setFont(QFont("Segoe UI", 11))
         loading_lbl.setStyleSheet("""
             background-color: rgba(25, 32, 48, 235);
-            border: 1px solid rgba(0, 255, 255, 0.3);
+            border: 1px solid #136266;
             border-radius: 14px;
             color: #00ddee;
             padding: 18px 28px;
@@ -3244,7 +3244,7 @@ class FileManagerWidget(QWidget):
         container.setStyleSheet("""
             #naming_dlg {
                 background-color: rgba(45, 50, 60, 230);
-                border: 1px solid rgba(100, 110, 120, 0.5);
+                border: 1px solid #40464e;
                 border-radius: 20px;
             }
         """)
@@ -3387,7 +3387,7 @@ class FileManagerWidget(QWidget):
         btn_cancel.setFont(QFont("Segoe UI", 10, QFont.Weight.Medium))
         btn_cancel.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_cancel.setStyleSheet("""
-            QPushButton { background-color: rgba(100,105,115,180); border: 1px solid rgba(150,155,165,0.5);
+            QPushButton { background-color: rgba(100,105,115,180); border: 1px solid #585c64;
                 border-radius: 12px; color: #fff; padding: 8px 20px; }
             QPushButton:hover { background-color: rgba(120,125,135,200); }
         """)

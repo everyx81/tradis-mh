@@ -26,7 +26,7 @@ from core.config import get_config_path
 _MODERN_BTN_STYLE = """
     QPushButton {
         background: rgba(20, 35, 55, 150);
-        border: 1px solid rgba(100, 160, 200, 50);
+        border: 1px solid #293744;
         border-radius: 10px;
         color: #c0d0e0;
         font-size: 10pt;
@@ -37,7 +37,7 @@ _MODERN_BTN_STYLE = """
     }
     QPushButton:hover {
         background: rgba(40, 70, 100, 200);
-        border: 1px solid rgba(100, 200, 240, 110);
+        border: 1px solid #3a677c;
         color: #ffffff;
     }
     QPushButton:pressed {
@@ -51,7 +51,7 @@ _MODERN_BTN_PRIMARY_STYLE = """
         background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
             stop:0 rgba(40, 108, 180, 180),
             stop:1 rgba(28, 88, 150, 160));
-        border: 1px solid rgba(90, 165, 220, 110);
+        border: 1px solid #365873;
         border-radius: 10px;
         color: #e8f2ff;
         font-size: 10pt;
@@ -64,7 +64,7 @@ _MODERN_BTN_PRIMARY_STYLE = """
         background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
             stop:0 rgba(55, 130, 205, 210),
             stop:1 rgba(40, 108, 175, 190));
-        border: 1px solid rgba(120, 195, 245, 170);
+        border: 1px solid #598caf;
         color: #ffffff;
     }
     QPushButton:pressed {
@@ -447,7 +447,7 @@ class IndependentCard(GlassFrame):
         self.list_widget.setStyleSheet("""
             QListWidget {
                 background: rgba(10, 20, 32, 120);
-                border: 1px solid rgba(100, 160, 200, 35);
+                border: 1px solid #25303b;
                 border-radius: 10px;
                 color: #c0d0e0;
                 font-size: 9.5pt;
@@ -766,7 +766,7 @@ class IndependentCard(GlassFrame):
         menu.setStyleSheet("""
             QMenu {
                 background-color: rgba(35, 40, 50, 240);
-                border: 1px solid rgba(0, 200, 255, 0.3);
+                border: 1px solid #135166;
                 border-radius: 8px;
                 padding: 6px 0px;
                 color: #ffffff;
@@ -810,7 +810,7 @@ class IndependentCard(GlassFrame):
         container.setStyleSheet("""
             #rename_dlg2 {
                 background-color: rgba(45, 50, 60, 235);
-                border: 1px solid rgba(100, 110, 120, 0.5);
+                border: 1px solid #40464e;
                 border-radius: 16px;
             }
         """)
@@ -853,7 +853,7 @@ class IndependentCard(GlassFrame):
         btn_cancel.setFont(QFont("Segoe UI", 10))
         btn_cancel.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_cancel.setStyleSheet("""
-            QPushButton { background-color: rgba(100,105,115,180); border: 1px solid rgba(150,155,165,0.5);
+            QPushButton { background-color: rgba(100,105,115,180); border: 1px solid #585c64;
                 border-radius: 10px; color: #fff; padding: 6px 20px; }
             QPushButton:hover { background-color: rgba(120,125,135,200); }
         """)
@@ -1237,6 +1237,16 @@ class GroupCard(GlassFrame):
         self._hover_progress = 0.0
         self._hover_anim = None
         self._toggle_in_progress = False
+        self._selected_row = None
+
+        # 파일 이동 단축키 — 카드 내부에 포커스가 있을 때만 동작
+        from PyQt6.QtGui import QShortcut, QKeySequence
+        for _seq, _fn in (("Ctrl+Up", lambda: self._move_selected_file(-1)),
+                          ("Ctrl+Down", lambda: self._move_selected_file(1)),
+                          ("Escape", lambda: self._set_selected_row(None))):
+            _sc = QShortcut(QKeySequence(_seq), self)
+            _sc.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+            _sc.activated.connect(_fn)
 
         # 성능: 카드별 그림자(블러) 이펙트 제거 — 카드가 많을 때 스크롤/호버마다
         # 전체 카드 오프스크린 렌더+블러가 발생해 버벅임의 주원인이었음
@@ -1582,7 +1592,7 @@ class GroupCard(GlassFrame):
         self._warning_frame.setStyleSheet(f"""
             QFrame {{
                 background-color: rgba(250, 104, 99, 22);
-                border: 1px solid rgba(250, 104, 99, 65);
+                border: 1px solid #543134;
                 border-radius: 8px;
             }}
         """)
@@ -1820,11 +1830,12 @@ class GroupCard(GlassFrame):
         """group-warning 배너를 상태별 색으로 갱신."""
         if not hasattr(self, '_warning_frame'):
             return
+        # 보더는 불투명 근사색 (반투명이면 둥근 모서리에 점 아티팩트)
         color_map = {
-            "green":   ("rgba(89, 200, 134, 22)",  "rgba(89, 200, 134, 65)",  "#59c886"),
-            "yellow":  ("rgba(233, 171, 43, 22)",  "rgba(233, 171, 43, 65)",  "#e9ab2b"),
-            "red":     ("rgba(250, 104, 99, 22)",  "rgba(250, 104, 99, 65)",  "#fa6863"),
-            "neutral": ("rgba(143, 146, 152, 22)", "rgba(143, 146, 152, 65)", "#8f9298"),
+            "green":   ("rgba(89, 200, 134, 22)",  "#2b493d", "#59c886"),
+            "yellow":  ("rgba(233, 171, 43, 22)",  "#504226", "#e9ab2b"),
+            "red":     ("rgba(250, 104, 99, 22)",  "#543134", "#fa6863"),
+            "neutral": ("rgba(143, 146, 152, 22)", "#393c42", "#8f9298"),
         }
         bg, border, fg = color_map.get(severity, color_map["neutral"])
         self._warning_frame.setStyleSheet(f"""
@@ -2836,7 +2847,7 @@ class GroupCard(GlassFrame):
         w.setStyleSheet(f"""
             color: {_CT['amber']};
             background-color: rgba(233, 171, 43, 36);
-            border: 1px solid rgba(233, 171, 43, 130);
+            border: 1px solid #846628;
             border-radius: 5px;
             padding: 3px 10px;
             font-size: 8.5pt;
@@ -2873,10 +2884,18 @@ class GroupCard(GlassFrame):
                     child.layout().deleteLater()
         _clear_layout(self.mapping_layout)
         
-        # 파일 매핑 리스트 (▲/▼ 버튼으로 파일 교환)
+        # 파일 매핑 리스트 — 파일 이동: 행 클릭으로 선택 → 하단 ▲▼ (또는 Ctrl+↑/↓)
+        #                    파일 배정/해제: 드롭다운 (다른 행의 파일을 고르면 자동 교환)
         self.combo_list = []  # 콤보박스 참조 저장
         self.badge_list = []  # 순번 배지 참조 (상태 색 갱신용)
         self.row_label_list = []  # 서류 라벨 참조 (상태 색 갱신용)
+        self.row_widget_list = []  # 행 위젯 참조 (선택 하이라이트용)
+        self._selected_row = None  # 리빌드 시 선택 초기화
+
+        # 이동 금지 파일: 여러 항목이 "(…포함)"으로 참조하는 부모 파일(수수료계산서 등)과
+        # 금액-only 제안 대기 중인 파일 — 이동/교환 대상에서 제외해 실수로 옮길 수 없게 함
+        _locked_files = self._compute_locked_files()
+        self._locked_files_set = _locked_files
         
         from .claude_theme import C as _CT
         from .claude_icons import pixmap as _icpx
@@ -2900,17 +2919,10 @@ class GroupCard(GlassFrame):
             row_widget = QWidget()
             row_widget.setObjectName("MappingRow")
             row_widget.setMinimumHeight(36)
-            _row_top = f"border-top: 1px solid {_CT['border_soft']};" if idx > 0 else ""
-            row_widget.setStyleSheet(f"""
-                QWidget#MappingRow {{
-                    background: transparent;
-                    border: none;
-                    {_row_top}
-                }}
-                QWidget#MappingRow:hover {{
-                    background: {_CT['bg_2']};
-                }}
-            """)
+            row_widget.setStyleSheet(self._row_style(idx, selected=False))
+            # 행 클릭 → 선택/해제 (콤보·버튼 클릭은 자식이 소비하므로 영향 없음)
+            row_widget.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+            row_widget.mousePressEvent = lambda ev, i=idx: self._on_row_clicked(i)
             row_layout = QHBoxLayout(row_widget)
             row_layout.setContentsMargins(0, 5, 0, 5)
             row_layout.setSpacing(8)
@@ -2929,24 +2941,30 @@ class GroupCard(GlassFrame):
             self.row_label_list.append(lbl)
             self._apply_row_status(idx)
             
-            # 콤보박스 (파일 선택)
+            # 콤보박스 (파일 선택 — 다른 행의 파일을 고르면 자동 교환)
+            _label_txt = item.get('label', '')
+            _is_included_row = '포함)' in _label_txt
+
             combo = QComboBox()
-            combo.addItems(self.available_pdfs)
+            current_file = item.get('filename', '')
+            # 교환 금지 파일은 목록에서 제외 (자기 행의 현재 파일은 유지)
+            combo.addItems([f for f in self.available_pdfs
+                            if f == '(선택 안 함)' or f == current_file or f not in _locked_files])
             combo.setMinimumWidth(200)
             combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
             combo.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
             combo.wheelEvent = lambda event: event.ignore()
-            
-            current_file = item.get('filename', '')
-            if current_file and current_file in self.available_pdfs:
-                combo.setCurrentText(current_file)
-            elif current_file:
+
+            if current_file and combo.findText(current_file) < 0:
                 combo.addItem(current_file)
-                combo.setCurrentText(current_file)
+            combo.setCurrentText(current_file if current_file else '(선택 안 함)')
+
+            if _is_included_row:
+                # "(…포함)" 행: 부모 파일에 함께 들어 있는 항목 — 파일 배정 잠금
+                combo.setEnabled(False)
+                combo.setToolTip("다른 계산서 파일에 포함된 항목입니다 — 파일이 함께 병합됩니다")
             else:
-                combo.setCurrentText('(선택 안 함)')
-            
-            combo.setToolTip(combo.currentText())
+                combo.setToolTip(combo.currentText())
             combo.currentIndexChanged.connect(lambda _, i=idx, c=combo: self.update_mapping(i, c))
             combo.currentTextChanged.connect(lambda text, c=combo: c.setToolTip(text))
             combo.setStyleSheet(f"""
@@ -2996,29 +3014,9 @@ class GroupCard(GlassFrame):
             btn_preview.clicked.connect(lambda _, c=combo: self._show_thumbnail_popup(c.currentText()))
             row_layout.addWidget(btn_preview)
 
-            # 순서 이동 버튼 (위/아래)
-            btn_up = QPushButton()
-            btn_up.setIcon(_QIcon(_icpx("ChevronUp", size=13, color=_CT['fg_2'])))
-            btn_up.setIconSize(_QSize(13, 13))
-            btn_up.setFixedSize(22, 26)
-            btn_up.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn_up.setStyleSheet(arrow_btn_style)
-            btn_up.setToolTip("파일을 위로 이동")
-            btn_up.setEnabled(idx > 0)
-            btn_up.clicked.connect(lambda _, i=idx: self._swap_files(i, i - 1))
-            row_layout.addWidget(btn_up)
+            # (구) 행별 ▲▼ 버튼은 제거됨 — 행 선택 + 하단 ▲▼로 대체 (2026-07 사용자 결정)
 
-            btn_down = QPushButton()
-            btn_down.setIcon(_QIcon(_icpx("ChevronDown", size=13, color=_CT['fg_2'])))
-            btn_down.setIconSize(_QSize(13, 13))
-            btn_down.setFixedSize(22, 26)
-            btn_down.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn_down.setStyleSheet(arrow_btn_style)
-            btn_down.setToolTip("파일을 아래로 이동")
-            btn_down.setEnabled(idx < len(self.mapping) - 1)
-            btn_down.clicked.connect(lambda _, i=idx: self._swap_files(i, i + 1))
-            row_layout.addWidget(btn_down)
-            
+            self.row_widget_list.append(row_widget)
             self.mapping_layout.addWidget(row_widget)
         
         self.mapping_layout.setSpacing(4)
@@ -3032,6 +3030,40 @@ class GroupCard(GlassFrame):
 
         btn_row = QHBoxLayout()
         btn_row.setSpacing(8)
+
+        # ── 파일 이동 ▲▼ (행 선택 후 사용) — 실행 버튼과 떨어진 왼쪽 끝 배치 ──
+        _move_css = f"""
+            QPushButton {{
+                background-color: {_CT['accent_bg']};
+                border: 1px solid {_CT['accent_border']};
+                border-radius: 7px;
+            }}
+            QPushButton:hover {{ background-color: rgba(75, 163, 247, 90); }}
+            QPushButton:disabled {{
+                background-color: transparent;
+                border: 1px solid {_CT['border_soft']};
+            }}
+        """
+        self.btn_move_up = QPushButton()
+        self.btn_move_up.setIcon(_QIcon(_icpx("ChevronUp", size=14, color=_CT['accent_hi'])))
+        self.btn_move_down = QPushButton()
+        self.btn_move_down.setIcon(_QIcon(_icpx("ChevronDown", size=14, color=_CT['accent_hi'])))
+        for _b, _tip, _dir in ((self.btn_move_up, "선택한 행의 파일을 위로 (Ctrl+↑)", -1),
+                               (self.btn_move_down, "선택한 행의 파일을 아래로 (Ctrl+↓)", 1)):
+            _b.setIconSize(_QSize(14, 14))
+            _b.setFixedSize(30, 27)
+            _b.setCursor(Qt.CursorShape.PointingHandCursor)
+            _b.setToolTip(_tip)
+            _b.setStyleSheet(_move_css)
+            _b.setEnabled(False)
+            _b.clicked.connect(lambda _, d=_dir: self._move_selected_file(d))
+            btn_row.addWidget(_b)
+
+        self.lbl_move_hint = QLabel("행을 클릭하면 파일을 옮길 수 있습니다")
+        self.lbl_move_hint.setStyleSheet(f"color: {_CT['fg_3']}; font-size: 8.5pt; background: transparent;")
+        btn_row.addWidget(self.lbl_move_hint)
+        btn_row.addStretch()
+
         btn_add_row = QPushButton("  행 추가")
         btn_add_row.setIcon(_QIcon(_icpx("Plus", size=13, color=_CT['fg_2'])))
         btn_add_row.setIconSize(_QSize(13, 13))
@@ -3053,7 +3085,6 @@ class GroupCard(GlassFrame):
         """)
         btn_add_row.clicked.connect(self.add_unclassified_row)
         btn_row.addWidget(btn_add_row)
-        btn_row.addStretch()
 
         btn_exec = QPushButton("합치기 실행")
         btn_exec.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -3107,12 +3138,13 @@ class GroupCard(GlassFrame):
         has_file = bool(item.get('filename', ''))
         is_included = '포함' in _label_raw
 
+        # 보더는 불투명 근사색 (반투명이면 둥근 모서리에 점 아티팩트)
         if _is_na:
             _b_bg, _b_bd, _b_fg = _CT['bg_3'], _CT['border_soft'], _CT['fg_3']
         elif has_file or is_included:
-            _b_bg, _b_bd, _b_fg = "rgba(89, 200, 134, 36)", "rgba(89, 200, 134, 120)", _CT['green']
+            _b_bg, _b_bd, _b_fg = "rgba(89, 200, 134, 36)", "#386e52", _CT['green']
         else:
-            _b_bg, _b_bd, _b_fg = "rgba(250, 104, 99, 36)", "rgba(250, 104, 99, 120)", _CT['red']
+            _b_bg, _b_bd, _b_fg = "rgba(250, 104, 99, 36)", "#844142", _CT['red']
         badge.setStyleSheet(f"""
             background-color: {_b_bg};
             border: 1px solid {_b_bd};
@@ -3140,47 +3172,165 @@ class GroupCard(GlassFrame):
             lbl.setStyleSheet(f"color: {_CT['fg_1']}; background: transparent; font-size: 9.5pt;")
             lbl.setToolTip("")
 
-    def _swap_files(self, idx_a, idx_b):
-        """두 행의 파일명(콤보박스 값)만 교환, 라벨은 고정"""
-        if 0 <= idx_a < len(self.mapping) and 0 <= idx_b < len(self.mapping):
-            # mapping 데이터 교환
-            self.mapping[idx_a]['filename'], self.mapping[idx_b]['filename'] = \
-                self.mapping[idx_b]['filename'], self.mapping[idx_a]['filename']
-            
-            # 콤보박스 UI 업데이트 (UI 전체 갱신 없이 빠르게)
-            combo_a = self.combo_list[idx_a]
-            combo_b = self.combo_list[idx_b]
-            
-            file_a = self.mapping[idx_a]['filename'] or '(선택 안 함)'
-            file_b = self.mapping[idx_b]['filename'] or '(선택 안 함)'
-            
-            # 시그널 임시 차단
-            combo_a.blockSignals(True)
-            combo_b.blockSignals(True)
-            
-            combo_a.setCurrentText(file_a)
-            combo_b.setCurrentText(file_b)
-            
-            combo_a.blockSignals(False)
-            combo_b.blockSignals(False)
+    # ──────────────────────────────────────────────
+    # 파일 이동: 행 선택 + 하단 ▲▼ (Ctrl+↑/↓)
+    # ──────────────────────────────────────────────
 
-            # 배지/라벨 상태 색 갱신
-            self._apply_row_status(idx_a)
-            self._apply_row_status(idx_b)
+    def _row_style(self, idx, selected):
+        """매핑 행 배경 스타일 (선택 시 파란 하이라이트)."""
+        from .claude_theme import C as _CT
+        if selected:
+            return f"""
+                QWidget#MappingRow {{
+                    background: {_CT['accent_bg']};
+                    border: 1px solid {_CT['accent_border']};
+                    border-radius: 9px;
+                }}
+            """
+        _row_top = f"border-top: 1px solid {_CT['border_soft']};" if idx > 0 else ""
+        return f"""
+            QWidget#MappingRow {{
+                background: transparent;
+                border: none;
+                {_row_top}
+            }}
+            QWidget#MappingRow:hover {{
+                background: {_CT['bg_2']};
+            }}
+        """
 
-            # 체크리스트 및 검증 갱신
-            self._update_checklist_from_mapping()
-            self._run_amount_validation()
+    def _row_movable(self, idx):
+        """이동 가능한 행인지 — "(포함)" 행과 잠긴 부모 파일 행은 불가."""
+        if not (0 <= idx < len(self.mapping)):
+            return False
+        item = self.mapping[idx]
+        if '포함)' in item.get('label', ''):
+            return False
+        if item.get('filename', '') in getattr(self, '_locked_files_set', set()):
+            return False
+        return True
 
-    def move_row(self, idx, direction):
-        new_idx = idx + direction
-        if 0 <= new_idx < len(self.mapping):
-            self.mapping[idx], self.mapping[new_idx] = self.mapping[new_idx], self.mapping[idx]
-            self.refresh_mapping_ui()
+    def _on_row_clicked(self, idx):
+        if not self._row_movable(idx):
+            return
+        self._set_selected_row(None if self._selected_row == idx else idx)
+
+    def _set_selected_row(self, idx):
+        old = getattr(self, '_selected_row', None)
+        self._selected_row = idx
+        rows = getattr(self, 'row_widget_list', [])
+        for i in (old, idx):
+            if i is not None and 0 <= i < len(rows):
+                try:
+                    rows[i].setStyleSheet(self._row_style(i, selected=(i == idx)))
+                except RuntimeError:
+                    pass
+        # 하단 ▲▼ / 안내 문구 갱신
+        if hasattr(self, 'btn_move_up'):
+            try:
+                self.btn_move_up.setEnabled(idx is not None and self._find_move_target(idx, -1) is not None)
+                self.btn_move_down.setEnabled(idx is not None and self._find_move_target(idx, 1) is not None)
+                if idx is None:
+                    self.lbl_move_hint.setText("행을 클릭하면 파일을 옮길 수 있습니다")
+                else:
+                    self.lbl_move_hint.setText(f"{idx + 1}번 행 선택됨 — ▲▼로 파일 이동 (ESC 해제)")
+            except RuntimeError:
+                pass
+
+    def _find_move_target(self, idx, direction):
+        """이동 상대 행 탐색 — "(포함)" 행과 잠긴 파일 행은 건너뜀."""
+        if idx is None:
+            return None
+        j = idx + direction
+        while 0 <= j < len(self.mapping):
+            if self._row_movable(j):
+                return j
+            j += direction
+        return None
+
+    def _move_selected_file(self, direction):
+        """선택한 행의 파일을 위/아래 행과 교환. 선택은 파일을 따라간다."""
+        sel = getattr(self, '_selected_row', None)
+        if sel is None:
+            return
+        tgt = self._find_move_target(sel, direction)
+        if tgt is None:
+            return
+        a, b = self.mapping[sel], self.mapping[tgt]
+        a['filename'], b['filename'] = b.get('filename', ''), a.get('filename', '')
+        # "총금액 매칭" 표식은 파일을 따라 이동
+        _a_flag = a.get('matched_by_amount', False)
+        a['matched_by_amount'] = b.get('matched_by_amount', False)
+        b['matched_by_amount'] = _a_flag
+
+        self._set_combo_text(sel, a['filename'] if a['filename'] else '(선택 안 함)')
+        self._set_combo_text(tgt, b['filename'] if b['filename'] else '(선택 안 함)')
+        self._apply_row_status(sel)
+        self._apply_row_status(tgt)
+        self._set_selected_row(tgt)
+
+        self._update_checklist_from_mapping()
+        self._run_amount_validation()
+
+    def _compute_locked_files(self):
+        """교환 금지 파일 집합.
+
+        - "(X 포함)" 라벨이 참조하는 부모 파일 (한 파일에 여러 항목 금액이 들어 있음)
+        - 금액-only 제안 대기 중인 파일 (승인/거부를 먼저 처리해야 함)
+        """
+        import re as _re
+        locked = set()
+        parent_kws = set()
+        for it in self.mapping:
+            m = _re.search(r'\(([^()]*?)\s*포함\)', it.get('label', ''))
+            if m:
+                kw = m.group(1).strip().replace(' ', '')
+                if kw:
+                    parent_kws.add(kw)
+        if parent_kws:
+            for it in self.mapping:
+                f = it.get('filename', '')
+                if f and any(kw in f.replace(' ', '') for kw in parent_kws):
+                    locked.add(f)
+        # 노란 제안 행에 걸려 있는 파일
+        for sg in self.data.get('suggested', []) or []:
+            f = sg.get('file', '')
+            if f:
+                locked.add(f)
+        return locked
+
+    def _set_combo_text(self, idx, text):
+        """콤보박스 값을 시그널 없이 갱신. 목록에 없는 파일명은 추가 후 설정
+        (setCurrentText가 조용히 실패해 화면-데이터가 어긋나는 것 방지)."""
+        if not (0 <= idx < len(getattr(self, 'combo_list', []))):
+            return
+        combo = self.combo_list[idx]
+        combo.blockSignals(True)
+        if combo.findText(text) < 0:
+            combo.addItem(text)
+        combo.setCurrentText(text)
+        combo.setToolTip(text)
+        combo.blockSignals(False)
 
     def update_mapping(self, idx, combo):
         val = combo.currentText()
         if val == '(선택 안 함)': val = ""
+        old = self.mapping[idx].get('filename', '')
+
+        # 자동 교환: 다른 행이 이미 가진 파일을 고르면 그 행에 내 파일을 넘김
+        # (같은 파일이 두 행에 중복 배정되는 것 원천 차단)
+        if val and val != old:
+            for j, other in enumerate(self.mapping):
+                if j != idx and other.get('filename', '') == val:
+                    other['filename'] = old
+                    # "총금액 매칭" 표식은 파일을 따라 이동
+                    _my_flag = self.mapping[idx].get('matched_by_amount', False)
+                    self.mapping[idx]['matched_by_amount'] = other.get('matched_by_amount', False)
+                    other['matched_by_amount'] = _my_flag
+                    self._set_combo_text(j, old if old else '(선택 안 함)')
+                    self._apply_row_status(j)
+                    break
+
         self.mapping[idx]['filename'] = val
         self._apply_row_status(idx)
         self._update_checklist_from_mapping()
@@ -3271,7 +3421,7 @@ class GroupCard(GlassFrame):
         tag.setStyleSheet(f"""
             color: {_CT['amber']};
             background-color: rgba(233, 171, 43, 26);
-            border: 1px solid rgba(233, 171, 43, 90);
+            border: 1px solid #645026;
             border-radius: 5px;
             padding: 1px 6px;
             font-size: 8pt;
@@ -3460,7 +3610,7 @@ class GroupCard(GlassFrame):
         menu.setStyleSheet("""
             QMenu {
                 background-color: rgba(35, 40, 50, 240);
-                border: 1px solid rgba(0, 200, 255, 0.3);
+                border: 1px solid #135166;
                 border-radius: 8px;
                 padding: 6px 0px;
                 color: #ffffff;
@@ -3571,7 +3721,7 @@ class GroupCard(GlassFrame):
         _menu_style = """
             QMenu {
                 background-color: rgba(35, 40, 50, 240);
-                border: 1px solid rgba(0, 200, 255, 0.3);
+                border: 1px solid #135166;
                 border-radius: 8px;
                 padding: 6px 0px;
                 color: #ffffff;
@@ -3628,7 +3778,7 @@ class GroupCard(GlassFrame):
         container.setStyleSheet("""
             #rename_dlg {
                 background-color: rgba(45, 50, 60, 235);
-                border: 1px solid rgba(100, 110, 120, 0.5);
+                border: 1px solid #40464e;
                 border-radius: 16px;
             }
         """)
@@ -3672,7 +3822,7 @@ class GroupCard(GlassFrame):
         btn_cancel.setFont(QFont("Segoe UI", 10))
         btn_cancel.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_cancel.setStyleSheet("""
-            QPushButton { background-color: rgba(100,105,115,180); border: 1px solid rgba(150,155,165,0.5);
+            QPushButton { background-color: rgba(100,105,115,180); border: 1px solid #585c64;
                 border-radius: 10px; color: #fff; padding: 6px 20px; }
             QPushButton:hover { background-color: rgba(120,125,135,200); }
         """)
@@ -4047,7 +4197,7 @@ class GroupCard(GlassFrame):
         container.setStyleSheet("""
             #missing_files_container {
                 background-color: rgba(45, 50, 60, 230);
-                border: 1px solid rgba(100, 110, 120, 0.5);
+                border: 1px solid #40464e;
                 border-radius: 20px;
             }
         """)
@@ -4155,7 +4305,7 @@ class GroupCard(GlassFrame):
         btn_cancel.setStyleSheet("""
             QPushButton {
                 background-color: rgba(100, 105, 115, 180);
-                border: 1px solid rgba(150, 155, 165, 0.5);
+                border: 1px solid #585c64;
                 border-radius: 12px;
                 color: #ffffff;
                 padding: 8px 20px;
@@ -4777,7 +4927,7 @@ class JarvisMessageBox(QDialog):
             btn.setStyleSheet(f"""
                 QPushButton {{
                     background-color: transparent;
-                    border: 1px solid rgba(233, 171, 43, 120);
+                    border: 1px solid #7c6027;
                     border-radius: 8px;
                     color: {_CT['amber']};
                     padding: 6px 16px;

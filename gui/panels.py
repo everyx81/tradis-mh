@@ -751,6 +751,8 @@ class FileManagerWidget(QWidget):
         self.rk_log = QTextEdit()
         self.rk_log.setMaximumHeight(100)
         self.rk_log.setReadOnly(True)
+        # 장시간 자동화 세션에서 로그가 무한히 쌓이지 않도록 최근 200줄만 유지
+        self.rk_log.document().setMaximumBlockCount(200)
         self.rk_log.setStyleSheet("""
             QTextEdit { 
                 background-color: rgba(5, 15, 30, 200); 

@@ -73,15 +73,18 @@ def _svg_for(name: str, color: str = "#c9ccd3", stroke_width: float = 1.6) -> st
     )
 
 
+# 렌더링된 픽스맵/아이콘 캐시 — 같은 (이름, 크기, 색, 두께, 배율) 조합을
+# 매번 SVG 래스터화하지 않는다. 조합 수가 유한해 사실상 상한 도달 없음.
+_pixmap_cache = {}
+_icon_cache = {}
+_CACHE_MAX = 512
+
+
 def pixmap(name: str, size: int = 16, color: str = "#c9ccd3", stroke_width: float = 1.6) -> QPixmap:
-    """이름 + 색상 + 크기로 QPixmap 생성.
+    """이름 + 색상 + 크기로 QPixmap 생성 (캐시됨).
 
     화면 배율(DPI)에 맞춰 실제 픽셀 해상도로 렌더링 — 확대 화면에서도 선명.
     """
-    svg_str = _svg_for(name, color, stroke_width)
-    if not svg_str:
-        return QPixmap()
-
     # 디바이스 픽셀 비율 (150% 화면 = 1.5) — 흐릿한 업스케일 방지
     dpr = 1.0
     try:
@@ -91,6 +94,15 @@ def pixmap(name: str, size: int = 16, color: str = "#c9ccd3", stroke_width: floa
             dpr = max(1.0, float(app.devicePixelRatio()))
     except Exception:
         pass
+
+    key = (name, size, color, stroke_width, dpr)
+    cached = _pixmap_cache.get(key)
+    if cached is not None:
+        return cached
+
+    svg_str = _svg_for(name, color, stroke_width)
+    if not svg_str:
+        return QPixmap()
 
     renderer = QSvgRenderer(QByteArray(svg_str.encode("utf-8")))
     px = max(1, round(size * dpr))
@@ -102,9 +114,21 @@ def pixmap(name: str, size: int = 16, color: str = "#c9ccd3", stroke_width: floa
     renderer.render(painter)
     painter.end()
     pm.setDevicePixelRatio(dpr)
+
+    if len(_pixmap_cache) >= _CACHE_MAX:
+        _pixmap_cache.clear()
+    _pixmap_cache[key] = pm
     return pm
 
 
 def ic(name: str, size: int = 16, color: str = "#c9ccd3", stroke_width: float = 1.6) -> QIcon:
-    """QIcon 반환."""
-    return QIcon(pixmap(name, size, color, stroke_width))
+    """QIcon 반환 (캐시됨)."""
+    key = (name, size, color, stroke_width)
+    cached = _icon_cache.get(key)
+    if cached is not None:
+        return cached
+    icon = QIcon(pixmap(name, size, color, stroke_width))
+    if len(_icon_cache) >= _CACHE_MAX:
+        _icon_cache.clear()
+    _icon_cache[key] = icon
+    return icon

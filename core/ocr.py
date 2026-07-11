@@ -11,15 +11,26 @@ import json
 import time
 import threading
 import hashlib
+import copy
 
 from .config import get_client
 from .utils import pdf_lock, cache_lock
+
+# (절대경로, mtime, size) → md5. 같은 파일을 반복문에서 여러 번 검증할 때
+# 전체 재읽기+재해시를 피한다. 파일이 수정되면 mtime/size가 바뀌어 키가 달라짐.
+_hash_memo = {}
+_HASH_MEMO_MAX = 2000
 
 
 def _compute_file_hash(fp):
     """파일 내용 해시 반환 (md5, 16진수 문자열).
     PDF 수정(금액 변경 등) 시 size 가 같아도 해시는 달라지므로 정확한 내용 비교 가능."""
     try:
+        st = os.stat(fp)
+        key = (os.path.abspath(fp), st.st_mtime, st.st_size)
+        memoized = _hash_memo.get(key)
+        if memoized is not None:
+            return memoized
         h = hashlib.md5()
         with open(fp, 'rb') as f:
             while True:
@@ -27,7 +38,11 @@ def _compute_file_hash(fp):
                 if not chunk:
                     break
                 h.update(chunk)
-        return h.hexdigest()
+        digest = h.hexdigest()
+        if len(_hash_memo) >= _HASH_MEMO_MAX:
+            _hash_memo.clear()
+        _hash_memo[key] = digest
+        return digest
     except Exception:
         return None
 
@@ -36,6 +51,10 @@ class GeminiOCR:
     """Gemini AI 기반 PDF OCR 분석기"""
     
     def __init__(self):
+        # 캐시 JSON 메모리 상주 사본 — 매 조회마다 파일 전체를 재파싱하지 않는다.
+        # 파일 mtime이 로드 시점과 다르면(외부 변경) 자동 재로드.
+        self._cache_data = None
+        self._cache_file_mtime = None
         self.model_id = 'gemini-3.1-flash-lite'
         self.base_prompt = """
 당신은 최고의 전문 관세사 사무원입니다. PDF 문서의 이미지를 분석하여 다음 정보를 JSON 형식으로만 응답하세요.
@@ -300,6 +319,40 @@ class GeminiOCR:
         
         return os.path.join(data_dir, ".analysis_cache.json")
 
+    def _load_cache(self):
+        """캐시 JSON을 메모리 사본으로 반환. 최초 1회만 디스크에서 파싱하고,
+        이후에는 파일 mtime이 바뀐 경우(외부 변경)에만 다시 읽는다.
+        호출자는 cache_lock을 잡은 상태여야 한다."""
+        cache_path = self._get_cache_path('')
+        try:
+            disk_mtime = os.path.getmtime(cache_path)
+        except OSError:
+            # 캐시 파일 없음
+            self._cache_data = {}
+            self._cache_file_mtime = None
+            return self._cache_data
+
+        if self._cache_data is None or disk_mtime != self._cache_file_mtime:
+            try:
+                with open(cache_path, 'r', encoding='utf-8') as f:
+                    self._cache_data = json.load(f)
+            except Exception as e:
+                print(f"캐시 읽기 오류: {e}")
+                self._cache_data = {}
+            self._cache_file_mtime = disk_mtime
+        return self._cache_data
+
+    def _write_cache(self):
+        """메모리 캐시를 디스크에 기록하고 mtime을 동기화.
+        호출자는 cache_lock을 잡은 상태여야 한다."""
+        cache_path = self._get_cache_path('')
+        with open(cache_path, 'w', encoding='utf-8') as f:
+            json.dump(self._cache_data, f, ensure_ascii=False, separators=(',', ':'))
+        try:
+            self._cache_file_mtime = os.path.getmtime(cache_path)
+        except OSError:
+            self._cache_file_mtime = None
+
     def _get_cached_result(self, fp):
         """캐시에서 결과 조회.
 
@@ -310,18 +363,13 @@ class GeminiOCR:
         hash 미존재 엔트리는 다음 OCR 시 자동으로 해시 포함 버전으로 교체됨.
         """
         try:
-            cache_path = self._get_cache_path(fp)
-            if not os.path.exists(cache_path):
-                return None
-
-            with open(cache_path, 'r', encoding='utf-8') as f:
-                cache = json.load(f)
-
             filename = os.path.basename(fp)
-            if filename not in cache:
+            with cache_lock:
+                cache = self._load_cache()
+                entry = cache.get(filename)
+            if entry is None:
                 return None
 
-            entry = cache[filename]
             file_mtime = os.path.getmtime(fp)
             file_size = os.path.getsize(fp)
 
@@ -337,12 +385,10 @@ class GeminiOCR:
                 if file_mtime != entry.get('mtime', 0):
                     with cache_lock:
                         try:
-                            with open(cache_path, 'r', encoding='utf-8') as _rf:
-                                _cache = json.load(_rf)
+                            _cache = self._load_cache()
                             if filename in _cache:
                                 _cache[filename]['mtime'] = file_mtime
-                                with open(cache_path, 'w', encoding='utf-8') as _wf:
-                                    json.dump(_cache, _wf, ensure_ascii=False, separators=(',', ':'))
+                                self._write_cache()
                         except Exception:
                             pass
             elif cached_size is not None:
@@ -352,12 +398,10 @@ class GeminiOCR:
                 if file_mtime != entry.get('mtime', 0):
                     with cache_lock:
                         try:
-                            with open(cache_path, 'r', encoding='utf-8') as _rf:
-                                _cache = json.load(_rf)
+                            _cache = self._load_cache()
                             if filename in _cache:
                                 _cache[filename]['mtime'] = file_mtime
-                                with open(cache_path, 'w', encoding='utf-8') as _wf:
-                                    json.dump(_cache, _wf, ensure_ascii=False, separators=(',', ':'))
+                                self._write_cache()
                         except Exception:
                             pass
             else:
@@ -377,7 +421,10 @@ class GeminiOCR:
             # 주의: business_no 누락은 무효화하지 않음 (소프트 미스) —
             # 무효화하면 levy_type 등 유효한 캐시까지 소실되고 파일 처리 파이프라인이
             # 전부 재분석을 유발함. business_no 백필은 GroupCard가 force 재분석으로 처리.
-            return result
+            #
+            # 메모리 캐시가 호출자와 공유되지 않도록 사본 반환 (호출자가 result를
+            # 수정해도 캐시 원본이 오염되지 않게).
+            return copy.deepcopy(result) if result is not None else None
         except Exception as e:
             print(f"캐시 읽기 오류: {e}")
             return None
@@ -388,13 +435,7 @@ class GeminiOCR:
 
         with cache_lock:
             try:
-                cache_path = self._get_cache_path(fp)
-
-                if os.path.exists(cache_path):
-                    with open(cache_path, 'r', encoding='utf-8') as f:
-                        cache = json.load(f)
-                else:
-                    cache = {}
+                cache = self._load_cache()
 
                 filename = os.path.basename(fp)
                 file_mtime = os.path.getmtime(fp)
@@ -405,7 +446,8 @@ class GeminiOCR:
                     'mtime': file_mtime,
                     'size': file_size,
                     'cached_at': time.time(),
-                    'result': result,
+                    # 호출자가 들고 있는 result와 메모리 캐시가 얽히지 않도록 사본 저장
+                    'result': copy.deepcopy(result),
                 }
                 if file_hash is not None:
                     entry['hash'] = file_hash
@@ -418,8 +460,7 @@ class GeminiOCR:
                     for k in oldest_keys:
                         del cache[k]
 
-                with open(cache_path, 'w', encoding='utf-8') as f:
-                    json.dump(cache, f, ensure_ascii=False, separators=(',', ':'))
+                self._write_cache()
 
             except Exception as e:
                 print(f"캐시 저장 오류: {e}")
@@ -428,12 +469,7 @@ class GeminiOCR:
         """파일 이름 변경 시 캐시 키도 업데이트"""
         with cache_lock:
             try:
-                cache_path = self._get_cache_path(old_path)
-                if not os.path.exists(cache_path):
-                    return
-
-                with open(cache_path, 'r', encoding='utf-8') as f:
-                    cache = json.load(f)
+                cache = self._load_cache()
 
                 old_name = os.path.basename(old_path)
                 new_name = os.path.basename(new_path)
@@ -443,8 +479,7 @@ class GeminiOCR:
                     entry['mtime'] = os.path.getmtime(new_path)
                     cache[new_name] = entry
 
-                    with open(cache_path, 'w', encoding='utf-8') as f:
-                        json.dump(cache, f, ensure_ascii=False, indent=2)
+                    self._write_cache()
                     print(f"[캐시] 키 업데이트: {old_name} -> {new_name}")
             except Exception as e:
                 print(f"캐시 키 업데이트 오류: {e}")

@@ -8,9 +8,43 @@ GUI 유틸리티 함수:
 
 import os
 import sys
+from collections import OrderedDict
 
-_thumbnail_cache = {}  # {(filepath, width, height, page, dpr): QPixmap}
+# 썸네일 LRU 캐시 — 미리보기 팝업 썸네일은 장당 수 MB(최대 ~900×1260px)라서
+# 무제한으로 쌓으면 세션이 길어질수록 메모리가 계속 증가한다.
+# 바이트 예산을 넘으면 가장 오래 안 쓴 항목부터 자동 삭제.
+_thumbnail_cache = OrderedDict()  # {(filepath, width, height, page, dpr): QPixmap}
+_thumbnail_cache_bytes = 0
+_THUMB_CACHE_MAX_BYTES = 60 * 1024 * 1024  # 60MB
+
 _page_count_cache = {}  # {filepath: int}
+_PAGE_COUNT_CACHE_MAX = 1000
+
+
+def _pixmap_nbytes(pm):
+    """QPixmap 대략적 메모리 크기 (RGBA 4바이트/픽셀)."""
+    return pm.width() * pm.height() * 4
+
+
+def _thumb_cache_put(key, pm):
+    """썸네일을 LRU 캐시에 넣고 예산 초과분을 오래된 순으로 제거."""
+    global _thumbnail_cache_bytes
+    old = _thumbnail_cache.pop(key, None)
+    if old is not None:
+        _thumbnail_cache_bytes -= _pixmap_nbytes(old)
+    _thumbnail_cache[key] = pm
+    _thumbnail_cache_bytes += _pixmap_nbytes(pm)
+    while _thumbnail_cache_bytes > _THUMB_CACHE_MAX_BYTES and len(_thumbnail_cache) > 1:
+        _, evicted = _thumbnail_cache.popitem(last=False)
+        _thumbnail_cache_bytes -= _pixmap_nbytes(evicted)
+
+
+def _thumb_cache_get(key):
+    """캐시 조회 — 히트 시 최근 사용으로 갱신."""
+    pm = _thumbnail_cache.get(key)
+    if pm is not None:
+        _thumbnail_cache.move_to_end(key)
+    return pm
 
 def resource_path(relative_path):
     """ Get absolute path to resource, works for dev and for PyInstaller """
@@ -36,6 +70,8 @@ def get_pdf_page_count(pdf_path):
         pdf = pdfium.PdfDocument(pdf_path)
         n = len(pdf)
         pdf.close()
+        if len(_page_count_cache) >= _PAGE_COUNT_CACHE_MAX:
+            _page_count_cache.clear()
         _page_count_cache[pdf_path] = max(1, n)
         return _page_count_cache[pdf_path]
     except Exception:
@@ -63,8 +99,9 @@ def generate_pdf_thumbnail(pdf_path, width=200, height=280, page_index=0):
         pass
 
     cache_key = (pdf_path, width, height, page_index, round(dpr * 100))
-    if cache_key in _thumbnail_cache:
-        return _thumbnail_cache[cache_key]
+    cached = _thumb_cache_get(cache_key)
+    if cached is not None:
+        return cached
 
     try:
         import pypdfium2 as pdfium
@@ -103,7 +140,7 @@ def generate_pdf_thumbnail(pdf_path, width=200, height=280, page_index=0):
                                    Qt.TransformationMode.SmoothTransformation)
             pixmap.setDevicePixelRatio(dpr)
 
-            _thumbnail_cache[cache_key] = pixmap
+            _thumb_cache_put(cache_key, pixmap)
             pdf.close()
             return pixmap
         pdf.close()

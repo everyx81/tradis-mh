@@ -1819,6 +1819,10 @@ class JarvisGUI(QMainWindow):
             timer.setInterval(120)
             state = {'t': 0.0}
             def _tick():
+                # 창이 최소화되거나 숨겨져 안 보일 때는 블러 재렌더 생략
+                # (하루 종일 백그라운드로 켜둘 때 유휴 CPU 소모 제거)
+                if self.isMinimized() or not self.isVisible():
+                    return
                 state['t'] = (state['t'] + 0.120 / 3.2) % 1.0
                 alpha = 205 + (250 - 205) * 0.5 * (1 - math.cos(2 * math.pi * state['t']))
                 self._brand_glow_set(int(alpha))

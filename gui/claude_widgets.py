@@ -66,6 +66,9 @@ class CircleToggle(QWidget):
         self.update()
 
     def _tick_pulse(self):
+        # 위젯이 실제 화면에 안 보이면 (창 최소화·다른 탭에 가림) 리페인트 생략
+        if self.visibleRegion().isEmpty():
+            return
         self._pulse_elapsed_ms = (self._pulse_elapsed_ms + self._PULSE_INTERVAL_MS) % self._PULSE_DURATION_MS
         self._pulse_progress = self._pulse_elapsed_ms / self._PULSE_DURATION_MS
         self.update()

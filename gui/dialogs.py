@@ -18,7 +18,7 @@ from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QPropertyAnimation, QEasingCurv
 from PyQt6.QtGui import QPixmap, QImage, QCursor, QColor, QDrag
 
 from .widgets import GlassFrame, NeonButton
-from .utils import resource_path, generate_pdf_thumbnail
+from .utils import resource_path
 from core.config import get_config_path
 
 
@@ -3010,7 +3010,7 @@ class GroupCard(GlassFrame):
             btn_preview.setFixedSize(26, 26)
             btn_preview.setCursor(Qt.CursorShape.PointingHandCursor)
             btn_preview.setStyleSheet(arrow_btn_style)
-            btn_preview.setToolTip("파일 미리보기")
+            btn_preview.setToolTip("PDF 열기")
             btn_preview.clicked.connect(lambda _, c=combo: self._show_thumbnail_popup(c.currentText()))
             row_layout.addWidget(btn_preview)
 
@@ -4009,190 +4009,21 @@ class GroupCard(GlassFrame):
 
     
     def _show_thumbnail_popup(self, filename):
+        """돋보기 클릭 → 기본 PDF 뷰어로 원본 파일 열기.
+        (썸네일 미리보기 팝업 대체 — 썸네일 생성/캐시 비용 제거)"""
         if not filename or filename == '(선택 안 함)':
             JarvisMessageBox.information(self, "미리보기", "파일을 먼저 선택해주세요.")
             return
-        
+
         pdf_path = os.path.join(self.directory, filename)
         if not os.path.exists(pdf_path):
             JarvisMessageBox.warning(self, "오류", f"파일을 찾을 수 없습니다:\n{filename}")
             return
-        
-        from .utils import get_pdf_page_count
-        page_count = get_pdf_page_count(pdf_path)
 
-        # 이미지 크기를 화면 높이에 맞춤 — 하단 버튼까지 항상 화면 안에 보이도록
-        # (여백: 팝업 마진 + 페이지 네비 + 파일명 + 버튼 행 ≈ 150px)
-        from PyQt6.QtWidgets import QApplication as _QApp
-        _scr = _QApp.primaryScreen().availableGeometry()
-        _img_h = max(400, min(840, _scr.height() - 150))
-        _img_w = int(_img_h * 600 / 840)
-
-        pixmap = generate_pdf_thumbnail(pdf_path, _img_w, _img_h, page_index=0)
-        if not pixmap:
-            JarvisMessageBox.warning(self, "오류", "썸네일 생성에 실패했습니다.")
-            return
-
-        # 이전 미리보기가 열려 있으면 닫고 교체 (돋보기 연속 클릭으로 파일 훑어보기)
-        _prev = getattr(self, '_preview_popup', None)
-        if _prev is not None:
-            try:
-                _prev.close()
-                _prev.deleteLater()  # 즉시 삭제 금지 — 이벤트 처리 후 안전하게 정리
-            except RuntimeError:
-                pass
-            self._preview_popup = None
-
-        from .claude_theme import C as _CT
-        popup = QDialog(self)
-        popup.setWindowTitle(f"미리보기: {filename}")
-        # Popup 타입은 포커스를 못 받아 ESC가 창에 전달되지 않음 → Dialog 타입 사용
-        popup.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
-        popup.setStyleSheet(f"""
-            QDialog {{
-                background-color: {_CT['bg_1']};
-                border: 1px solid {_CT['border']};
-                border-radius: 12px;
-            }}
-        """)
-
-        layout = QVBoxLayout(popup)
-        layout.setContentsMargins(10, 10, 10, 10)
-
-        lbl_img = QLabel()
-        lbl_img.setPixmap(pixmap)
-        lbl_img.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lbl_img.setStyleSheet("background: transparent; border: none;")
-        layout.addWidget(lbl_img)
-
-        # ── 페이지 넘김 (2페이지 이상일 때만) ──
-        _page_state = {'idx': 0}
-
-        def _show_page(new_idx):
-            if not (0 <= new_idx < page_count):
-                return
-            pm = generate_pdf_thumbnail(pdf_path, _img_w, _img_h, page_index=new_idx)
-            if pm:
-                _page_state['idx'] = new_idx
-                lbl_img.setPixmap(pm)
-                lbl_page.setText(f"{new_idx + 1} / {page_count}")
-                btn_prev.setEnabled(new_idx > 0)
-                btn_next.setEnabled(new_idx < page_count - 1)
-
-        _nav_css = f"""
-            QPushButton {{
-                background-color: {_CT['bg_3']};
-                border: 1px solid {_CT['border']};
-                border-radius: 7px;
-                color: {_CT['fg_1']};
-                font-size: 10pt;
-                font-weight: 600;
-            }}
-            QPushButton:hover {{ background-color: {_CT['bg_4']}; color: {_CT['fg_0']}; }}
-            QPushButton:disabled {{ color: {_CT['fg_3']}; background-color: {_CT['bg_2']}; }}
-        """
-        if page_count > 1:
-            nav_row = QHBoxLayout()
-            nav_row.setSpacing(10)
-            nav_row.addStretch()
-            btn_prev = QPushButton("◀")
-            btn_next = QPushButton("▶")
-            lbl_page = QLabel(f"1 / {page_count}")
-            lbl_page.setStyleSheet(
-                f"color: {_CT['fg_1']}; font-size: 9.5pt; background: transparent; border: none;")
-            for _b in (btn_prev, btn_next):
-                _b.setFixedSize(40, 28)
-                _b.setCursor(Qt.CursorShape.PointingHandCursor)
-                _b.setStyleSheet(_nav_css)
-            btn_prev.setEnabled(False)
-            btn_prev.clicked.connect(lambda: _show_page(_page_state['idx'] - 1))
-            btn_next.clicked.connect(lambda: _show_page(_page_state['idx'] + 1))
-            nav_row.addWidget(btn_prev)
-            nav_row.addWidget(lbl_page)
-            nav_row.addWidget(btn_next)
-            nav_row.addStretch()
-            layout.addLayout(nav_row)
-        else:
-            btn_prev = btn_next = None
-            lbl_page = QLabel()
-
-        lbl_name = QLabel(filename)
-        lbl_name.setStyleSheet(
-            f"color: {_CT['fg_2']}; font-size: 9pt; padding: 5px; background: transparent; border: none;"
-        )
-        lbl_name.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(lbl_name)
-
-        # ── 하단 버튼: 원본 열기 / 닫기 ──
-        _btm_css = f"""
-            QPushButton {{
-                background-color: {_CT['bg_3']};
-                border: 1px solid {_CT['border']};
-                border-radius: 8px;
-                color: {_CT['fg_1']};
-                padding: 5px 16px;
-                font-size: 9.5pt;
-                font-weight: 500;
-            }}
-            QPushButton:hover {{
-                background-color: {_CT['bg_4']};
-                color: {_CT['fg_0']};
-            }}
-        """
-        btm_row = QHBoxLayout()
-        btm_row.setSpacing(8)
-
-        btn_open = QPushButton("원본 열기")
-        btn_open.setFixedHeight(32)
-        btn_open.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_open.setStyleSheet(_btm_css)
-
-        def _open_original():
-            try:
-                os.startfile(pdf_path)
-            except Exception as e:
-                self.parent_widget.emit_log(f"[미리보기] 원본 열기 실패: {e}")
-            popup.close()
-        btn_open.clicked.connect(_open_original)
-        btm_row.addWidget(btn_open)
-
-        btn_close = QPushButton("닫기")
-        btn_close.setFixedHeight(32)
-        btn_close.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_close.setStyleSheet(_btm_css)
-        btn_close.clicked.connect(popup.close)
-        btm_row.addWidget(btn_close)
-        layout.addLayout(btm_row)
-
-        # ESC 닫기 + ←/→ 페이지 넘김
-        _orig_kp = popup.keyPressEvent
-        def _popup_keypress(ev):
-            if ev.key() == Qt.Key.Key_Escape:
-                popup.close()
-            elif ev.key() == Qt.Key.Key_Left and page_count > 1:
-                _show_page(_page_state['idx'] - 1)
-            elif ev.key() == Qt.Key.Key_Right and page_count > 1:
-                _show_page(_page_state['idx'] + 1)
-            else:
-                _orig_kp(ev)
-        popup.keyPressEvent = _popup_keypress
-
-        # 비모달 표시 — 미리보기를 띄운 채로 카드 조작(파일 변경·다른 돋보기 클릭) 가능
-        # 위치: 오른쪽 끝(카드 목록이 가리지 않게), 세로는 화면 중앙
-        # WA_DeleteOnClose 사용 금지 — 클릭 이벤트 처리 중 창이 파괴되면 앱 크래시
-        self._preview_popup = popup
-        popup.adjustSize()
-
-        from PyQt6.QtWidgets import QApplication as _QApp
-        _scr = _QApp.primaryScreen().availableGeometry()
-        _win = self.window().frameGeometry() if self.window() else _scr
-        x = min(_win.right(), _scr.right()) - popup.width() - 24
-        y = _scr.center().y() - popup.height() // 2
-        x = max(_scr.left() + 8, x)
-        y = max(_scr.top() + 8, min(y, _scr.bottom() - popup.height() - 8))
-        popup.move(x, y)
-        popup.show()
-        popup.activateWindow()
+        try:
+            os.startfile(pdf_path)
+        except Exception as e:
+            self.parent_widget.emit_log(f"[미리보기] 파일 열기 실패: {e}")
         
     def _archive_export_only(self):
         """정산서 없는 수출/수입건: 신고필증 아카이빙 + 관련 파일 수집"""

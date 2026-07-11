@@ -1803,32 +1803,18 @@ class JarvisGUI(QMainWindow):
         ignite.valueChanged.connect(self._brand_glow_set)
         seq.addAnimation(ignite)
 
+        # 점화 후 고정 글로우로 정착 — 호흡(주기적 밝기 변화) 애니메이션은
+        # 체감이 거의 없는데 블러 재렌더를 계속 유발해 제거 (유휴 CPU 0)
         settle = QVariantAnimation(seq)
         settle.setDuration(550)
         settle.setStartValue(255)
-        settle.setEndValue(205)
+        settle.setEndValue(225)
         settle.setEasingCurve(QEasingCurve.Type.InOutQuad)
         settle.valueChanged.connect(self._brand_glow_set)
         seq.addAnimation(settle)
 
         def _steady():
-            # 성능: 60fps 애니메이션 대신 120ms 간격 QTimer로 호흡
-            # (블러 재렌더 빈도 ~87% 감소 — 하루 종일 켜두는 앱의 유휴 부하 최소화)
-            import math
-            timer = QTimer(self)
-            timer.setInterval(120)
-            state = {'t': 0.0}
-            def _tick():
-                # 창이 최소화되거나 숨겨져 안 보일 때는 블러 재렌더 생략
-                # (하루 종일 백그라운드로 켜둘 때 유휴 CPU 소모 제거)
-                if self.isMinimized() or not self.isVisible():
-                    return
-                state['t'] = (state['t'] + 0.120 / 3.2) % 1.0
-                alpha = 205 + (250 - 205) * 0.5 * (1 - math.cos(2 * math.pi * state['t']))
-                self._brand_glow_set(int(alpha))
-            timer.timeout.connect(_tick)
-            timer.start()
-            self._brand_anim = timer
+            self._brand_anim = None
         seq.finished.connect(_steady)
         seq.start()
         self._brand_anim = seq

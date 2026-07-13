@@ -826,11 +826,9 @@ class MK3ScheduleOnlyWidget(QWidget):
         self.refresh_schedules()
     
     def refresh_schedules(self):
-        self.schedule_list.clear()
-        
         from PyQt6.QtCore import QDate
         from datetime import datetime as dt
-        
+
         schedules = self.schedule_manager.list_schedules(include_completed=True)
         
         active_schedules = []
@@ -873,25 +871,27 @@ class MK3ScheduleOnlyWidget(QWidget):
             self.lbl_list_header.setText("전체 일정")
             self.btn_show_all.hide()
             
+        # 표시 내용이 직전 렌더와 동일하면 카드 재생성 생략
+        # (같은 날짜 재클릭, 변경 없는 갱신 호출 등에서 전체 리빌드 방지)
+        import json as _json
+        render_sig = (
+            self.current_filter_date.toString() if self.current_filter_date else None,
+            _json.dumps(active_schedules + completed_schedules,
+                        ensure_ascii=False, sort_keys=True, default=str),
+        )
+        if render_sig == getattr(self, '_render_sig', None):
+            return
+        self._render_sig = render_sig
+
         # 리스트 렌더링
-        for schedule in active_schedules:
+        self.schedule_list.clear()
+        for schedule in active_schedules + completed_schedules:
             try:
                 item = QListWidgetItem(self.schedule_list)
                 card = ScheduleCardWidget(schedule, self)
                 item.setSizeHint(card.sizeHint())
                 item.setData(Qt.ItemDataRole.UserRole, schedule["id"])
-                
-                self.schedule_list.addItem(item)
-                self.schedule_list.setItemWidget(item, card)
-            except Exception as e: pass
-                
-        for schedule in completed_schedules:
-            try:
-                item = QListWidgetItem(self.schedule_list)
-                card = ScheduleCardWidget(schedule, self)
-                item.setSizeHint(card.sizeHint())
-                item.setData(Qt.ItemDataRole.UserRole, schedule["id"])
-                
+
                 self.schedule_list.addItem(item)
                 self.schedule_list.setItemWidget(item, card)
             except Exception as e: pass

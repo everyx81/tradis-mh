@@ -34,6 +34,26 @@ STANDARD_DOC_TYPES = {
 # BL과 무관한 독립 문서 유형 (별도 카드로 관리)
 INDEPENDENT_DOC_TYPES = {"이체증"}
 
+
+def is_merge_excluded_file(filename: str) -> bool:
+    """정산명세서 병합에 절대 포함하면 안 되는 서류인지 파일명으로 판별.
+
+    - 이체증: 지불 증빙일 뿐 정산 구성 서류가 아님
+    - 신고서(수입/수출/반송 — '신고필증' 아님): 수리 전 견본 단계 문서
+    - 청구서(자금청구서 등 — '계산서' 아님): 정산서와 별개의 청구 문서
+    자동 매칭 후보와 매핑 드롭다운 양쪽에서 이 함수로 걸러낸다.
+    """
+    if not filename:
+        return False
+    name = filename.replace(" ", "")
+    if "이체증" in name:
+        return True
+    if "신고서" in name and "신고필증" not in name:
+        return True
+    if "청구서" in name and "계산서" not in name:
+        return True
+    return False
+
 # 앵커 문서 — BL/Invoice 번호가 문서에 공식 기재되는 통관 절차 문서.
 # 이 문서들의 괄호 ID만 그룹(카드) 생성 근거로 신뢰한다.
 # 비용 계산서류의 ID는 검사기관 접수번호·주문번호 등이 들어올 수 있으므로

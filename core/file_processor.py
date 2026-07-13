@@ -906,13 +906,14 @@ class AutoRenamer:
         af = [x['filename'] for x in m if x['filename']]
         allp = []
 
+        from core.constants import is_merge_excluded_file
         if ti:
             normalized_ti_main = normalize_id(ti)
             for f in _all_dir_pdfs:
                 if f in af:
                     continue
-                # 청구서(자금청구서)는 정산서에 병합하면 안 되는 별도 서류이므로 제외
-                if "청구서" in f and "계산서" not in f:
+                # 이체증·신고서·청구서는 정산서에 병합하면 안 되는 서류이므로 제외
+                if is_merge_excluded_file(f):
                     continue
                 match = RE_ID_PAREN.search(f)
                 if match:
@@ -931,7 +932,7 @@ class AutoRenamer:
             for _fn in dm.values():
                 if not _fn or _fn in af or _fn in allp or _fn not in _all_dir_pdfs:
                     continue
-                if "청구서" in _fn and "계산서" not in _fn:
+                if is_merge_excluded_file(_fn):
                     continue
                 allp.append(_fn)
 

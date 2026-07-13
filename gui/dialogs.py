@@ -1047,7 +1047,14 @@ class GroupCard(GlassFrame):
         #   'red'      = 크게 불일치
         self._validation_status = None
 
-        self.available_pdfs = ['(선택 안 함)'] + sorted(list(self.data['docs'].values())) + sorted(self.unclassified)
+        # 이체증·신고서·청구서는 정산 병합 대상이 아니므로 드롭다운 후보에서 제외
+        # (미분류로 들어온 청구서·신고서를 실수로 배정해 병합되는 것 방지)
+        from core.constants import is_merge_excluded_file
+        self.available_pdfs = (
+            ['(선택 안 함)']
+            + sorted(f for f in self.data['docs'].values() if f and not is_merge_excluded_file(f))
+            + sorted(f for f in self.unclassified if f and not is_merge_excluded_file(f))
+        )
 
         # 마킹 데이터 로드 (팝업에서 마킹한 파일)
         if hasattr(parent_widget, 'marked_data') and text_id in parent_widget.marked_data:

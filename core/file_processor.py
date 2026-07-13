@@ -1293,7 +1293,9 @@ class AutoRenamer:
                 for f in _all_dir_pdfs:
                     if f in af or f in uncl_files:
                         continue
-                    if "청구서" in f and "계산서" not in f:
+                    # 이체증·신고서·청구서는 금액이 일치해도 병합 금지
+                    # (이체증은 BL이 없어 아래 BL 필터를 통과하므로 여기서 차단 필수)
+                    if is_merge_excluded_file(f):
                         continue
                     # 파일에 BL번호가 있으면서 현재 건과 다른 BL이면 제외
                     f_match = RE_ID_PAREN.search(f)

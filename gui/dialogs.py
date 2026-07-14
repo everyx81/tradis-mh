@@ -1250,8 +1250,7 @@ class GroupCard(GlassFrame):
         # 파일 이동 단축키 — 카드 내부에 포커스가 있을 때만 동작
         from PyQt6.QtGui import QShortcut, QKeySequence
         for _seq, _fn in (("Ctrl+Up", lambda: self._move_selected_file(-1)),
-                          ("Ctrl+Down", lambda: self._move_selected_file(1)),
-                          ("Escape", lambda: self._set_selected_row(None))):
+                          ("Ctrl+Down", lambda: self._move_selected_file(1))):
             _sc = QShortcut(QKeySequence(_seq), self)
             _sc.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
             _sc.activated.connect(_fn)
@@ -3222,6 +3221,14 @@ class GroupCard(GlassFrame):
         if not self._row_movable(idx):
             return
         self._set_selected_row(None if self._selected_row == idx else idx)
+
+    def keyPressEvent(self, event):
+        # ESC: 선택된 행이 있으면 해제만, 없으면 부모(메인 윈도우)로 전달해 미니 윈도우 전환
+        if event.key() == Qt.Key.Key_Escape and getattr(self, '_selected_row', None) is not None:
+            self._set_selected_row(None)
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
     def _set_selected_row(self, idx):
         old = getattr(self, '_selected_row', None)

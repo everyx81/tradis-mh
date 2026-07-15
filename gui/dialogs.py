@@ -1172,8 +1172,6 @@ class GroupCard(GlassFrame):
             from .claude_theme import C as _CT
             icon_map = (
                 ("폴더 정리", "Folder"),
-                ("펼치기",    "Split"),
-                ("접기",      "Merge"),
                 ("분석 중",   "Refresh"),
                 ("재분석",    "Refresh"),
                 ("매칭",      "Merge"),
@@ -1961,6 +1959,13 @@ class GroupCard(GlassFrame):
         self.is_collapsed = not self.is_collapsed
         self.body_widget.setVisible(not self.is_collapsed)
         self.lbl_arrow.setText("▶" if self.is_collapsed else "▼")
+        # 정산서 카드: 펼칠 때 매칭 UI가 준비됐는데 아직 안 만들어졌으면 바로 구성
+        # (구 펼치기 버튼 대체 — 매칭 UI가 기본 화면)
+        if (not self.is_collapsed and getattr(self, 'mapping', None)
+                and not getattr(self, '_analyzing', False)
+                and not getattr(self, '_in_refresh_expand', False)
+                and self.mapping_layout.count() == 0):
+            self.refresh_mapping_ui()
         # 펼침/접힘 상태에 따라 카드 bg 재적용 (디자인 .group.open 차별화)
         self._apply_card_bg(self._hover_progress)
         # Claude Design caret 회전 (collapsed→Chevron, open→rotated)
@@ -2146,7 +2151,8 @@ class GroupCard(GlassFrame):
                 self.parent_widget.log_signal.emit(f"Analysis Error: {e}")
                 import traceback
                 print(traceback.format_exc())
-                
+                QTimer.singleShot(0, self._on_auto_analyze_fail)
+
         threading.Thread(target=run, daemon=True).start()
 
     def _auto_analyze_from_cache(self):
@@ -2188,19 +2194,21 @@ class GroupCard(GlassFrame):
             print(f"[자동분석 초기화 오류] {e}")
 
     def _on_auto_analyze_done(self):
-        """자동 분석 완료 후 체크리스트 갱신 (UI는 펼치지 않음)"""
+        """자동 분석 완료 후 체크리스트 갱신.
+        매칭 UI가 카드의 기본 화면이므로: 펼쳐져 있으면 즉시 전환, 접혀 있으면 다음 펼침 때 표시."""
         self._analyzing = False
         self._update_checklist_from_mapping()
         self._run_amount_validation()
-        # 버튼: EXPAND (매핑 UI 펼치기)
-        self._set_btn_toggle("펼치기")
+        self._set_btn_toggle("재분석")
         self.btn_toggle.setEnabled(True)
         try:
             self.btn_toggle.clicked.disconnect()
         except (RuntimeError, TypeError):
             pass
-        self.btn_toggle.clicked.connect(self.refresh_mapping_ui)
+        self.btn_toggle.clicked.connect(self.start_analysis)
         self._update_status_badge()
+        if not getattr(self, 'is_collapsed', True):
+            self.refresh_mapping_ui()
 
     def _on_auto_analyze_fail(self):
         """자동 분석 실패 시 수동 분석 버튼으로 복원"""
@@ -2865,17 +2873,23 @@ class GroupCard(GlassFrame):
 
     def refresh_mapping_ui(self):
         # 카드가 접혀있으면 먼저 펼침 (body_widget이 숨김이면 내부 mapping_widget도 안 보임)
+        # _in_refresh_expand: toggle_collapse가 refresh_mapping_ui를 되부르는 이중 빌드 방지
         if getattr(self, 'is_collapsed', False):
-            self.toggle_collapse()
+            self._in_refresh_expand = True
+            try:
+                self.toggle_collapse()
+            finally:
+                self._in_refresh_expand = False
         self.mapping_widget.setVisible(True)
-        # 매핑 UI 표시 시 중복되는 파일 목록 숨김
+        # 매핑 UI가 정산서 카드의 기본 화면 — 중복되는 파일 목록은 숨김
         if hasattr(self, 'file_list'):
             self.file_list.setVisible(False)
-        self._set_btn_toggle("접기")
+        self._analyzing = False
+        self._set_btn_toggle("재분석")
         self.btn_toggle.setEnabled(True)
         try: self.btn_toggle.clicked.disconnect()
         except (RuntimeError, TypeError): pass
-        self.btn_toggle.clicked.connect(self.toggle_view)
+        self.btn_toggle.clicked.connect(self.start_analysis)
         
         # 기존 레이아웃 정리 — 중첩 레이아웃(하단 버튼 행 addLayout)까지 재귀 삭제.
         # 위젯만 지우면 버튼 행의 "행 추가/합치기 실행" 버튼이 화면에 남아
@@ -2927,9 +2941,9 @@ class GroupCard(GlassFrame):
             row_widget.setObjectName("MappingRow")
             row_widget.setMinimumHeight(36)
             row_widget.setStyleSheet(self._row_style(idx, selected=False))
-            # 행 클릭 → 선택/해제 (콤보·버튼 클릭은 자식이 소비하므로 영향 없음)
+            # 행 좌클릭 → 선택/해제, 우클릭 → 파일 관리 메뉴 (콤보·버튼 클릭은 자식이 소비)
             row_widget.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
-            row_widget.mousePressEvent = lambda ev, i=idx: self._on_row_clicked(i)
+            row_widget.mousePressEvent = lambda ev, i=idx: self._on_mapping_row_press(ev, i)
             row_layout = QHBoxLayout(row_widget)
             row_layout.setContentsMargins(0, 5, 0, 5)
             row_layout.setSpacing(8)
@@ -3025,7 +3039,16 @@ class GroupCard(GlassFrame):
 
             self.row_widget_list.append(row_widget)
             self.mapping_layout.addWidget(row_widget)
-        
+
+        # ── 금액-only 매칭 제안 행 — 매칭 화면에서는 파일 목록이 숨겨지므로 여기에 표시 ──
+        for sug in self.data.get('suggested', []) or []:
+            sug_fn = sug.get('file', '')
+            if not sug_fn:
+                continue
+            sug_row = self._make_suggestion_row_widget(sug_fn, os.path.join(self.directory, sug_fn))
+            sug_row.setMinimumHeight(32)
+            self.mapping_layout.addWidget(sug_row)
+
         self.mapping_layout.setSpacing(4)
         self.mapping_layout.setContentsMargins(0, 0, 0, 0)
 
@@ -3222,6 +3245,60 @@ class GroupCard(GlassFrame):
             return
         self._set_selected_row(None if self._selected_row == idx else idx)
 
+    def _on_mapping_row_press(self, event, idx):
+        """매핑 행 마우스: 좌클릭=선택 토글, 우클릭=파일 관리 메뉴"""
+        if event.button() == Qt.MouseButton.RightButton:
+            self._show_mapping_row_menu(idx, event.globalPosition().toPoint())
+        else:
+            self._on_row_clicked(idx)
+
+    def _show_mapping_row_menu(self, idx, global_pos):
+        """매핑 행 우클릭 → 파일 관리 메뉴 (파일 목록 우클릭과 동일 기능)"""
+        try:
+            filename = self.combo_list[idx].currentText()
+        except (IndexError, RuntimeError):
+            return
+        if not filename or filename == '(선택 안 함)':
+            return
+        path = os.path.join(self.directory, filename)
+        from PyQt6.QtWidgets import QMenu
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: rgba(35, 40, 50, 240);
+                border: 1px solid #135166;
+                border-radius: 8px;
+                padding: 6px 0px;
+                color: #ffffff;
+                font-size: 10pt;
+            }
+            QMenu::item {
+                padding: 8px 24px;
+                border-radius: 4px;
+                margin: 2px 6px;
+            }
+            QMenu::item:selected {
+                background-color: rgba(0, 200, 255, 50);
+                color: #00ffff;
+            }
+        """)
+        action_open = menu.addAction("📄 열기")
+        action_preview = menu.addAction("🔍 미리보기")
+        action_copy = menu.addAction("📋 경로 복사")
+        action_rename = menu.addAction("✏️ 이름 변경")
+        action_delete = menu.addAction("🗑️ 삭제")
+        action = menu.exec(global_pos)
+        if action == action_open:
+            self._open_file_with_default(path)
+        elif action == action_preview:
+            self._show_thumbnail_popup(filename)
+        elif action == action_copy:
+            self._fl_copy_path(path)
+        elif action == action_rename:
+            self._fl_rename_by_path(path, filename)
+        elif action == action_delete:
+            self._fl_delete_by_path(path, filename)
+
     def keyPressEvent(self, event):
         # ESC: 선택된 행이 있으면 해제만, 없으면 부모(메인 윈도우)로 전달해 미니 윈도우 전환
         if event.key() == Qt.Key.Key_Escape and getattr(self, '_selected_row', None) is not None:
@@ -3355,23 +3432,6 @@ class GroupCard(GlassFrame):
         self.mapping.append({'label': '[추가] 미분류 서류', 'filename': ''})
         self.refresh_mapping_ui()
 
-    def toggle_view(self):
-        # 카드 본문이 접혀있으면 먼저 펼침 (그래야 mapping_widget이 보임)
-        if getattr(self, 'is_collapsed', False):
-            self.toggle_collapse()
-            self.mapping_widget.setVisible(True)
-            if hasattr(self, 'file_list'):
-                self.file_list.setVisible(False)
-            self._set_btn_toggle("접기"); self.btn_toggle.setToolTip("접기")
-            return
-        is_visible = self.mapping_widget.isVisible()
-        self.mapping_widget.setVisible(not is_visible)
-        # 매핑 표시/숨김에 따라 파일 목록은 반대로
-        if hasattr(self, 'file_list'):
-            self.file_list.setVisible(is_visible)
-        self._set_btn_toggle("펼치기" if is_visible else "접기")
-        self.btn_toggle.setToolTip("펼치기" if is_visible else "접기")
-    
     def _refresh_file_list(self):
         """파일 목록 위젯 갱신 (통일 디자인: 초록 도트 + 파일명 한 줄)"""
         from .claude_theme import C as _CT

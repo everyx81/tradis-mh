@@ -19,9 +19,10 @@ from ctypes import wintypes
 
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QPushButton, QListWidgetItem, QStyledItemDelegate,
-                             QStyle, QFileIconProvider, QAbstractItemView)
+                             QStyle, QFileIconProvider, QAbstractItemView,
+                             QLineEdit)
 from PyQt6.QtCore import (Qt, QTimer, QFileSystemWatcher, QSize, QRect,
-                          QFileInfo, pyqtSignal)
+                          QFileInfo, pyqtSignal, QEvent)
 from PyQt6.QtGui import QFontMetrics, QColor, QPainter, QFont
 
 from .widgets import DropListWidget
@@ -240,12 +241,14 @@ class FileBrowserWidget(QWidget):
 
     escape_pressed = pyqtSignal()
     MAX_FILES = 200
+    SORT_MODES = (("mtime", "최신순"), ("name", "이름순"), ("size", "크기순"))
 
     def __init__(self, path_callback, parent=None):
         super().__init__(parent)
         self.path_callback = path_callback
         self.current_folder = None
         self._icon_provider = QFileIconProvider()
+        self._sort_idx = 0  # 기본 최신순
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -286,6 +289,58 @@ class FileBrowserWidget(QWidget):
         self.btn_up.clicked.connect(self.go_up)
         self.btn_explorer.clicked.connect(self._open_in_explorer)
         layout.addLayout(toolbar)
+
+        # ----- 검색 + 정렬 -----
+        search_row = QHBoxLayout()
+        search_row.setSpacing(6)
+
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("파일명 검색")
+        self.search_input.setClearButtonEnabled(True)
+        self.search_input.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {CT['bg_2']};
+                color: {CT['fg_0']};
+                border: 1px solid {CT['border_soft']};
+                border-radius: 8px;
+                padding: 5px 10px;
+                font-family: {FONT_UI};
+                font-size: 9pt;
+            }}
+            QLineEdit:focus {{ border: 1px solid {CT['accent_border']}; }}
+            QLineEdit[hasText="true"] {{
+                border: 1px solid {CT['accent_border']};
+                background-color: {CT['accent_bg']};
+            }}
+        """)
+        self.search_input.textChanged.connect(self._on_search_changed)
+        self.search_input.installEventFilter(self)  # ESC로 검색어 지우기
+        search_row.addWidget(self.search_input, 1)
+
+        self.btn_sort = QPushButton(self.SORT_MODES[0][1])
+        self.btn_sort.setToolTip("정렬 방식 변경 (최신순 → 이름순 → 크기순)")
+        self.btn_sort.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_sort.setFixedWidth(62)
+        self.btn_sort.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {CT['bg_2']};
+                color: {CT['fg_1']};
+                border: 1px solid {CT['border_soft']};
+                border-radius: 8px;
+                padding: 5px 8px;
+                font-family: {FONT_UI};
+                font-size: 8.5pt;
+                font-weight: 500;
+            }}
+            QPushButton:hover {{
+                background-color: {CT['bg_3']};
+                color: {CT['fg_0']};
+                border: 1px solid {CT['border']};
+            }}
+        """)
+        self.btn_sort.clicked.connect(self._cycle_sort)
+        search_row.addWidget(self.btn_sort)
+        layout.addLayout(search_row)
 
         # ----- 파일 목록 -----
         self.list = FileListWidget(self)
@@ -356,10 +411,45 @@ class FileBrowserWidget(QWidget):
         self.current_folder = folder
         if folder and os.path.isdir(folder):
             self._watcher.addPath(folder)
+        # 폴더 이동 시 검색어 초기화 (검색은 현재 폴더 기준)
+        if self.search_input.text():
+            self.search_input.blockSignals(True)
+            self.search_input.clear()
+            self.search_input.blockSignals(False)
+            self._apply_search_style(False)
         self._populate()
 
     def refresh(self):
         self._populate()
+
+    # ---------- 검색 · 정렬 ----------
+    def _apply_search_style(self, has_text):
+        """검색어 유무에 따라 입력창 강조 (파란 테두리)"""
+        if self.search_input.property("hasText") != has_text:
+            self.search_input.setProperty("hasText", has_text)
+            st = self.search_input.style()
+            st.unpolish(self.search_input)
+            st.polish(self.search_input)
+
+    def _on_search_changed(self, text):
+        self._apply_search_style(bool(text.strip()))
+        self._schedule_refresh()  # 타이핑 디바운스 (300ms)
+
+    def _cycle_sort(self):
+        self._sort_idx = (self._sort_idx + 1) % len(self.SORT_MODES)
+        self.btn_sort.setText(self.SORT_MODES[self._sort_idx][1])
+        self._populate()
+
+    def eventFilter(self, obj, event):
+        # 검색창에서 ESC: 검색어 지우기 / 이미 비어 있으면 상위(트레이 닫기 등)로 전달
+        if obj is self.search_input and event.type() == QEvent.Type.KeyPress \
+                and event.key() == Qt.Key.Key_Escape:
+            if self.search_input.text():
+                self.search_input.clear()
+            else:
+                self.escape_pressed.emit()
+            return True
+        return super().eventFilter(obj, event)
 
     def _populate(self):
         self.list.clear()
@@ -392,8 +482,23 @@ class FileBrowserWidget(QWidget):
             self.lbl_path.setText(f"폴더 접근 실패: {e}")
             return
 
+        # 검색 필터 (파일명 부분 일치, 대소문자 무시) — 검색 중엔 표시 개수 제한 해제
+        query = self.search_input.text().strip().lower()
+        if query:
+            dirs = [d for d in dirs if query in d[0].lower()]
+            files = [f for f in files if query in f[0].lower()]
+
+        # 폴더는 항상 상단 (이름순), 파일은 선택된 정렬 적용
         dirs.sort(key=lambda x: x[0].lower())
-        files.sort(key=lambda x: x[2], reverse=True)  # 최신 파일이 맨 위
+        sort_mode = self.SORT_MODES[self._sort_idx][0]
+        if sort_mode == "name":
+            files.sort(key=lambda x: x[0].lower())
+        elif sort_mode == "size":
+            files.sort(key=lambda x: x[3], reverse=True)  # 큰 파일이 맨 위
+        else:
+            files.sort(key=lambda x: x[2], reverse=True)  # 최신 파일이 맨 위
+
+        limit = len(files) if query else self.MAX_FILES
 
         for name, full, mtime in dirs:
             item = QListWidgetItem(name)
@@ -401,7 +506,7 @@ class FileBrowserWidget(QWidget):
             item.setData(SUB_ROLE, "폴더")
             item.setIcon(self._icon_provider.icon(QFileInfo(full)))
             self.list.addItem(item)
-        for name, full, mtime, size in files[:self.MAX_FILES]:
+        for name, full, mtime, size in files[:limit]:
             item = QListWidgetItem(name)
             item.setData(Qt.ItemDataRole.UserRole, full)
             item.setData(SUB_ROLE, f"{_rel_time(mtime)}  ·  {_fmt_size(size)}")

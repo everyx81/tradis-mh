@@ -2377,6 +2377,8 @@ class JarvisGUI(QMainWindow):
             for k, btn in self.filter_btns.items():
                 btn.setChecked(k == 'all')
             self._refresh_filter_counts()
+            # 스캔 후 메모리 정리 + 추적 로그 (증가 추이 파악용, 파일 로그에만 기록)
+            QTimer.singleShot(1500, self._post_scan_memory_cleanup)
         except Exception as e: self.emit_log(f"Critical error updating UI: {e}")
 
     def _on_merge_complete(self):
@@ -2812,6 +2814,74 @@ class JarvisGUI(QMainWindow):
         """창 내리기 — 작업 표시줄로 최소화.
         (구 미니 HUD 위젯 제거 — 작업 표시줄의 TRADIS 아이콘 클릭으로 복원)"""
         self.showMinimized()
+
+    def changeEvent(self, event):
+        # 최소화 시 미사용 메모리 페이지를 OS에 반납 (백그라운드 상주 시 메모리 절감)
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.WindowStateChange and self.isMinimized():
+            QTimer.singleShot(300, self._trim_working_set)
+
+    @staticmethod
+    def _mem_api():
+        """kernel32 메모리 API 준비 (argtypes 명시 — 64비트 핸들 오류 방지)"""
+        import ctypes
+        from ctypes import wintypes
+
+        class _PMC(ctypes.Structure):
+            _fields_ = [("cb", wintypes.DWORD),
+                        ("PageFaultCount", wintypes.DWORD),
+                        ("PeakWorkingSetSize", ctypes.c_size_t),
+                        ("WorkingSetSize", ctypes.c_size_t),
+                        ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                        ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                        ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                        ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                        ("PagefileUsage", ctypes.c_size_t),
+                        ("PeakPagefileUsage", ctypes.c_size_t)]
+
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        k32.GetCurrentProcess.restype = wintypes.HANDLE
+        k32.K32GetProcessMemoryInfo.argtypes = [wintypes.HANDLE, ctypes.POINTER(_PMC), wintypes.DWORD]
+        k32.SetProcessWorkingSetSize.argtypes = [wintypes.HANDLE, ctypes.c_size_t, ctypes.c_size_t]
+        return ctypes, k32, _PMC
+
+    def _trim_working_set(self):
+        """파이썬 gc 후 워킹셋을 OS에 반납. 복원 시 필요한 페이지만 다시 올라온다."""
+        if not self.isMinimized():
+            return
+        try:
+            import gc
+            gc.collect()
+            ctypes, k32, _ = self._mem_api()
+            k32.SetProcessWorkingSetSize(
+                k32.GetCurrentProcess(), ctypes.c_size_t(-1), ctypes.c_size_t(-1))
+        except Exception:
+            pass
+
+    def _post_scan_memory_cleanup(self):
+        """스캔/카드 재구성 후 가비지 정리 + 메모리 추적 로그 (누수 진단 데이터)"""
+        try:
+            import gc
+            gc.collect()
+            ws = self._working_set_mb()
+            if ws:
+                line = f"[{datetime.datetime.now().strftime('%H:%M:%S')}] [메모리] 워킹셋 {ws:.0f}MB"
+                self._write_log_file(line)
+        except Exception:
+            pass
+
+    @staticmethod
+    def _working_set_mb():
+        """현재 프로세스 워킹셋(MB) — 메모리 추적 로그용"""
+        try:
+            ctypes, k32, _PMC = JarvisGUI._mem_api()
+            pmc = _PMC()
+            pmc.cb = ctypes.sizeof(_PMC)
+            if k32.K32GetProcessMemoryInfo(k32.GetCurrentProcess(), ctypes.byref(pmc), pmc.cb):
+                return pmc.WorkingSetSize / 1048576
+        except Exception:
+            pass
+        return 0.0
 
     def _start_everything(self):
         try:

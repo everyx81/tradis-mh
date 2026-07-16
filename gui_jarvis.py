@@ -2780,11 +2780,6 @@ class JarvisGUI(QMainWindow):
                 self.emit_log("API Key loaded." if loaded_api_key else "API Key missing.")
                 if "browser_home_path" in data:
                     self.file_manager.browser_home_path = data["browser_home_path"]
-                # 미니 윈도우 위치 로드
-                if "mini_window_pos" in data:
-                    self.mini_window_saved_pos = data["mini_window_pos"]
-                else:
-                    self.mini_window_saved_pos = None
             except Exception as e: print(f"Settings Load Error: {e}")
 
     def save_settings(self):
@@ -2801,9 +2796,6 @@ class JarvisGUI(QMainWindow):
             if self.archiver.export_docs_root: data["export_docs_root"] = self.archiver.export_docs_root
             if hasattr(self.file_manager, 'browser_home_path') and self.file_manager.browser_home_path:
                 data["browser_home_path"] = self.file_manager.browser_home_path
-            # 미니 윈도우 위치 저장
-            if hasattr(self, 'mini_window_saved_pos') and self.mini_window_saved_pos:
-                data["mini_window_pos"] = self.mini_window_saved_pos
             # Atomic write: 임시 파일에 쓰고 rename (중간 종료 시 파일 손상 방지)
             tmp_cfg = cfg + ".tmp"
             with open(tmp_cfg, 'w', encoding='utf-8') as f:
@@ -2817,138 +2809,9 @@ class JarvisGUI(QMainWindow):
             except OSError: pass
     
     def _show_mini_window(self):
-        if hasattr(self, 'mini_window') and self.mini_window: self.mini_window.close()
-        self.mini_window = QWidget()
-        # Tool 플래그 제거 - 메인 윈도우가 숨겨져도 미니윈도우가 유지되도록
-        self.mini_window.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
-        self.mini_window.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.mini_window.setFixedSize(130, 36)
-        
-        # JARVIS HUD 스타일 프레임 (더 컴팩트)
-        frame = QFrame(self.mini_window)
-        frame.setGeometry(0, 0, 130, 36)
-        frame.setStyleSheet("""
-            QFrame { 
-                background-color: rgba(5, 15, 30, 230); 
-                border: 1px solid #00ffff; 
-                border-radius: 8px;
-            }
-        """)
-        
-        layout = QHBoxLayout(frame)
-        layout.setContentsMargins(8, 4, 4, 4)
-        layout.setSpacing(4)
-        
-        # JARVIS 라벨 (컴팩트 HUD 스타일)
-        lbl = QLabel("TRADIS MH")
-        lbl.setStyleSheet("""
-            color: #00ffff; 
-            font-weight: bold; 
-            font-size: 8pt; 
-            background: transparent;
-            letter-spacing: 0px;
-        """)
-        layout.addWidget(lbl)
-        layout.addStretch()
-        
-        # 복원 버튼 (macOS 스타일 원형 - 초록)
-        btn_restore = QPushButton("")
-        btn_restore.setFixedSize(12, 12)
-        btn_restore.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_restore.setToolTip("복원")
-        btn_restore.setStyleSheet("""
-            QPushButton {
-                background-color: #28c840;
-                border: none;
-                border-radius: 6px;
-            }
-            QPushButton:hover {
-                background-color: #1fa834;
-            }
-        """)
-        btn_restore.clicked.connect(self._restore_from_mini)
-        layout.addWidget(btn_restore)
-
-        # 닫기 버튼 (macOS 스타일 원형 - 빨강)
-        btn_close = QPushButton("")
-        btn_close.setFixedSize(12, 12)
-        btn_close.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_close.setToolTip("종료")
-        btn_close.setStyleSheet("""
-            QPushButton {
-                background-color: #ff5f57;
-                border: none;
-                border-radius: 6px;
-            }
-            QPushButton:hover {
-                background-color: #e04640;
-            }
-        """)
-        btn_close.clicked.connect(self._close_from_mini)
-        layout.addWidget(btn_close)
-        
-        # 드래그 이벤트 핸들러
-        self.mini_window.drag_pos = None
-        def mini_mouse_press(e):
-             if e.button() == Qt.MouseButton.LeftButton: self.mini_window.drag_pos = e.globalPosition().toPoint()
-        def mini_mouse_move(e):
-             if self.mini_window.drag_pos:
-                 delta = e.globalPosition().toPoint() - self.mini_window.drag_pos
-                 self.mini_window.move(self.mini_window.pos() + delta)
-                 self.mini_window.drag_pos = e.globalPosition().toPoint()
-        
-        def mini_mouse_release(e):
-            self.mini_window.drag_pos = None
-            # 드래그 후 위치 저장 (화면 밖으로만 안 나가도록)
-            pos = self.mini_window.pos()
-            screen = QApplication.primaryScreen().geometry()
-            available = QApplication.primaryScreen().availableGeometry()
-            # 화면 밖으로 나가지 않도록 보정 (작업 표시줄과 격치게 놓을 수 있음)
-            x = max(0, min(pos.x(), screen.width() - 130))
-            y = max(0, min(pos.y(), screen.height() - 36))
-            self.mini_window.move(x, y)
-            self.mini_window_saved_pos = {"x": x, "y": y}
-        
-        self.mini_window.mousePressEvent = mini_mouse_press
-        self.mini_window.mouseMoveEvent = mini_mouse_move
-        self.mini_window.mouseReleaseEvent = mini_mouse_release
-        self.mini_window.mouseDoubleClickEvent = lambda e: self._restore_from_mini()
-        
-        # 저장된 위치 또는 기본 위치에 배치
-        screen = QApplication.primaryScreen().geometry()
-        available = QApplication.primaryScreen().availableGeometry()
-        if hasattr(self, 'mini_window_saved_pos') and self.mini_window_saved_pos:
-            x = self.mini_window_saved_pos["x"]
-            y = self.mini_window_saved_pos["y"]
-            # 화면 밖으로 나가지 않도록 보정
-            x = max(0, min(x, screen.width() - 130))
-            y = max(0, min(y, screen.height() - 36))
-            self.mini_window.move(x, y)
-        else:
-            self.mini_window.move(available.right() - 145, available.bottom() - 50)
-        self.hide()
-        self.mini_window.show()
-    
-    def _restore_from_mini(self):
-        if hasattr(self, 'mini_window') and self.mini_window:
-            self.mini_window.close()
-            self.mini_window = None
-        self.show()
-        self.activateWindow()
-    
-    def _close_from_mini(self):
-        """미니 윈도우에서 앱 완전 종료"""
-        if hasattr(self, 'mini_window') and self.mini_window:
-            self.mini_window.close()
-            self.mini_window = None
-        # 설정 저장 및 모니터링 중지
-        try:
-            self.stop_monitoring()
-            self.save_settings()
-        except Exception:
-            pass
-        # 앱 전체 종료
-        QApplication.quit()
+        """창 내리기 — 작업 표시줄로 최소화.
+        (구 미니 HUD 위젯 제거 — 작업 표시줄의 TRADIS 아이콘 클릭으로 복원)"""
+        self.showMinimized()
 
     def _start_everything(self):
         try:
@@ -3443,14 +3306,24 @@ class JarvisGUI(QMainWindow):
 
 
 if __name__ == "__main__":
+    # Windows 작업 표시줄에 TRADIS 고유 아이콘·이름이 표시되도록 앱 ID 등록
+    # (미등록 시 python 실행에서 기본 아이콘으로 묶이고 '작업 표시줄에 고정'이 깨짐)
+    try:
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Haedo.TRADIS.MH")
+    except Exception:
+        pass
+
     instance_socket = check_single_instance()
     if not instance_socket:
         temp_app = QApplication(sys.argv)
+        temp_app.setWindowIcon(QIcon(resource_path("app_icon.ico")))
         from gui.dialogs import JarvisMessageBox
         JarvisMessageBox.warning(None, "중복 실행", "TRADIS MH가 이미 실행 중입니다.")
         sys.exit(0)
 
     app = QApplication(sys.argv)
+    app.setWindowIcon(QIcon(resource_path("app_icon.ico")))
     SKIP_INTRO = True 
     
     if SKIP_INTRO:

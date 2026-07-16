@@ -34,6 +34,7 @@ SUB_ROLE = Qt.ItemDataRole.UserRole + 1  # 부제목 (시간·크기)
 ICON_FONT = "'Segoe Fluent Icons', 'Segoe MDL2 Assets'"
 GLYPH_HOME = "\uE80F"
 GLYPH_UP = "\uE74A"
+GLYPH_DOWN = "\uE74B"
 GLYPH_FOLDER = "\uE838"
 GLYPH_CLOSE = "\uE8BB"
 
@@ -241,14 +242,15 @@ class FileBrowserWidget(QWidget):
 
     escape_pressed = pyqtSignal()
     MAX_FILES = 200
-    SORT_MODES = (("mtime", "최신순"), ("name", "이름순"), ("size", "크기순"))
+    SORT_MODES = (("mtime", "최신순"), ("name", "이름순"))
 
     def __init__(self, path_callback, parent=None):
         super().__init__(parent)
         self.path_callback = path_callback
         self.current_folder = None
         self._icon_provider = QFileIconProvider()
-        self._sort_idx = 0  # 기본 최신순
+        self._sort_idx = 0        # 기본 최신순
+        self._sort_desc = True    # 기본 내림차순 (최신 파일이 맨 위)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -317,11 +319,7 @@ class FileBrowserWidget(QWidget):
         self.search_input.installEventFilter(self)  # ESC로 검색어 지우기
         search_row.addWidget(self.search_input, 1)
 
-        self.btn_sort = QPushButton(self.SORT_MODES[0][1])
-        self.btn_sort.setToolTip("정렬 방식 변경 (최신순 → 이름순 → 크기순)")
-        self.btn_sort.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_sort.setFixedWidth(62)
-        self.btn_sort.setStyleSheet(f"""
+        _sort_btn_css = f"""
             QPushButton {{
                 background-color: {CT['bg_2']};
                 color: {CT['fg_1']};
@@ -337,9 +335,24 @@ class FileBrowserWidget(QWidget):
                 color: {CT['fg_0']};
                 border: 1px solid {CT['border']};
             }}
-        """)
+        """
+        self.btn_sort = QPushButton(self.SORT_MODES[0][1])
+        self.btn_sort.setToolTip("정렬 기준 변경 (최신순 ↔ 이름순)")
+        self.btn_sort.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_sort.setFixedWidth(62)
+        self.btn_sort.setStyleSheet(_sort_btn_css)
         self.btn_sort.clicked.connect(self._cycle_sort)
         search_row.addWidget(self.btn_sort)
+
+        # 오름/내림차순 토글 (▲/▼)
+        self.btn_sort_dir = QPushButton(GLYPH_DOWN)
+        self.btn_sort_dir.setToolTip("내림차순 — 클릭하면 오름차순으로")
+        self.btn_sort_dir.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_sort_dir.setFixedWidth(30)
+        self.btn_sort_dir.setStyleSheet(
+            _sort_btn_css.replace(f"font-family: {FONT_UI};", f"font-family: {ICON_FONT};"))
+        self.btn_sort_dir.clicked.connect(self._toggle_sort_dir)
+        search_row.addWidget(self.btn_sort_dir)
         layout.addLayout(search_row)
 
         # ----- 파일 목록 -----
@@ -438,6 +451,17 @@ class FileBrowserWidget(QWidget):
     def _cycle_sort(self):
         self._sort_idx = (self._sort_idx + 1) % len(self.SORT_MODES)
         self.btn_sort.setText(self.SORT_MODES[self._sort_idx][1])
+        # 기준별 자연스러운 기본 방향: 최신순=내림차순(최신 위), 이름순=오름차순(ㄱ→ㅎ)
+        self._set_sort_dir(self.SORT_MODES[self._sort_idx][0] == "mtime")
+
+    def _toggle_sort_dir(self):
+        self._set_sort_dir(not self._sort_desc)
+
+    def _set_sort_dir(self, desc):
+        self._sort_desc = desc
+        self.btn_sort_dir.setText(GLYPH_DOWN if desc else GLYPH_UP)
+        self.btn_sort_dir.setToolTip(
+            "내림차순 — 클릭하면 오름차순으로" if desc else "오름차순 — 클릭하면 내림차순으로")
         self._populate()
 
     def eventFilter(self, obj, event):
@@ -488,15 +512,14 @@ class FileBrowserWidget(QWidget):
             dirs = [d for d in dirs if query in d[0].lower()]
             files = [f for f in files if query in f[0].lower()]
 
-        # 폴더는 항상 상단 (이름순), 파일은 선택된 정렬 적용
-        dirs.sort(key=lambda x: x[0].lower())
+        # 폴더는 항상 상단, 파일은 선택된 기준·방향으로 정렬
         sort_mode = self.SORT_MODES[self._sort_idx][0]
         if sort_mode == "name":
-            files.sort(key=lambda x: x[0].lower())
-        elif sort_mode == "size":
-            files.sort(key=lambda x: x[3], reverse=True)  # 큰 파일이 맨 위
+            dirs.sort(key=lambda x: x[0].lower(), reverse=self._sort_desc)
+            files.sort(key=lambda x: x[0].lower(), reverse=self._sort_desc)
         else:
-            files.sort(key=lambda x: x[2], reverse=True)  # 최신 파일이 맨 위
+            dirs.sort(key=lambda x: x[0].lower())
+            files.sort(key=lambda x: x[2], reverse=self._sort_desc)
 
         limit = len(files) if query else self.MAX_FILES
 

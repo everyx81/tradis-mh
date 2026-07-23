@@ -983,6 +983,12 @@ class JarvisGUI(QMainWindow):
             if getattr(self, 'send_tray', None):
                 self.send_tray.hide_tray()
                 self.send_tray.close()
+            # 메모 트레이 정리 (위치·메모 저장 포함)
+            # ※ 메인 메모 save_all_memos(위) 이후에 실행되어야
+            #   트레이에서 수정한 최신 내용이 마지막에 저장됨
+            if getattr(self, 'memo_tray', None):
+                self.memo_tray.hide_tray()
+                self.memo_tray.close()
             # 글로벌 단축키 해제
             self._remove_snippet_hook()
             # [PERF] 잔류 토스트 위젯 강제 정리
@@ -1001,13 +1007,14 @@ class JarvisGUI(QMainWindow):
         """글로벌 단축키 초기화"""
         self.hotkey_settings = self._load_hotkey_settings()
         self._register_hotkeys()
-        self.emit_log(f"Global Hotkeys Initialized: Memo={self.hotkey_settings.get('memo_hotkey', 'ctrl+shift+m')}, Tray={self.hotkey_settings.get('tray_hotkey', 'ctrl+g')}")
+        self.emit_log(f"Global Hotkeys Initialized: Memo={self.hotkey_settings.get('memo_hotkey', 'ctrl+shift+m')}, Tray={self.hotkey_settings.get('tray_hotkey', 'ctrl+g')}, MemoTray={self.hotkey_settings.get('memo_tray_hotkey', 'ctrl+m')}")
     
     def _load_hotkey_settings(self):
         """단축키 설정 로드"""
         default_settings = {
             "memo_hotkey": "ctrl+shift+m",
             "tray_hotkey": "ctrl+g",
+            "memo_tray_hotkey": "ctrl+m",
             "snippets": [
                 {"hotkey": "ctrl+1", "text": "[해도관세사무소]"},
                 {"hotkey": "ctrl+2", "text": "확인 후 송금 부탁드립니다"},
@@ -1096,6 +1103,37 @@ class JarvisGUI(QMainWindow):
         except Exception as e:
             print(f"보내기 트레이 오류: {e}")
 
+    def _activate_memo_tray(self):
+        """메모 트레이 토글 (훅 스레드에서 호출됨)"""
+        QTimer.singleShot(0, self._toggle_memo_tray)
+
+    def _toggle_memo_tray(self):
+        """메모 트레이 표시/숨김 (메인 스레드)"""
+        try:
+            if not getattr(self, 'memo_tray', None):
+                from gui.memo_tray import MemoTrayWindow
+                self.memo_tray = MemoTrayWindow(
+                    schedule_manager=self.shared_schedule_manager,
+                    on_hidden=self._on_memo_tray_hidden)
+                self.memo_tray.memo.hotkey_settings_clicked.connect(self.show_hotkey_settings)
+            if not self.memo_tray.isVisible() and hasattr(self, 'mk3_memo_widget'):
+                # 메인 메모의 미저장(디바운스 대기) 내용을 먼저 반영
+                # → 트레이가 표시 직전 저장소 기준으로 다시 읽음
+                self.mk3_memo_widget.save_all_memos()
+            self.memo_tray.toggle()
+            if self.memo_tray.isVisible():
+                self.emit_log("📝 메모 트레이 열림")
+        except Exception as e:
+            print(f"메모 트레이 오류: {e}")
+
+    def _on_memo_tray_hidden(self):
+        """트레이에서 수정한 메모를 메인 메모 위젯에 반영"""
+        try:
+            if hasattr(self, 'mk3_memo_widget'):
+                self.mk3_memo_widget.reload_memos()
+        except Exception as e:
+            print(f"메모 동기화 오류: {e}")
+
     def _paste_snippet(self, text):
         """텍스트 스니펫 붙여넣기 (다른 스레드에서 호출됨)"""
         def do_paste():
@@ -1138,6 +1176,10 @@ class JarvisGUI(QMainWindow):
         tray_key = self.hotkey_settings.get("tray_hotkey", "ctrl+g")
         self._tray_vk_combo = self._parse_hotkey_combo(tray_key)
 
+        # --- 메모 트레이 단축키 파싱 (기본: Ctrl+M) ---
+        memo_tray_key = self.hotkey_settings.get("memo_tray_hotkey", "ctrl+m")
+        self._memo_tray_vk_combo = self._parse_hotkey_combo(memo_tray_key)
+
         # --- VK 코드 → 스니펫 텍스트 맵 구축 ---
         self._vk_snippet_map = {}
         for snippet in self.hotkey_settings.get("snippets", []):
@@ -1152,7 +1194,8 @@ class JarvisGUI(QMainWindow):
                         if vk is not None:
                             self._vk_snippet_map[vk] = text
 
-        if not self._vk_snippet_map and not self._memo_vk_combo and not self._tray_vk_combo:
+        if (not self._vk_snippet_map and not self._memo_vk_combo
+                and not self._tray_vk_combo and not self._memo_tray_vk_combo):
             self._snippet_hook_handle = None
             self._snippet_hook_thread = None
             return
@@ -1160,9 +1203,11 @@ class JarvisGUI(QMainWindow):
         vk_map = self._vk_snippet_map
         memo_combo = self._memo_vk_combo
         tray_combo = self._tray_vk_combo
+        memo_tray_combo = self._memo_tray_vk_combo
         paste_fn = self._paste_snippet
         activate_memo_fn = self._activate_memo
         activate_tray_fn = self._activate_send_tray
+        activate_memo_tray_fn = self._activate_memo_tray
         self._hook_thread_id = None
 
         def hook_thread_func():
@@ -1230,6 +1275,13 @@ class JarvisGUI(QMainWindow):
                                 activate_tray_fn()
                                 return 1
 
+                        # 메모 트레이 단축키 체크 (예: Ctrl+M)
+                        if memo_tray_combo:
+                            need_ctrl, need_alt, need_shift, trigger_vk = memo_tray_combo
+                            if kb.vkCode == trigger_vk and mods == (need_ctrl, need_alt, need_shift):
+                                activate_memo_tray_fn()
+                                return 1
+
                         # 스니펫 단축키 체크 (예: Ctrl+1~9)
                         if ctrl_down and not shift_down and kb.vkCode in vk_map:
                             text = vk_map[kb.vkCode]
@@ -1250,7 +1302,8 @@ class JarvisGUI(QMainWindow):
             # 이 스레드의 ID 저장 (종료 시 WM_QUIT 전송용)
             self._hook_thread_id = ctypes.windll.kernel32.GetCurrentThreadId()
 
-            total = len(vk_map) + (1 if memo_combo else 0) + (1 if tray_combo else 0)
+            total = (len(vk_map) + (1 if memo_combo else 0) + (1 if tray_combo else 0)
+                     + (1 if memo_tray_combo else 0))
             if hook_handle:
                 print(f"✅ 통합 키보드 훅 설치 완료 (단축키 {total}개, 전용 스레드)")
             else:
@@ -1332,11 +1385,11 @@ class JarvisGUI(QMainWindow):
         dlg = QDialog(self)
         dlg.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
         dlg.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        dlg.setFixedSize(750, 650)
-        
+        dlg.setFixedSize(750, 710)
+
         # 메인 컨테이너 (네온 테두리)
         container = QFrame(dlg)
-        container.setGeometry(0, 0, 750, 650)
+        container.setGeometry(0, 0, 750, 710)
         container.setStyleSheet("""
             QFrame {
                 background-color: rgba(8, 15, 25, 245);
@@ -1416,6 +1469,25 @@ class JarvisGUI(QMainWindow):
         tray_input.setStyleSheet(memo_input.styleSheet())
         tray_layout.addWidget(tray_input, 1)
         main_layout.addWidget(tray_frame)
+
+        # ===== 메모 트레이 단축키 섹션 =====
+        memo_tray_frame = QFrame()
+        memo_tray_frame.setStyleSheet(tray_frame.styleSheet())
+        memo_tray_layout = QHBoxLayout(memo_tray_frame)
+        memo_tray_layout.setContentsMargins(15, 12, 15, 12)
+        memo_tray_layout.setSpacing(15)
+
+        memo_tray_label = QLabel("메모 트레이:")
+        memo_tray_label.setStyleSheet("color: #00cccc; font-size: 10pt; font-weight: bold; border: none;")
+        memo_tray_label.setFixedWidth(100)
+        memo_tray_layout.addWidget(memo_tray_label)
+
+        memo_tray_input = QLineEdit(self.hotkey_settings.get("memo_tray_hotkey", "ctrl+m"))
+        memo_tray_input.setFixedHeight(36)
+        memo_tray_input.setPlaceholderText("ctrl+m")
+        memo_tray_input.setStyleSheet(memo_input.styleSheet())
+        memo_tray_layout.addWidget(memo_tray_input, 1)
+        main_layout.addWidget(memo_tray_frame)
         
         # ===== 열 헤더: HOTKEY | SNIPPET TEXT =====
         col_header = QWidget()
@@ -1590,7 +1662,8 @@ class JarvisGUI(QMainWindow):
         def save_and_close():
             # 유효성 검사: 잘못된 조합(단독 문자, shift+문자 등)은 저장 전에 거부
             for name, val in (("메모장", memo_input.text().strip()),
-                              ("보내기 트레이", tray_input.text().strip())):
+                              ("보내기 트레이", tray_input.text().strip()),
+                              ("메모 트레이", memo_tray_input.text().strip())):
                 if val and self._parse_hotkey_combo(val) is None:
                     from gui.dialogs import JarvisMessageBox
                     JarvisMessageBox.warning(
@@ -1603,6 +1676,7 @@ class JarvisGUI(QMainWindow):
             self._unregister_hotkeys()
             self.hotkey_settings["memo_hotkey"] = memo_input.text().strip()
             self.hotkey_settings["tray_hotkey"] = tray_input.text().strip()
+            self.hotkey_settings["memo_tray_hotkey"] = memo_tray_input.text().strip()
             new_snippets = []
             for hk_input, txt_input in snippet_inputs:
                 new_snippets.append({

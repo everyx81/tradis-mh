@@ -936,6 +936,35 @@ class AutoRenamer:
                     continue
                 allp.append(_fn)
 
+        # ── 동일 내용 중복 파일 제거 ──
+        # 같은 파일을 두 번 넣으면 "xxx (1).pdf" 복사본이 생기고, 슬롯에 못 들어간
+        # 복사본이 '[추가] 미분류 서류'로 병합에 이중 포함됨.
+        # 슬롯 배정 파일(af) 및 후보끼리 내용(MD5)이 같으면 한 장만 남긴다.
+        import hashlib as _hashlib
+
+        def _file_hash(_fn):
+            try:
+                with open(os.path.join(dr, _fn), 'rb') as _fh:
+                    return _hashlib.md5(_fh.read()).hexdigest()
+            except OSError:
+                return None
+
+        _seen_hashes = {}
+        for _fn in af:
+            _h = _file_hash(_fn)
+            if _h and _h not in _seen_hashes:
+                _seen_hashes[_h] = _fn
+        _deduped = []
+        for _fn in allp:
+            _h = _file_hash(_fn)
+            if _h and _h in _seen_hashes:
+                self.log(f" -> [중복 제외] {_fn} (동일 내용: {_seen_hashes[_h]})")
+                continue
+            if _h:
+                _seen_hashes[_h] = _fn
+            _deduped.append(_fn)
+        allp = _deduped
+
         syns = EXPENSE_SYNONYMS
 
         merge_info = an.get("merge_info", {}) if isinstance(an, dict) else {}

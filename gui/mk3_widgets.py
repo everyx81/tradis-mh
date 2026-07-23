@@ -1189,7 +1189,24 @@ class MK3MemoOnlyWidget(QWidget):
             if isinstance(editor, QTextEdit):
                 editor.setFocus()
 
-    
+    def reload_memos(self):
+        """저장소 기준으로 메모 탭 전체 재구성 (메모 트레이 ↔ 메인 동기화용)
+
+        같은 schedule_manager를 공유하는 위젯이 둘일 때(일정 탭 + 메모 트레이),
+        한쪽에서 수정한 내용을 다른 쪽이 낡은 편집기 내용으로 덮어쓰지 않도록
+        표시 전환 시점에 호출한다.
+        """
+        self.save_timer.stop()  # 재구성 중 낡은 내용이 저장되는 것 방지
+        self.tab_widget.blockSignals(True)
+        while self.tab_widget.count():
+            w = self.tab_widget.widget(0)
+            self.tab_widget.removeTab(0)
+            w.deleteLater()
+        self.tab_widget.blockSignals(False)
+        self.memo_counter = 0
+        self._load_all_memos()
+
+
     def _create_memo_editor(self) -> QTextEdit:
         """메모 편집기 생성"""
         editor = QTextEdit()

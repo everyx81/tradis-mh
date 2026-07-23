@@ -35,12 +35,23 @@ STANDARD_DOC_TYPES = {
 INDEPENDENT_DOC_TYPES = {"이체증"}
 
 
+# 정산과 무관하지만 BL 번호가 기재되어 병합 후보에 잘못 걸리는 운송 부속 서류
+# (수입화물 운송의뢰 및 화물인도 확인서 등)
+MERGE_EXCLUDE_KEYWORDS = [
+    "운송의뢰",
+    "화물인도",
+    "인도확인",
+    "인도지시",  # D/O (Delivery Order)
+]
+
+
 def is_merge_excluded_file(filename: str) -> bool:
     """정산명세서 병합에 절대 포함하면 안 되는 서류인지 파일명으로 판별.
 
     - 이체증: 지불 증빙일 뿐 정산 구성 서류가 아님
     - 신고서(수입/수출/반송 — '신고필증' 아님): 수리 전 견본 단계 문서
     - 청구서(자금청구서 등 — '계산서' 아님): 정산서와 별개의 청구 문서
+    - 운송의뢰서·화물인도확인서 등: BL이 적혀 있어도 정산 구성 서류가 아님
     자동 매칭 후보와 매핑 드롭다운 양쪽에서 이 함수로 걸러낸다.
     """
     if not filename:
@@ -51,6 +62,8 @@ def is_merge_excluded_file(filename: str) -> bool:
     if "신고서" in name and "신고필증" not in name:
         return True
     if "청구서" in name and "계산서" not in name:
+        return True
+    if any(kw in name for kw in MERGE_EXCLUDE_KEYWORDS):
         return True
     return False
 

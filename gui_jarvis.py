@@ -3425,21 +3425,19 @@ class JarvisGUI(QMainWindow):
         except Exception as e:
             print(f"[업데이트] 설정 저장 실패: {e}")
 
-        if apply_update(tmp_path):
+        if apply_update(tmp_path, new_version=self._new_ver):
             # PyInstaller _MEI 폴더 정리를 위해 정상 종료 필수
             # os._exit(0)는 atexit 핸들러를 스킵하여 _MEI 잔존 → DLL 로드 실패 유발
             def _clean_exit_for_update():
                 QApplication.quit()  # Qt 이벤트 루프 종료 → sys.exit() → atexit → _MEI 정리
 
-            # 10초 후에도 프로세스가 살아있으면 종료 (스레드 hang 대비)
-            # sys.exit()로 atexit 핸들러(_MEI 정리) 실행 보장
+            # 10초 후에도 프로세스가 살아있으면 강제 종료 (스레드 hang 대비)
+            # sys.exit()는 서브스레드에서 해당 스레드만 끝내므로 os._exit 사용.
+            # atexit(_MEI 정리)는 스킵되지만 업데이터 PowerShell이 잔여 _MEI를 정리함.
             import time as _time
             def _force_exit():
                 _time.sleep(10)
-                try:
-                    sys.exit(0)
-                except SystemExit:
-                    os._exit(0)  # sys.exit마저 실패 시 최후 수단
+                os._exit(0)
             threading.Thread(target=_force_exit, daemon=True).start()
 
             QTimer.singleShot(800, _clean_exit_for_update)

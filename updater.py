@@ -113,10 +113,11 @@ def download_update(download_url, progress_callback=None):
         return None
 
 
-def apply_update(new_exe_path):
+def apply_update(new_exe_path, new_version=None):
     """
     인스톨러 스타일 업데이트.
-    PowerShell WinForms 창으로 진행 상황을 표시하며 EXE 교체 후 재시작.
+    PowerShell WinForms 창(Claude Design·단계 체크리스트)으로 진행 상황을
+    표시하며 EXE 교체 후 안내.
     """
     current_exe = get_current_exe_path()
     if not current_exe:
@@ -130,20 +131,38 @@ def apply_update(new_exe_path):
     esc_new = new_exe_path.replace("'", "''")
     esc_cur = current_exe.replace("'", "''")
     esc_mei = mei_path.replace("'", "''")
+    title_text = f"v{new_version} 업데이트" if new_version else f"{APP_NAME} 업데이트"
 
+    # 업데이트 창 (시안 D-1): Claude Design 카드 + 실제 앱 아이콘 + 단계 체크리스트
+    # 한글은 -EncodedCommand(UTF-16LE)로 전달되므로 리터럴 그대로 사용 가능
     ps_script = f'''
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
-# ── 업데이트 창 ──
+# ── Claude Design 팔레트 (gui/claude_theme.py 와 동일) ──
+$cBg     = [Drawing.Color]::FromArgb(20, 23, 29)
+$cBorder = [Drawing.Color]::FromArgb(52, 55, 64)
+$cFg     = [Drawing.Color]::FromArgb(248, 250, 252)
+$cGray   = [Drawing.Color]::FromArgb(106, 110, 118)
+$cBlue   = [Drawing.Color]::FromArgb(94, 189, 255)
+$cGreen  = [Drawing.Color]::FromArgb(89, 200, 134)
+$cRed    = [Drawing.Color]::FromArgb(250, 104, 99)
+
+# ── 창 (1px 보더: 폼 배경=보더색 + 1px 패딩 위 패널) ──
 $f = New-Object Windows.Forms.Form
 $f.Text = "TRADIS MH"
-$f.ClientSize = New-Object Drawing.Size(400, 160)
+$f.ClientSize = New-Object Drawing.Size(340, 224)
 $f.StartPosition = "CenterScreen"
 $f.FormBorderStyle = "None"
-$f.BackColor = [Drawing.Color]::FromArgb(20, 25, 38)
+$f.BackColor = $cBorder
+$f.Padding = New-Object Windows.Forms.Padding(1)
 $f.TopMost = $true
 $f.ShowInTaskbar = $true
+
+$panel = New-Object Windows.Forms.Panel
+$panel.Dock = "Fill"
+$panel.BackColor = $cBg
+$f.Controls.Add($panel)
 
 # Windows 11 둥근 모서리
 try {{
@@ -158,57 +177,77 @@ public class DwmRound {{
     [DwmRound]::DwmSetWindowAttribute($f.Handle, 33, [ref]$v, 4) | Out-Null
 }} catch {{}}
 
-# 타이틀
+# ── 헤더: 앱 아이콘(작업표시줄과 동일한 EXE 내장 아이콘) + 제목 ──
+$icoBox = New-Object Windows.Forms.PictureBox
+$icoBox.Size = New-Object Drawing.Size(28, 28)
+$icoBox.Location = New-Object Drawing.Point(22, 18)
+$icoBox.SizeMode = "Zoom"
+$icoBox.BackColor = $cBg
+try {{
+    $ico = [System.Drawing.Icon]::ExtractAssociatedIcon('{esc_cur}')
+    if ($ico) {{ $icoBox.Image = $ico.ToBitmap() }}
+}} catch {{}}
+$panel.Controls.Add($icoBox)
+
 $lbl = New-Object Windows.Forms.Label
-$lbl.Text = "TRADIS MH"
-$lbl.ForeColor = [Drawing.Color]::FromArgb(0, 229, 255)
-$lbl.Font = New-Object Drawing.Font("Segoe UI", 16, [Drawing.FontStyle]::Bold)
-$lbl.TextAlign = "MiddleCenter"
+$lbl.Text = "{title_text}"
+$lbl.ForeColor = $cFg
+$lbl.Font = New-Object Drawing.Font("Malgun Gothic", 11, [Drawing.FontStyle]::Bold)
 $lbl.AutoSize = $false
-$lbl.Size = New-Object Drawing.Size(400, 40)
-$lbl.Location = New-Object Drawing.Point(0, 20)
-$lbl.BackColor = [Drawing.Color]::Transparent
-$f.Controls.Add($lbl)
+$lbl.Size = New-Object Drawing.Size(250, 28)
+$lbl.Location = New-Object Drawing.Point(58, 18)
+$lbl.TextAlign = "MiddleLeft"
+$lbl.BackColor = $cBg
+$panel.Controls.Add($lbl)
 
-# 상태 텍스트
-$st = New-Object Windows.Forms.Label
-$st.Text = ""
-$st.ForeColor = [Drawing.Color]::FromArgb(160, 165, 175)
-$st.Font = New-Object Drawing.Font("Segoe UI", 10)
-$st.TextAlign = "MiddleCenter"
-$st.AutoSize = $false
-$st.Size = New-Object Drawing.Size(400, 30)
-$st.Location = New-Object Drawing.Point(0, 65)
-$st.BackColor = [Drawing.Color]::Transparent
-$f.Controls.Add($st)
+# ── 단계 체크리스트 ──
+$steps = @()
+$stepNames = @("프로그램 종료", "파일 교체", "임시 파일 정리", "완료")
+for ($i = 0; $i -lt 4; $i++) {{
+    $s = New-Object Windows.Forms.Label
+    $s.Text = "○  " + $stepNames[$i]
+    $s.ForeColor = $cGray
+    $s.Font = New-Object Drawing.Font("Consolas", 10.5)
+    $s.AutoSize = $false
+    $s.Size = New-Object Drawing.Size(300, 26)
+    $s.Location = New-Object Drawing.Point(24, (64 + $i * 32))
+    $s.BackColor = $cBg
+    $panel.Controls.Add($s)
+    $steps += $s
+}}
 
-# 프로그레스 바
-$pb = New-Object Windows.Forms.ProgressBar
-$pb.Location = New-Object Drawing.Point(40, 120)
-$pb.Size = New-Object Drawing.Size(320, 6)
-$pb.Style = "Marquee"
-$pb.MarqueeAnimationSpeed = 25
-$f.Controls.Add($pb)
+function Set-Step($idx, $mark, $color, $text) {{
+    $steps[$idx].Text = $mark + "  " + $text
+    $steps[$idx].ForeColor = $color
+    [Windows.Forms.Application]::DoEvents()
+}}
 
 $f.Show()
 [Windows.Forms.Application]::DoEvents()
 
 # ── Phase 1: 프로세스 종료 대기 ──
-$st.Text = [char]0xD504 + [char]0xB85C + [char]0xC138 + [char]0xC2A4 + " " + [char]0xC885 + [char]0xB8CC + " " + [char]0xB300 + [char]0xAE30 + " " + [char]0xC911 + "..."
-[Windows.Forms.Application]::DoEvents()
+Set-Step 0 "▸" $cBlue "프로그램 종료 대기 중..."
 
-for ($i = 0; $i -lt 60; $i++) {{
+for ($i = 0; $i -lt 30; $i++) {{
     $proc = Get-Process -Id {pid} -ErrorAction SilentlyContinue
     if (-not $proc -or $proc.HasExited) {{ break }}
     Start-Sleep -Milliseconds 500
     [Windows.Forms.Application]::DoEvents()
 }}
+# 15초 후에도 살아있으면 강제 종료.
+# PyInstaller 부트로더가 _MEI 삭제 실패 시 "Failed to remove temporary directory"
+# 모달 경고창을 띄우고 확인을 누를 때까지 프로세스가 붙잡혀 EXE 교체가 영원히
+# 실패하는 케이스 방지. 이 시점엔 저장·종료 처리가 모두 끝난 뒤라 안전하다.
+$proc = Get-Process -Id {pid} -ErrorAction SilentlyContinue
+if ($proc -and -not $proc.HasExited) {{
+    Stop-Process -Id {pid} -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 1
+}}
 Start-Sleep -Seconds 1
-[Windows.Forms.Application]::DoEvents()
+Set-Step 0 "✓" $cGreen "프로그램 종료"
 
 # ── Phase 2: 파일 교체 ──
-$st.Text = [char]0xD30C + [char]0xC77C + " " + [char]0xAD50 + [char]0xCCB4 + " " + [char]0xC911 + "..."
-[Windows.Forms.Application]::DoEvents()
+Set-Step 1 "▸" $cBlue "파일 교체 중..."
 
 $ok = $false
 for ($r = 0; $r -lt 20; $r++) {{
@@ -223,12 +262,11 @@ for ($r = 0; $r -lt 20; $r++) {{
 }}
 
 if ($ok) {{
-    # ── Phase 3: 잔여 _MEI 폴더 정리 ──
-    $pb.Style = "Continuous"
-    $pb.Value = 100
-    [Windows.Forms.Application]::DoEvents()
+    Set-Step 1 "✓" $cGreen "파일 교체"
 
-    # PyInstaller 임시 폴더(_MEI*) 정리
+    # ── Phase 3: 잔여 _MEI 폴더 정리 ──
+    Set-Step 2 "▸" $cBlue "임시 파일 정리 중..."
+
     $meiPass = '{esc_mei}'
     if ($meiPass -and (Test-Path $meiPass)) {{
         Remove-Item $meiPass -Recurse -Force -ErrorAction SilentlyContinue
@@ -243,18 +281,13 @@ if ($ok) {{
     }}
 
     Remove-Item -LiteralPath '{esc_new}' -Force -ErrorAction SilentlyContinue
+    Set-Step 2 "✓" $cGreen "임시 파일 정리"
 
     # 자동 재시작 대신 안내 메시지 표시
-    $st.Text = [char]0xC5C5 + [char]0xB370 + [char]0xC774 + [char]0xD2B8 + " " + [char]0xC644 + [char]0xB8CC + "! " + [char]0xD504 + [char]0xB85C + [char]0xADF8 + [char]0xB7A8 + [char]0xC744 + " " + [char]0xB2E4 + [char]0xC2DC + " " + [char]0xC2E4 + [char]0xD589 + [char]0xD574 + " " + [char]0xC8FC + [char]0xC138 + [char]0xC694 + "."
-    $st.ForeColor = [Drawing.Color]::FromArgb(0, 229, 255)
-    [Windows.Forms.Application]::DoEvents()
+    Set-Step 3 "✓" $cBlue "완료! 다시 실행해 주세요."
     Start-Sleep -Seconds 5
 }} else {{
-    $st.Text = [char]0xC5C5 + [char]0xB370 + [char]0xC774 + [char]0xD2B8 + " " + [char]0xC2E4 + [char]0xD328
-    $st.ForeColor = [Drawing.Color]::FromArgb(255, 100, 100)
-    $pb.Style = "Continuous"
-    $pb.Value = 0
-    [Windows.Forms.Application]::DoEvents()
+    Set-Step 1 "✗" $cRed "파일 교체 실패"
     Start-Sleep -Seconds 3
 }}
 
@@ -270,9 +303,12 @@ $f.Close()
         si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
         si.wShowWindow = 0  # SW_HIDE
 
+        # cwd를 temp로 지정 — 자식 프로세스가 앱의 작업 디렉토리(_MEI 내부일 가능성)를
+        # 물려받아 _MEI 삭제를 막는 것 방지
         subprocess.Popen(
             ['powershell', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encoded],
-            startupinfo=si
+            startupinfo=si,
+            cwd=tempfile.gettempdir()
         )
         return True
     except FileNotFoundError:
@@ -303,6 +339,8 @@ if errorlevel 1 (
         pause
         exit /b 1
     )
+    REM 10초 넘게 잠겨 있으면 _MEI 삭제 실패 경고창에 붙잡힌 프로세스로 보고 강제 종료
+    if %RETRIES% EQU 10 taskkill /F /PID {os.getpid()} >nul 2>nul
     timeout /t 1 /nobreak >nul
     goto retry
 )

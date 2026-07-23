@@ -34,31 +34,78 @@ from core.config import get_config_path
 
 CONFIG_KEY = "memo_tray_geo"  # {모니터이름: [x, y, w, h]}
 
-# 칩 높이 24px 기준 — Qt는 border-radius가 높이/2를 넘으면 사각형으로 그리므로 12px 고정
-_CHIP_H = 24
-CHIP_NORMAL = f"""
+# ── 왼쪽 메모 레일 ──
+RAIL_W = 106        # 레일 폭
+RAIL_ITEM_H = 30    # 항목 높이
+RAIL_ITEM_NORMAL = f"""
     QPushButton {{
-        background-color: {CT['bg_2']}; color: {CT['fg_2']};
-        border: 1px solid {CT['border_soft']}; border-radius: {_CHIP_H // 2}px;
-        padding: 0px 12px; font-family: {FONT_UI}; font-size: 8.5pt;
+        background-color: transparent; color: {CT['fg_2']};
+        border: 1px solid transparent; border-radius: 8px;
+        padding: 0px 9px; font-family: {FONT_UI}; font-size: 8.5pt;
+        text-align: left;
     }}
-    QPushButton:hover {{ background-color: {CT['bg_3']}; color: {CT['fg_0']}; }}
+    QPushButton:hover {{ background-color: {CT['bg_2']}; color: {CT['fg_0']}; }}
 """
-CHIP_SELECTED = f"""
+RAIL_ITEM_SELECTED = f"""
     QPushButton {{
         background-color: {CT['accent_bg']}; color: {CT['accent_hi']};
-        border: 1px solid {CT['accent_border']}; border-radius: {_CHIP_H // 2}px;
-        padding: 0px 12px; font-family: {FONT_UI}; font-size: 8.5pt; font-weight: 600;
+        border: 1px solid {CT['accent_border']}; border-radius: 8px;
+        padding: 0px 9px; font-family: {FONT_UI}; font-size: 8.5pt; font-weight: 600;
+        text-align: left;
+    }}
+"""
+RAIL_TOOL_BTN = f"""
+    QPushButton {{
+        background-color: transparent; color: {CT['fg_3']};
+        border: 1px solid transparent; border-radius: 8px;
+        padding: 0px 6px; font-family: {FONT_UI}; font-size: 8pt;
+    }}
+    QPushButton:hover {{ background-color: {CT['bg_2']}; color: {CT['fg_0']}; }}
+"""
+
+# 트레이 전체에 적용되는 얇은 Claude 스크롤바 (기본 Windows 스크롤바 대체)
+SLIM_SCROLLBAR = f"""
+    QScrollBar:vertical {{ background: transparent; width: 8px; margin: 2px; }}
+    QScrollBar::handle:vertical {{
+        background: {CT['border']}; border-radius: 4px; min-height: 24px;
+    }}
+    QScrollBar::handle:vertical:hover {{ background: {CT['border_strong']}; }}
+    QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+        height: 0; background: transparent;
+    }}
+    QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
+        background: transparent;
+    }}
+    QScrollBar:horizontal {{ background: transparent; height: 8px; margin: 2px; }}
+    QScrollBar::handle:horizontal {{
+        background: {CT['border']}; border-radius: 4px; min-width: 24px;
+    }}
+    QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
+        width: 0; background: transparent;
+    }}
+    QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{
+        background: transparent;
     }}
 """
 
 
 class ChipButton(QPushButton):
-    """더블클릭 시그널을 지원하는 칩 버튼"""
+    """더블클릭 시그널을 지원하는 레일 항목 버튼"""
     double_clicked = pyqtSignal()
 
     def mouseDoubleClickEvent(self, event):
         self.double_clicked.emit()
+        event.accept()
+
+
+class MemoRail(QFrame):
+    """마우스 휠로 메모를 전환할 수 있는 왼쪽 레일 (버튼 위 휠도 여기로 전파됨)"""
+    wheel_stepped = pyqtSignal(int)  # +1 = 아래 메모, -1 = 위 메모
+
+    def wheelEvent(self, event):
+        delta = event.angleDelta().y()
+        if delta:
+            self.wheel_stepped.emit(-1 if delta > 0 else 1)
         event.accept()
 
 
@@ -75,12 +122,35 @@ class TrayMemoWidget(MK3MemoOnlyWidget):
         self._sync_chips()
 
     def init_ui(self):
-        """베이스의 헤더/상단 탭 UI 를 트레이용으로 대체 (__init__ 에서 호출됨)"""
-        layout = QVBoxLayout(self)
+        """베이스의 헤더/상단 탭 UI 를 트레이용으로 대체 (__init__ 에서 호출됨)
+
+        좌: 메모 레일 (세로 목록 + 휠 전환)  /  우: 편집 카드
+        """
+        # 트레이 안 모든 스크롤바를 얇은 Claude 스타일로 (기본 Windows 스크롤바 대체)
+        self.setStyleSheet(SLIM_SCROLLBAR)
+
+        layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
 
-        # 편집 카드 — 탭 바는 숨기고 하단 칩으로 전환
+        # 왼쪽 메모 레일
+        self.rail = MemoRail()
+        self.rail.setObjectName("MemoRail")
+        self.rail.setFixedWidth(RAIL_W)
+        self.rail.setStyleSheet(f"""
+            QFrame#MemoRail {{
+                background-color: {CT['bg_0']};
+                border: 1px solid {CT['border_soft']};
+                border-radius: 10px;
+            }}
+        """)
+        self._rail_layout = QVBoxLayout(self.rail)
+        self._rail_layout.setContentsMargins(6, 8, 6, 8)
+        self._rail_layout.setSpacing(3)
+        self.rail.wheel_stepped.connect(self._step_memo)
+        layout.addWidget(self.rail)
+
+        # 편집 카드 — 탭 바는 숨기고 레일로 전환
         self.tab_widget = QTabWidget()
         self.tab_widget.tabBar().hide()
         self.tab_widget.setStyleSheet(f"""
@@ -94,55 +164,61 @@ class TrayMemoWidget(MK3MemoOnlyWidget):
         self.tab_widget.currentChanged.connect(self._sync_chips)
         layout.addWidget(self.tab_widget, 1)
 
-        # 하단 칩 바
-        self._chip_row = QHBoxLayout()
-        self._chip_row.setSpacing(5)
-        layout.addLayout(self._chip_row)
+    def _step_memo(self, step):
+        """휠로 위/아래 메모 전환"""
+        cnt = self.tab_widget.count()
+        if cnt <= 0:
+            return
+        cur = self.tab_widget.currentIndex()
+        self.tab_widget.setCurrentIndex(max(0, min(cnt - 1, cur + step)))
 
-    # ---------- 칩 바 ----------
+    # ---------- 메모 레일 ----------
     def _sync_chips(self, *_):
-        """탭 상태를 하단 칩 바에 반영 (탭 추가/삭제/전환/이름변경 후 호출)"""
-        while self._chip_row.count():
-            item = self._chip_row.takeAt(0)
+        """탭 상태를 왼쪽 레일에 반영 (탭 추가/삭제/전환/이름변경 후 호출)"""
+        while self._rail_layout.count():
+            item = self._rail_layout.takeAt(0)
             w = item.widget()
             if w:
                 w.deleteLater()
 
         cur = self.tab_widget.currentIndex()
         for i in range(self.tab_widget.count()):
-            chip = ChipButton(self.tab_widget.tabText(i))
-            chip.setFixedHeight(_CHIP_H)
+            name = self.tab_widget.tabText(i)
+            chip = ChipButton()
+            chip.setFixedHeight(RAIL_ITEM_H)
+            fm = chip.fontMetrics()
+            chip.setText(fm.elidedText(name, Qt.TextElideMode.ElideRight, RAIL_W - 32))
             chip.setCursor(Qt.CursorShape.PointingHandCursor)
-            chip.setStyleSheet(CHIP_SELECTED if i == cur else CHIP_NORMAL)
-            chip.setToolTip("더블클릭: 이름 변경 · 우클릭: 메뉴")
+            chip.setStyleSheet(RAIL_ITEM_SELECTED if i == cur else RAIL_ITEM_NORMAL)
+            chip.setToolTip(f"{name}\n휠: 메모 전환 · 더블클릭: 이름 변경 · 우클릭: 메뉴")
             chip.clicked.connect(lambda _, idx=i: self.tab_widget.setCurrentIndex(idx))
             chip.double_clicked.connect(lambda idx=i: self._rename_chip(idx))
             chip.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
             chip.customContextMenuRequested.connect(
                 lambda pos, idx=i, c=chip: self._show_chip_menu(idx, c, pos))
-            self._chip_row.addWidget(chip)
+            self._rail_layout.addWidget(chip)
 
-        btn_add = QPushButton()
-        btn_add.setIcon(QIcon(pixmap("Plus", size=12, color=CT['fg_2'])))
+        self._rail_layout.addStretch()
+
+        btn_add = QPushButton(" 새 메모")
+        btn_add.setIcon(QIcon(pixmap("Plus", size=12, color=CT['fg_3'])))
         btn_add.setIconSize(QSize(12, 12))
-        btn_add.setFixedSize(30, _CHIP_H)
+        btn_add.setFixedHeight(RAIL_ITEM_H - 2)
         btn_add.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_add.setStyleSheet(CHIP_NORMAL)
+        btn_add.setStyleSheet(RAIL_TOOL_BTN)
         btn_add.setToolTip("새 메모 추가")
         btn_add.clicked.connect(self._add_new_memo)  # setCurrentIndex → _sync_chips 재호출
-        self._chip_row.addWidget(btn_add)
+        self._rail_layout.addWidget(btn_add)
 
-        self._chip_row.addStretch()
-
-        btn_ai = QPushButton("정리")
-        btn_ai.setIcon(QIcon(pixmap("Sparkles", size=12, color=CT['fg_2'])))
+        btn_ai = QPushButton(" AI 정리")
+        btn_ai.setIcon(QIcon(pixmap("Sparkles", size=12, color=CT['fg_3'])))
         btn_ai.setIconSize(QSize(12, 12))
-        btn_ai.setFixedHeight(_CHIP_H)
+        btn_ai.setFixedHeight(RAIL_ITEM_H - 2)
         btn_ai.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_ai.setStyleSheet(CHIP_NORMAL)
-        btn_ai.setToolTip("AI로 메모 내용 정리")
+        btn_ai.setStyleSheet(RAIL_TOOL_BTN)
+        btn_ai.setToolTip("AI로 현재 메모 내용 정리")
         btn_ai.clicked.connect(self._organize_memo_with_ai)
-        self._chip_row.addWidget(btn_ai)
+        self._rail_layout.addWidget(btn_ai)
 
         if cur >= 0:
             self.title_changed.emit(self.tab_widget.tabText(cur))
@@ -204,8 +280,8 @@ class MemoTrayWindow(QWidget):
                             Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setWindowTitle("메모 트레이")
-        self.resize(400, 480)
-        self.setMinimumSize(300, 340)
+        self.resize(470, 480)
+        self.setMinimumSize(370, 340)
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -306,7 +382,7 @@ class MemoTrayWindow(QWidget):
             self.setGeometry(x, y, w, h)
         else:
             # 기본: 해당 모니터 오른쪽 아래
-            self.resize(400, 480)
+            self.resize(470, 480)
             self.move(geo.right() - self.width() - 16,
                       geo.bottom() - self.height() - 16)
 

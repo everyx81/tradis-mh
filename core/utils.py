@@ -34,8 +34,9 @@ def normalize_doc_type(raw):
     if cleaned in DOC_TYPE_ALIAS:
         return DOC_TYPE_ALIAS[cleaned]
 
-    # 2차: 끝 괄호 부가설명 제거 ("자금정산서 (수입)" → "자금정산서")
-    no_paren = re.sub(r'\s*\([^)]*\)\s*$', '', cleaned).strip()
+    # 2차: 끝 괄호/대괄호 부가설명 제거 ("자금정산서 (수입)" → "자금정산서",
+    #      "납부영수증서[납부자용]" → "납부영수증서")
+    no_paren = re.sub(r'\s*[\(\[][^)\]]*[\)\]]\s*$', '', cleaned).strip()
     if no_paren != cleaned:
         if no_paren in STANDARD_DOC_TYPES:
             return no_paren

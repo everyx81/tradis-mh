@@ -18,7 +18,7 @@ from .constants import (
     DOC_TYPE_IMPORT_DECLARATION, DOC_TYPE_EXPORT_DECLARATION,
     DOC_TYPE_PAYMENT_NOTICE, DOC_TYPE_IMPORT_TAX_INVOICE,
     FEE_INVOICE_ITEMS, EXPENSE_SYNONYMS, REQUIREMENT_DOC_KEYWORDS,
-    INDEPENDENT_DOC_TYPES
+    INDEPENDENT_DOC_TYPES, FIXED_SLOT_KEYS
 )
 from .utils import (
     sanitize_filename, get_unique_filename, cleanup_company_name,
@@ -939,7 +939,11 @@ class AutoRenamer:
         # ── 동일 내용 중복 파일 제거 ──
         # 같은 파일을 두 번 넣으면 "xxx (1).pdf" 복사본이 생기고, 슬롯에 못 들어간
         # 복사본이 '[추가] 미분류 서류'로 병합에 이중 포함됨.
-        # 슬롯 배정 파일(af) 및 후보끼리 내용(MD5)이 같으면 한 장만 남긴다.
+        # 슬롯 배정 파일(af) 및 후보끼리 내용이 같으면 한 장만 남긴다.
+        # 1차: 파일 바이트 MD5. 2차: 추출 텍스트 해시 —
+        # 유니패스 재다운로드본은 내용이 같아도 PDF 생성정보 차이로 바이트가 달라
+        # MD5 로는 못 잡는다. 텍스트가 충분히 있을 때만 사용 (이미지 스캔본끼리
+        # 빈 텍스트로 오인 병합되는 것 방지).
         import hashlib as _hashlib
 
         def _file_hash(_fn):
@@ -949,19 +953,55 @@ class AutoRenamer:
             except OSError:
                 return None
 
+        def _text_hash(_fn):
+            try:
+                import fitz
+                with fitz.open(os.path.join(dr, _fn)) as _doc:
+                    _txt = "".join(p.get_text() for p in _doc)
+                _txt = "".join(_txt.split())  # 공백/줄바꿈 차이 무시
+                if len(_txt) < 50:
+                    return None  # 이미지 스캔본 등 텍스트 부족 → 판단 불가
+                return _hashlib.md5(_txt.encode("utf-8")).hexdigest()
+            except Exception:
+                return None
+
+        # 3차: 고정 슬롯 서류(BL당 1장 — 신고필증/정산서/납부고지서/수입세금계산서)는
+        # 슬롯이 이미 다른 파일로 채워져 있으면 재다운로드 복사본으로 보고 제외.
+        # 재다운로드본은 출력일자 등이 달라 바이트/텍스트 해시로도 못 잡는다.
+        # (재발행 등 진짜 교체가 필요하면 매핑 화면에서 수동 배정 가능)
+        _slot_doc_of = {}
+        for _fn in af:
+            _c0, _i0, _d0, _s0 = parse_renamed_filename(_fn)
+            if _d0 in FIXED_SLOT_KEYS and _d0 not in _slot_doc_of:
+                _slot_doc_of[_d0] = _fn
+
         _seen_hashes = {}
+        _seen_texts = {}
         for _fn in af:
             _h = _file_hash(_fn)
             if _h and _h not in _seen_hashes:
                 _seen_hashes[_h] = _fn
+            _t = _text_hash(_fn)
+            if _t and _t not in _seen_texts:
+                _seen_texts[_t] = _fn
         _deduped = []
         for _fn in allp:
             _h = _file_hash(_fn)
             if _h and _h in _seen_hashes:
                 self.log(f" -> [중복 제외] {_fn} (동일 내용: {_seen_hashes[_h]})")
                 continue
+            _t = _text_hash(_fn)
+            if _t and _t in _seen_texts:
+                self.log(f" -> [중복 제외] {_fn} (동일 텍스트: {_seen_texts[_t]})")
+                continue
+            _c0, _i0, _d0, _s0 = parse_renamed_filename(_fn)
+            if _d0 in _slot_doc_of and _slot_doc_of[_d0] != _fn:
+                self.log(f" -> [중복 제외] {_fn} (슬롯 이미 배정: {_slot_doc_of[_d0]})")
+                continue
             if _h:
                 _seen_hashes[_h] = _fn
+            if _t:
+                _seen_texts[_t] = _fn
             _deduped.append(_fn)
         allp = _deduped
 

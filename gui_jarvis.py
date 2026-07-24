@@ -733,7 +733,7 @@ class JarvisGUI(QMainWindow):
             ("SETTINGS", "설정", "Cog"),
         ]
 
-        admin_only_tabs = {"일정", "통관", "REPORT"}
+        admin_only_tabs = self.ADMIN_ONLY_TABS
 
         # 디자인 .side-tab: padding 14px 4px, border-radius 10, font 11.5px, letter-spacing 0.02em
         _nav_btn_css = f"""
@@ -818,6 +818,10 @@ class JarvisGUI(QMainWindow):
         self.main_layout.addWidget(self.navbar, 0, 2)
     
     def _on_navbar_clicked(self, tab_name):
+        # 중앙 가드: navbar 버튼 유무와 무관하게 모든 전환 경로(단축키 등)를 차단
+        if tab_name in self.ADMIN_ONLY_TABS and self.license_tier != "admin":
+            self.emit_log(f"[잠금] '{tab_name}' 탭은 관리자 모드에서만 사용할 수 있습니다.")
+            return
         from gui.claude_icons import pixmap as _icpx
         from PyQt6.QtCore import QSize
         for name, btn in self.nav_buttons.items():
@@ -902,6 +906,9 @@ class JarvisGUI(QMainWindow):
     # 페이지 인덱스 매핑
     PAGE_INDEX = {"정산": 0, "일정": 1, "통관": 2, "REPORT": 3, "SETTINGS": 4}
 
+    # 관리자 전용 탭 — navbar 생성과 탭 전환 가드 양쪽에서 공용
+    ADMIN_ONLY_TABS = {"일정", "통관", "REPORT"}
+
     def _create_content_pages(self):
         """QStackedWidget에 일정/통관/REPORT/SETTINGS 페이지 추가"""
         # --- 공유 리소스 (라이선스 무관하게 항상 생성) ---
@@ -922,7 +929,8 @@ class JarvisGUI(QMainWindow):
         mk3_layout.setSpacing(10)
         self.mk3_schedule_widget = MK3ScheduleOnlyWidget(
             schedule_manager=self.shared_schedule_manager,
-            notifier=self.shared_notifier
+            notifier=self.shared_notifier,
+            start_reminder=(self.license_tier == "admin")
         )
         mk3_layout.addWidget(self.mk3_schedule_widget)
         self.left_content_stack.addWidget(mk3_page)  # index 1
@@ -1069,6 +1077,10 @@ class JarvisGUI(QMainWindow):
     
     def _show_memo_tab(self):
         """일정 메모 탭 표시 (메인 스레드)"""
+        # 메모 알림 창이 관리자 전용이므로 메모 기능 전체를 관리자로 제한
+        if self.license_tier != "admin":
+            self.emit_log("[잠금] 메모 기능은 관리자 모드에서만 사용할 수 있습니다.")
+            return
         self.showNormal()
         self.activateWindow()
         self.raise_()
@@ -1109,6 +1121,10 @@ class JarvisGUI(QMainWindow):
 
     def _toggle_memo_tray(self):
         """메모 트레이 표시/숨김 (메인 스레드)"""
+        # 메모 알림 창이 관리자 전용이므로 메모 트레이도 관리자로 제한
+        if self.license_tier != "admin":
+            self.emit_log("[잠금] 메모 트레이는 관리자 모드에서만 사용할 수 있습니다.")
+            return
         try:
             if not getattr(self, 'memo_tray', None):
                 from gui.memo_tray import MemoTrayWindow
@@ -3230,6 +3246,10 @@ class JarvisGUI(QMainWindow):
         """관리자 잠금 해제 → navbar에 일정/통관/보고 버튼 추가"""
         self.license_tier = "admin"
         self._save_license_tier("admin")
+
+        # standard로 시작해 꺼져 있던 일정 알림 루프 기동 (이미 실행 중이면 no-op)
+        if hasattr(self, 'shared_schedule_manager'):
+            self.shared_schedule_manager.start_reminder_loop(1)
 
         # navbar 재생성 — admin 등급이므로 일정/통관/보고 탭이 포함된 전체 메뉴가 만들어진다
         current_tab = self.current_nav_tab

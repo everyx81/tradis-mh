@@ -629,7 +629,7 @@ class ScheduleCardWidget(QFrame):
 class MK3ScheduleOnlyWidget(QWidget):
     """MK3 - 일정 관리 전용 위젯 (중앙 패널)"""
     
-    def __init__(self, schedule_manager=None, notifier=None, parent=None):
+    def __init__(self, schedule_manager=None, notifier=None, parent=None, start_reminder=True):
         super().__init__(parent)
         self.schedule_manager = schedule_manager if schedule_manager else LocalScheduleManager()
         self.notifier = notifier if notifier else WindowsNotifier()
@@ -640,7 +640,10 @@ class MK3ScheduleOnlyWidget(QWidget):
             lambda: QTimer.singleShot(0, self.refresh_schedules)
         )
 
-        self.schedule_manager.start_reminder_loop(1)
+        # 알림 루프는 관리자 전용 — standard에서는 시작하지 않고,
+        # 관리자 잠금 해제 시 메인 윈도우가 start_reminder_loop()를 호출한다
+        if start_reminder:
+            self.schedule_manager.start_reminder_loop(1)
     
     def init_ui(self):
         from PyQt6.QtWidgets import QDateEdit

@@ -2561,22 +2561,13 @@ class FileManagerWidget(QWidget):
 
     def _on_admin_unlock(self):
         """관리자 비밀번호 검증"""
-        from version import get_admin_password, set_admin_password
+        from version import verify_admin_password
         pw = self.input_admin_pw.text().strip()
         if not pw:
             JarvisMessageBox.warning(self, "오류", "비밀번호를 입력해주세요.")
             return
 
-        stored = get_admin_password()
-        if stored is None:
-            # 최초 설정: 지금 입력한 비밀번호를 관리자 비밀번호로 등록
-            set_admin_password(pw)
-            stored = pw
-            JarvisMessageBox.information(
-                self, "관리자 비밀번호 설정",
-                "관리자 비밀번호가 아직 없어 지금 입력한 비밀번호로 설정했습니다.")
-
-        if pw == stored:
+        if verify_admin_password(pw):
             self.license_tier = "admin"
             self.lbl_admin_status.setText("Status: Admin ✓")
             self.lbl_admin_status.setStyleSheet("color: #ff88ff; font-size: 8pt;")

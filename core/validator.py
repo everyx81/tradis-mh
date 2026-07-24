@@ -163,6 +163,8 @@ def validate_mapping_amounts(mapping, directory):
         # 2) 파일 총액 + 추가파일 금액
         # 3) 청구항목 금액 단독
         # 4) 파일 총액 단독
+        # 5) 청구항목 금액 x1.1 — 계산서가 공급가액 기준으로 추출된 경우
+        #    (정산서는 부가세 포함 기재 → 정확히 10% 관계일 때만 일치 인정)
         비교용_파일금액 = file_amt + 추가파일_합계
         matched = False
         if item_amt > 0:
@@ -171,6 +173,7 @@ def validate_mapping_amounts(mapping, directory):
                 파일_총액 + 추가파일_합계,    # 파일 총액 + 추가파일
                 file_amt,                    # 청구항목 금액 단독
                 파일_총액,                    # 파일 총액 단독
+                round(file_amt * 1.1),       # 공급가액 → 부가세 포함 환산
             ]:
                 if 후보금액 > 0 and item_amt == 후보금액:
                     matched = True

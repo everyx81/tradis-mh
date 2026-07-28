@@ -42,12 +42,17 @@ def _next_weekday(base: date, weekday: int) -> date:
     return base + timedelta(days=days_ahead)
 
 
-def parse_quick_schedule(text: str, base_date: date = None, now: datetime = None) -> dict:
+def parse_quick_schedule(text: str, base_date: date = None, now: datetime = None,
+                         allow_empty_title: bool = False) -> dict:
     """빠른 입력 텍스트 파싱.
+
+    Args:
+        allow_empty_title: True면 제목 없이 날짜/시간만 있는 입력("내일 14시")도 허용
+                           (편집 팝업의 기한 빠른 지정용). 단 날짜·시간 둘 다 없으면 None.
 
     Returns:
         {'title': str, 'datetime': datetime, 'date_explicit': bool, 'time_explicit': bool}
-        제목이 비면 None.
+        제목이 비면 None (allow_empty_title=False일 때).
     """
     if not text or not text.strip():
         return None
@@ -171,7 +176,8 @@ def parse_quick_schedule(text: str, base_date: date = None, now: datetime = None
 
     title = re.sub(r'\s+', ' ', remaining).strip()
     if not title:
-        return None
+        if not (allow_empty_title and (date_explicit or time_explicit)):
+            return None
 
     return {
         'title': title,

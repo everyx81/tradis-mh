@@ -167,10 +167,20 @@ class JarvisToast(QWidget):
             btn_snooze.setCursor(Qt.CursorShape.PointingHandCursor)
             
             snooze_menu = QMenu(btn_snooze)
-            snooze_menu.setStyleSheet("QMenu { background-color: #fff; border: 1px solid #ccc; font-size: 9pt; } QMenu::item:selected { background-color: #e3f2fd; color: #1976d2; }")
-            snooze_menu.addAction("15분 뒤", lambda: self._on_snooze_clicked(15))
-            snooze_menu.addAction("1시간 뒤", lambda: self._on_snooze_clicked(60))
+            snooze_menu.setStyleSheet("QMenu { background-color: #fff; border: 1px solid #ccc; font-size: 9pt; } QMenu::item:selected { background-color: #e3f2fd; color: #1976d2; } QMenu::separator { height: 1px; background: #eee; margin: 3px 6px; }")
+
+            from calendar_manager import SNOOZE_PRESETS, minutes_until
+            from datetime import datetime as _dt
+            for _label, _mins in SNOOZE_PRESETS:
+                snooze_menu.addAction(_label, lambda m=_mins: self._on_snooze_clicked(m))
+            snooze_menu.addSeparator()
+            # 시각 고정형 — 분 환산은 클릭 시점에 계산 (토스트가 오래 떠 있어도 정확)
+            if _dt.now().hour < 14:
+                snooze_menu.addAction("오늘 오후 2시", lambda: self._on_snooze_clicked(minutes_until(14)))
+            snooze_menu.addAction("내일 아침 9시", lambda: self._on_snooze_clicked(minutes_until(9, days_ahead=1)))
             snooze_menu.addAction("내일 이 시간", lambda: self._on_snooze_clicked(1440))
+            snooze_menu.addSeparator()
+            snooze_menu.addAction("직접 입력…", self._on_snooze_custom)
             btn_snooze.setMenu(snooze_menu)
             action_layout.addWidget(btn_snooze)
             
@@ -202,6 +212,14 @@ class JarvisToast(QWidget):
             except Exception as e:
                 print(f"[Toast Snooze Error] {e}")
         self.close_toast()
+
+    def _on_snooze_custom(self):
+        """직접 입력 스누즈 — 분 단위 (앱 전역 스타일시트를 따르는 표준 입력 팝업)"""
+        from PyQt6.QtWidgets import QInputDialog
+        minutes, ok = QInputDialog.getInt(
+            None, "스누즈 직접 입력", "몇 분 뒤에 다시 알릴까요?", 30, 1, 1440, 5)
+        if ok:
+            self._on_snooze_clicked(minutes)
         
     def _on_complete_clicked(self):
         if self.complete_callback:

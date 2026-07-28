@@ -8,7 +8,7 @@ MK3 일정 관리 시스템 위젯:
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
                               QLineEdit, QComboBox, QListWidget, QListWidgetItem,
                               QTextEdit, QFrame, QSpinBox, QMenu, QDialog, QCheckBox,
-                              QTabWidget, QCalendarWidget)
+                              QTabWidget, QCalendarWidget, QDateEdit, QTimeEdit)
 from PyQt6.QtCore import Qt, QTimer, QDate, QTime, QSize, pyqtSignal
 from PyQt6.QtGui import QFont, QColor, QBrush, QIcon, QTransform
 
@@ -269,6 +269,22 @@ class HUDStyleCalendar(QCalendarWidget):
 
         painter.restore()
 
+class WheelDateEdit(QDateEdit):
+    """세그먼트 선택 없이 마우스 휠만으로 ±1일 조정되는 날짜 입력"""
+    def wheelEvent(self, event):
+        delta = 1 if event.angleDelta().y() > 0 else -1
+        self.setDate(self.date().addDays(delta))
+        event.accept()
+
+
+class WheelTimeEdit(QTimeEdit):
+    """세그먼트 선택 없이 마우스 휠만으로 ±30분 조정되는 시간 입력"""
+    def wheelEvent(self, event):
+        delta = 30 if event.angleDelta().y() > 0 else -30
+        self.setTime(self.time().addSecs(delta * 60))
+        event.accept()
+
+
 class ScheduleEditDialog(QDialog):
     """일정 상세 편집 다이얼로그 (갤럭시 리마인더 스타일 팝업)"""
     def __init__(self, schedule: dict, parent=None, is_new=False):
@@ -284,7 +300,7 @@ class ScheduleEditDialog(QDialog):
         from datetime import datetime
 
         self.setWindowTitle("새 리마인더" if self.is_new else "리마인더 상세 편집")
-        self.setFixedSize(380, 560)
+        self.setFixedSize(380, 620)
         self.setStyleSheet(f"""
             QDialog {{ background-color: {CT['bg_1']}; border: 1px solid {CT['border']}; border-radius: 12px; }}
             QLabel {{ color: {CT['fg_1']}; font-size: 10pt; }}
@@ -336,15 +352,28 @@ class ScheduleEditDialog(QDialog):
         # 2. 날짜/시간 설정 그룹
         time_group = QGroupBox("기한 (목표일시)")
         time_layout = QGridLayout(time_group)
-        
-        self.date_edit = QDateEdit(QDate(dt_obj.year, dt_obj.month, dt_obj.day))
+
+        # 자연어 빠른 지정 — 타이핑으로 기한 즉시 설정 ("내일 14시" 등)
+        self.nl_input = QLineEdit()
+        self.nl_input.setPlaceholderText("빠른 지정: 내일 14시 · 8/12 9시 반 · 금요일 오후 2시")
+        self.nl_input.textChanged.connect(self._on_nl_changed)
+        time_layout.addWidget(self.nl_input, 0, 0, 1, 2)
+
+        self.nl_preview = QLabel("")
+        self.nl_preview.setStyleSheet(f"color: {CT['fg_3']}; font-size: 8.5pt; background: transparent;")
+        self.nl_preview.hide()
+        time_layout.addWidget(self.nl_preview, 1, 0, 1, 2)
+
+        self.date_edit = WheelDateEdit(QDate(dt_obj.year, dt_obj.month, dt_obj.day))
         self.date_edit.setCalendarPopup(True)
-        time_layout.addWidget(QLabel("날짜:"), 0, 0)
-        time_layout.addWidget(self.date_edit, 0, 1)
-        
-        self.time_edit = QTimeEdit(QTime(dt_obj.hour, dt_obj.minute))
-        time_layout.addWidget(QLabel("시간:"), 1, 0)
-        time_layout.addWidget(self.time_edit, 1, 1)
+        self.date_edit.setToolTip("마우스 휠: 1일 단위 조정")
+        time_layout.addWidget(QLabel("날짜:"), 2, 0)
+        time_layout.addWidget(self.date_edit, 2, 1)
+
+        self.time_edit = WheelTimeEdit(QTime(dt_obj.hour, dt_obj.minute))
+        self.time_edit.setToolTip("마우스 휠: 30분 단위 조정")
+        time_layout.addWidget(QLabel("시간:"), 3, 0)
+        time_layout.addWidget(self.time_edit, 3, 1)
 
         # 시간 프리셋 원클릭 버튼 (자주 쓰는 시각)
         preset_row = QHBoxLayout()
@@ -367,7 +396,7 @@ class ScheduleEditDialog(QDialog):
             btn.setFixedHeight(24)
             btn.clicked.connect(lambda _, hh=h: self.time_edit.setTime(QTime(hh, 0)))
             preset_row.addWidget(btn)
-        time_layout.addLayout(preset_row, 2, 1)
+        time_layout.addLayout(preset_row, 4, 1)
 
         self.repeat_combo = QComboBox()
         self.repeat_combo.addItems(["반복 없음", "매 30분", "매 1시간", "매 3시간", "매일", "매주", "매월"])
@@ -376,8 +405,8 @@ class ScheduleEditDialog(QDialog):
             "Daily": 4, "Weekly": 5, "Monthly": 6
         }
         self.repeat_combo.setCurrentIndex(repeat_map_rev.get(self.schedule.get("repeat", "None"), 0))
-        time_layout.addWidget(QLabel("반복:"), 3, 0)
-        time_layout.addWidget(self.repeat_combo, 3, 1)
+        time_layout.addWidget(QLabel("반복:"), 5, 0)
+        time_layout.addWidget(self.repeat_combo, 5, 1)
 
         layout.addWidget(time_group)
         
@@ -439,6 +468,37 @@ class ScheduleEditDialog(QDialog):
         # 열리자마자 제목부터 입력 가능하도록
         self.title_edit.setFocus()
         
+    def _on_nl_changed(self, text):
+        """자연어 기한 입력 → 날짜/시간 위젯에 즉시 반영 + 미리보기"""
+        from core.schedule_parser import parse_quick_schedule
+        from datetime import date as _date
+        if not text.strip():
+            self.nl_preview.hide()
+            return
+
+        base_qd = self.date_edit.date()
+        parsed = parse_quick_schedule(
+            text,
+            base_date=_date(base_qd.year(), base_qd.month(), base_qd.day()),
+            allow_empty_title=True,
+        )
+        if parsed and (parsed['date_explicit'] or parsed['time_explicit']):
+            dt = parsed['datetime']
+            if parsed['date_explicit']:
+                self.date_edit.setDate(QDate(dt.year, dt.month, dt.day))
+            if parsed['time_explicit']:
+                self.time_edit.setTime(QTime(dt.hour, dt.minute))
+            weekdays = ["월", "화", "수", "목", "금", "토", "일"]
+            qd = self.date_edit.date()
+            qt = self.time_edit.time()
+            wd = weekdays[qd.dayOfWeek() - 1]
+            self.nl_preview.setText(f"→  {qd.month()}월 {qd.day()}일 ({wd}) {qt.toString('HH:mm')}")
+            self.nl_preview.setStyleSheet(f"color: {CT['accent_hi']}; font-size: 8.5pt; background: transparent;")
+        else:
+            self.nl_preview.setText("해석할 수 없는 표현입니다 (예: 내일 14시)")
+            self.nl_preview.setStyleSheet(f"color: {CT['fg_3']}; font-size: 8.5pt; background: transparent;")
+        self.nl_preview.show()
+
     def get_alerts(self):
         res = []
         if self.chk_0.isChecked(): res.append(0)
@@ -598,9 +658,69 @@ class ScheduleCardWidget(QFrame):
             QPushButton:hover {{ background-color: {CT['bg_3']}; }}
         """)
         self.btn_edit.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_edit.clicked.connect(self.open_edit_dialog)
+        self.btn_edit.clicked.connect(self.open_menu)
         layout.addWidget(self.btn_edit)
-        
+
+    def open_menu(self):
+        """⋮ 버튼 메뉴: 편집 / 스누즈 / 완료 / 삭제 (더블클릭=바로 편집은 그대로)"""
+        from calendar_manager import SNOOZE_PRESETS, minutes_until
+        from datetime import datetime as _dt
+
+        menu_css = f"""
+            QMenu {{
+                background-color: {CT['bg_2']}; color: {CT['fg_0']};
+                border: 1px solid {CT['border']}; border-radius: 8px; padding: 4px;
+            }}
+            QMenu::item {{ padding: 6px 18px; border-radius: 6px; }}
+            QMenu::item:selected {{ background-color: {CT['accent_bg']}; color: {CT['accent_hi']}; }}
+            QMenu::separator {{ height: 1px; background: {CT['border_soft']}; margin: 4px 8px; }}
+        """
+        menu = QMenu(self)
+        menu.setStyleSheet(menu_css)
+
+        menu.addAction("편집…", self.open_edit_dialog)
+
+        is_completed = self.schedule.get("completed", False)
+        if not is_completed:
+            snooze_menu = menu.addMenu("스누즈")
+            snooze_menu.setStyleSheet(menu_css)
+            for label, mins in SNOOZE_PRESETS:
+                snooze_menu.addAction(label, lambda m=mins: self._snooze(m))
+            snooze_menu.addSeparator()
+            if _dt.now().hour < 14:
+                snooze_menu.addAction("오늘 오후 2시", lambda: self._snooze(minutes_until(14)))
+            snooze_menu.addAction("내일 아침 9시", lambda: self._snooze(minutes_until(9, days_ahead=1)))
+            snooze_menu.addSeparator()
+            snooze_menu.addAction("직접 입력…", self._snooze_custom)
+
+        menu.addSeparator()
+        if is_completed:
+            menu.addAction("완료 해제", lambda: self._set_completed(False))
+        else:
+            menu.addAction("완료 처리", lambda: self._set_completed(True))
+        menu.addAction("삭제", self._delete_schedule)
+
+        menu.exec(self.btn_edit.mapToGlobal(self.btn_edit.rect().bottomLeft()))
+
+    def _snooze(self, minutes):
+        self.main_widget.schedule_manager.snooze_schedule(self.schedule["id"], minutes)
+        self.main_widget.refresh_schedules()
+
+    def _snooze_custom(self):
+        from PyQt6.QtWidgets import QInputDialog
+        minutes, ok = QInputDialog.getInt(
+            self.window(), "스누즈 직접 입력", "몇 분 뒤에 다시 알릴까요?", 30, 1, 1440, 5)
+        if ok:
+            self._snooze(minutes)
+
+    def _set_completed(self, value):
+        self.main_widget.schedule_manager.update_schedule(self.schedule["id"], completed=value)
+        self.main_widget.refresh_schedules()
+
+    def _delete_schedule(self):
+        self.main_widget.schedule_manager.delete_schedule(self.schedule["id"])
+        self.main_widget.refresh_schedules()
+
     def toggle_complete(self):
         new_status = self.chk_complete.isChecked()
         self.main_widget.schedule_manager.update_schedule(self.schedule["id"], completed=new_status)

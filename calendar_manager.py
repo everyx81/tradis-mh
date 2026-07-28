@@ -22,6 +22,28 @@ except ImportError:
     print("[경고] winotify 패키지가 없습니다. pip install winotify")
 
 
+# 스누즈 프리셋 (라벨, 분) — 토스트/일정 리스트 메뉴에서 공용
+SNOOZE_PRESETS = [
+    ("5분 뒤", 5),
+    ("15분 뒤", 15),
+    ("30분 뒤", 30),
+    ("1시간 뒤", 60),
+    ("3시간 뒤", 180),
+]
+
+
+def minutes_until(hour: int, minute: int = 0, days_ahead: int = 0, now: datetime = None) -> int:
+    """지금부터 (days_ahead일 뒤 hour:minute)까지 남은 분 (최소 1분).
+
+    시각 고정형 스누즈("내일 아침 9시")용 — 클릭 시점에 호출해 분으로 환산한다.
+    """
+    if now is None:
+        now = datetime.now()
+    target = (now + timedelta(days=days_ahead)).replace(
+        hour=hour, minute=minute, second=0, microsecond=0)
+    return max(1, int((target - now).total_seconds() // 60))
+
+
 class WindowsNotifier:
     """Windows 토스트 알림 관리 (winotify 기반)"""
     

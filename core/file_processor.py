@@ -180,10 +180,12 @@ class AutoRenamer:
                     if gemini_ocr._get_cached_result(fp) is None:
                         self.log(f"[재분석] BL 있지만 캐시 없음 - OCR 실행: {fn}")
                         extract_document_info_ai(fp)  # _save_to_cache 자동 호출
-                        if self.rename_complete_callback:
-                            self.rename_complete_callback()
                 except Exception as e:
                     self.log(f"[재분석 실패] {fn}: {e}")
+                # 캐시 유무와 무관하게 UI 갱신 — 외부(탐색기 등)에서 리네임된 파일도
+                # 카드 스냅샷에 반영되도록 함. 콜백은 1초 디바운스라 부담 없음.
+                if self.rename_complete_callback and not is_initial:
+                    self.rename_complete_callback()
                 return
 
             self.log(f"\n[AI 분석 대기/시작] {fn}")
@@ -527,6 +529,22 @@ class AutoRenamer:
             # 같은 문서 유형이 이미 있으면 suffix를 포함한 고유 키 사용
             doc_key = d
             if d in groups[fk]['docs']:
+                # 고정 슬롯 중복 시 회사명이 placeholder(Unknown 등)인 파일이
+                # 메인 슬롯을 차지하지 않도록 정상 회사명 파일을 우선 배치
+                # (오분류된 파일이 필증 슬롯을 가로채 징수형태/세액 판정을
+                #  오염시키는 것 방지)
+                if d in _FIXED_SLOT:
+                    occupant = groups[fk]['docs'][d]
+                    occ_c = parse_renamed_filename(occupant)[0]
+                    if (occ_c or "") in _GENERIC_COMPANIES and (c or "") not in _GENERIC_COMPANIES:
+                        counter = 1
+                        alt_key = f"{d}({counter})"
+                        while alt_key in groups[fk]['docs']:
+                            counter += 1
+                            alt_key = f"{d}({counter})"
+                        groups[fk]['docs'][alt_key] = occupant
+                        groups[fk]['docs'][d] = f
+                        return
                 # suffix가 있으면 포함 (예: "운송료(1)"), 없으면 카운터 추가
                 if s:
                     doc_key = f"{d}{s}"
@@ -1955,3 +1973,10 @@ class PDFHandler(FileSystemEventHandler):
             # 이미 처리 중인 파일은 건너뜀 (중복 방지)
             if e.src_path not in self.r.processing_files:
                 self.r.executor.submit(self.r.process_pdf, e.src_path)
+
+    def on_deleted(self, e):
+        """파일 삭제(외부 리네임으로 옛 이름이 사라진 경우 포함) 시 카드 갱신 —
+        지워진 파일명을 물고 있는 카드 스냅샷이 낡은 채 남지 않도록 함."""
+        if not e.is_directory and e.src_path.lower().endswith('.pdf'):
+            if self.r.rename_complete_callback:
+                self.r.rename_complete_callback()

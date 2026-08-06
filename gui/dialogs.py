@@ -2118,6 +2118,19 @@ class GroupCard(GlassFrame):
     def start_analysis(self):
         if getattr(self, '_analyzing', False):
             return
+        # 스냅샷 무결성 확인: 배정된 파일이 디스크에 없으면(외부 리네임/삭제 등)
+        # 낡은 스냅샷으로 매핑을 재계산해봐야 소용없으므로 폴더 재스캔으로
+        # 카드 자체를 재구성한다. 재스캔은 파일명+캐시 조회만 하므로 토큰 소모 없음.
+        try:
+            _missing = [fn for fn in self.data.get('docs', {}).values()
+                        if fn and not os.path.exists(os.path.join(self.directory, fn))]
+        except (AttributeError, TypeError):
+            _missing = []
+        if _missing:
+            self.parent_widget.emit_log(
+                f"[재분석] 사라진 파일 {len(_missing)}건 감지 → 폴더 재스캔: {_missing[0]}")
+            self.parent_widget.rename_trigger_signal.emit()
+            return
         # Import gemini_ocr at runtime to avoid circular imports
         from auto_rename import gemini_ocr
         self._analyzing = True
@@ -3262,6 +3275,7 @@ class GroupCard(GlassFrame):
             return
         path = os.path.join(self.directory, filename)
         from PyQt6.QtWidgets import QMenu
+        from core.constants import DOC_TYPE_CORRECTION_CHOICES
         menu = QMenu(self)
         menu.setStyleSheet("""
             QMenu {
@@ -3286,6 +3300,11 @@ class GroupCard(GlassFrame):
         action_preview = menu.addAction("🔍 미리보기")
         action_copy = menu.addAction("📋 경로 복사")
         action_rename = menu.addAction("✏️ 이름 변경")
+        # AI 오분류 수동 교정: 종류를 고르면 파일명+분석캐시를 함께 교정
+        type_menu = menu.addMenu("🏷️ 서류 종류 변경")
+        type_actions = {}
+        for _dt in DOC_TYPE_CORRECTION_CHOICES:
+            type_actions[type_menu.addAction(_dt)] = _dt
         action_delete = menu.addAction("🗑️ 삭제")
         action = menu.exec(global_pos)
         if action == action_open:
@@ -3296,6 +3315,8 @@ class GroupCard(GlassFrame):
             self._fl_copy_path(path)
         elif action == action_rename:
             self._fl_rename_by_path(path, filename)
+        elif action in type_actions:
+            self._fl_change_doc_type(path, filename, type_actions[action])
         elif action == action_delete:
             self._fl_delete_by_path(path, filename)
 
@@ -3943,6 +3964,41 @@ class GroupCard(GlassFrame):
             except Exception as e:
                 JarvisMessageBox.warning(self, "이름 변경 실패", str(e))
 
+    def _fl_change_doc_type(self, old_path, old_name, new_doc_type):
+        """AI 오분류 수동 교정: 파일명(서류 종류) 변경 + 분석 캐시 교정 + 카드 재스캔.
+        탐색기에서 이름만 바꾸면 캐시의 doc_type이 옛 값으로 남는 문제까지 한 번에 처리."""
+        from core.utils import parse_renamed_filename
+        c, i, _d, _s = parse_renamed_filename(old_name)
+        if _d == new_doc_type:
+            return
+        _generic = {"Unknown", "알수없는상호", "알수없는", "미상", ""}
+        company = c if (c or "") not in _generic else ""
+        if not company:
+            # 카드 회사명은 "회사1, 회사2" 형태일 수 있어 첫 항목만 사용
+            raw = (self.data.get('company') or "").split(",")[0].strip()
+            company = raw if raw and raw not in _generic else "Unknown"
+        bl = i or self.text_id
+        new_name = f"{company}({bl}){new_doc_type}.pdf"
+        new_path = os.path.join(self.directory, new_name)
+        counter = 1
+        while os.path.exists(new_path):
+            new_name = f"{company}({bl}){new_doc_type}({counter}).pdf"
+            new_path = os.path.join(self.directory, new_name)
+            counter += 1
+        if not JarvisMessageBox.question(
+                self, "서류 종류 변경",
+                f"{old_name}\n→ {new_name}\n\n파일명과 AI 분석 결과를 함께 교정할까요?"):
+            return
+        try:
+            os.rename(old_path, new_path)
+            from auto_rename import gemini_ocr
+            gemini_ocr.override_doc_type(old_path, new_path, new_doc_type,
+                                         company_name=company, identifier=bl)
+            self.parent_widget.emit_log(f"[종류 교정] {old_name} → {new_name}")
+            self.parent_widget.rename_trigger_signal.emit()
+        except Exception as e:
+            JarvisMessageBox.warning(self, "종류 변경 실패", str(e))
+
     def _fl_delete_by_path(self, path, name):
         """파일 삭제 + 카드 재스캔"""
         if JarvisMessageBox.question(self, "삭제 확인", f"'{name}' 파일을 삭제할까요?"):
@@ -4092,7 +4148,15 @@ class GroupCard(GlassFrame):
 
         pdf_path = os.path.join(self.directory, filename)
         if not os.path.exists(pdf_path):
-            JarvisMessageBox.warning(self, "오류", f"파일을 찾을 수 없습니다:\n{filename}")
+            # 카드 스냅샷이 실제 폴더와 어긋난 상태 (외부 리네임/삭제) —
+            # 오류만 띄우지 않고 폴더 재스캔을 트리거해 자가 복구
+            JarvisMessageBox.warning(
+                self, "오류",
+                f"파일을 찾을 수 없습니다:\n{filename}\n\n폴더를 다시 스캔해 카드를 갱신합니다.")
+            try:
+                self.parent_widget.rename_trigger_signal.emit()
+            except (AttributeError, RuntimeError):
+                pass
             return
 
         try:

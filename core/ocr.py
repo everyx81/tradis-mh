@@ -130,6 +130,11 @@ class GeminiOCR:
       - [참고 — 수입/수출신고필증 vs 신고서의 추가 식별 단서]:
         • 신고필증: "수리일자" 가 채워져 있음, 세관 직인/도장, "신고수리" 상태
         • 신고서: "수리일자" 비어 있거나 없음, "신고일자" 만 기재, "견 본" 워터마크/표기, 세관 직인 없음
+      - [★ 한글이 깨져 보이는 문서 — 오분류 금지 ★]
+        폰트 문제로 한글 라벨/제목이 거의 렌더링되지 않고 숫자·영문만 보이는 문서는, 제목을 추측해 '수입신고필증'으로 단정하지 마세요.
+        • 좌우 2개의 사업자등록번호 박스(공급자=세관 / 공급받는자) + 큰 금액(과세표준)과 그 약 1/10 금액(세액) + 수납계좌·customs.go.kr 안내 구조 → 세관 발행 **'수입세금계산서'**
+        • 세관 사업자등록번호가 공급자 위치에 보이면 수입세금계산서 가능성 높음. 예: 121-83-00561(인천본부세관), 109-83-02763(인천공항세관), 601-83-00048(부산세관)
+        • 수입신고필증의 판별 근거(품명/규격 표, 세번부호, 결제금액 란 등)가 전혀 보이지 않으면 무리하게 추측하지 말고 doc_type 'Unknown'을 반환하세요.
       - 문서에 적힌 제목이 예시에 없더라도 임의로 바꾸지 말고 적힌 그대로 반환하세요. (시스템이 후처리로 표준화합니다)
 
    B. [내용 기반 심층 분석]
@@ -467,6 +472,44 @@ class GeminiOCR:
 
             except Exception as e:
                 print(f"캐시 저장 오류: {e}")
+
+    def override_doc_type(self, old_path, new_path, new_doc_type,
+                          company_name=None, identifier=None):
+        """사용자 수동 교정: 캐시 키를 새 파일명으로 옮기고 결과의 문서 종류·회사명을
+        덮어쓴다. AI 오분류를 UI에서 바로잡을 때 사용 — 재OCR 없이 교정값이 유지된다."""
+        with cache_lock:
+            try:
+                cache = self._load_cache()
+                old_name = os.path.basename(old_path)
+                new_name = os.path.basename(new_path)
+                entry = cache.pop(old_name, None)
+                if entry is None:
+                    entry = {'cached_at': time.time(), 'result': {}}
+                res = entry.get('result') or {}
+                res['doc_type'] = new_doc_type
+                if company_name:
+                    res['company_name'] = company_name
+                if identifier:
+                    res.setdefault('identifier', identifier)
+                    res.setdefault('id_type', 'BL')
+                # 수입신고필증으로 교정 시 levy_type 없으면 캐시가 무효 판정되므로 보장
+                if new_doc_type in ('수입신고필증', '수출신고필증', '반송신고필증'):
+                    res.setdefault('levy_type', 'Unknown')
+                    res.setdefault('business_no', 'Unknown')
+                entry['result'] = res
+                try:
+                    entry['mtime'] = os.path.getmtime(new_path)
+                    entry['size'] = os.path.getsize(new_path)
+                    file_hash = _compute_file_hash(new_path)
+                    if file_hash is not None:
+                        entry['hash'] = file_hash
+                except OSError:
+                    pass
+                cache[new_name] = entry
+                self._write_cache()
+                print(f"[캐시] 종류 교정: {old_name} -> {new_name} ({new_doc_type})")
+            except Exception as e:
+                print(f"캐시 종류 교정 오류: {e}")
 
     def _update_cache_key(self, old_path, new_path):
         """파일 이름 변경 시 캐시 키도 업데이트"""

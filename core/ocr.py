@@ -55,7 +55,7 @@ class GeminiOCR:
         # 파일 mtime이 로드 시점과 다르면(외부 변경) 자동 재로드.
         self._cache_data = None
         self._cache_file_mtime = None
-        self.model_id = 'gemini-3.1-flash-lite'
+        self.model_id = 'gemini-3.5-flash-lite'
         self.base_prompt = """
 당신은 최고의 전문 관세사 사무원입니다. PDF 문서의 이미지를 분석하여 다음 정보를 JSON 형식으로만 응답하세요.
 
@@ -243,6 +243,14 @@ class GeminiOCR:
                 print(f"[캐시] 사용: {os.path.basename(fp)}")
                 return cached_result
 
+        # --- 표준 서식 직독 (관세청 전산 출력물은 텍스트 레이어로 확정, AI 불필요) ---
+        from .form_parser import parse_standard_form
+        parsed = parse_standard_form(fp)
+        if parsed:
+            print(f"[직독] 표준서식 확정: {os.path.basename(fp)} → {parsed['doc_type']} / {parsed['company_name']}")
+            self._save_to_cache(fp, parsed)
+            return parsed
+
         try:
             from google.genai import types
 
@@ -258,7 +266,11 @@ class GeminiOCR:
                 contents=[
                     self.base_prompt,
                     types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf")
-                ]
+                ],
+                # 기본 해상도가 낮아지면 OCR 환각(번호 오독)이 발생하므로 high 고정
+                config=types.GenerateContentConfig(
+                    media_resolution=types.MediaResolution.MEDIA_RESOLUTION_HIGH
+                )
             )
             text_response = response.text.strip()
             text_response = re.sub(r'```(?:json)?\n?(.*?)\n?```', r'\1', text_response, flags=re.DOTALL).strip()

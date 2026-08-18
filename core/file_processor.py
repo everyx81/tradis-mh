@@ -185,11 +185,10 @@ class AutoRenamer:
                 except Exception as e:
                     self.log(f"[재분석 실패] {fn}: {e}")
 
-                # 신고서/신고필증이 텍스트 레이어로 확정됐는데 파일명의 서류 종류가
-                # 다르면 파일명까지 교정한다. BL 이 있다는 이유로 리네임을 건너뛰던
-                # 탓에 과거 오분류로 굳어진 이름(신고서인데 …수입신고필증.pdf)이
-                # 영구히 남던 문제를 여기서 푼다.
-                if _res and _res.get('doc_type_src') == 'text_layer':
+                # 보완 레이어가 신고필증 오분류를 교정한 건에 한해 파일명도 맞춘다.
+                # BL 이 이름에 있다는 이유로 리네임을 건너뛰던 탓에 과거 오분류로
+                # 굳어진 이름(신고서인데 …수입신고필증.pdf)이 영구히 남던 문제를 푼다.
+                if _res and _res.get('doc_type_src') == 'text_layer_fix':
                     self._fix_doctype_in_filename(fp, fn, d, _res.get('doc_type'))
                 # 캐시 유무와 무관하게 UI 갱신 — 외부(탐색기 등)에서 리네임된 파일도
                 # 카드 스냅샷에 반영되도록 함. 콜백은 1초 디바운스라 부담 없음.

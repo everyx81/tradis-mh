@@ -146,28 +146,31 @@ def parse_standard_form(fp):
         return None
 
 
-# ── 신고서 / 신고필증 확정 판별 ──
-# 실측 근거 (E:\수입신고·E:\수출신고 아카이브 1,879건 개봉, 오판 0건):
-#   A. 신고필증  : 최상단 "* 본 신고필증은 전자문서(PDF파일)로 발급된 신고필증입니다"
-#                  + 제목 "수 입 신 고 필 증" + "시점확인필" + 하단 "발 행 번 호"
-#   B. 신고서    : 제목 "수 입 신 고 서" (견본 표기 없음 — 신형 UNI-PASS 출력물)
-#   C. 임시용견본: 제목 칸이 "견   본 (수입)" 이고 상·하단에 "이 문서는 임시용 견본입니다"
-#                  (수리 전 단계이므로 신고서와 동일 취급)
-#   D. 스캔본    : 텍스트 레이어 없음 → None 반환, 기존 AI 판정으로 폴백
-# AI 이미지 판독은 자간이 넓은 "수 입 신 고 서" 를 빈번형인 "수입신고필증" 으로
-# 정규화해 읽는 오분류가 반복되므로, 텍스트 레이어가 있으면 이쪽을 신뢰한다.
+# ── 신고서 / 신고필증 오분류 보완 ──
+# 판별 주체는 AI 다. 이 모듈은 AI 가 '신고필증'으로 읽은 결과가 **명백히** 틀린
+# 경우에만 뒤집는 보완 레이어이며, 확신이 서지 않으면 아무것도 하지 않는다.
+#
+# 실측 근거 (E:\수입신고·E:\수출신고 아카이브 4,450건 개봉):
+#   신고필증  : "* 본 신고필증은 전자문서(PDF파일)로 발급된 신고필증입니다" +
+#               "시점확인필" + 하단 "발 행 번 호" (셋 중 최소 하나는 반드시 존재)
+#   신고서    : 위 마커가 하나도 없고 제목이 "수 입 신 고 서"
+#   임시용견본: 제목이 "견   본 (수입)", 상·하단 "이 문서는 임시용 견본입니다"
 
-# 신고 서식이 아닌 문서(계산서 본문의 단어 언급 등)에 규칙이 오작동하지 않도록 하는 관문
+# 신고 서식이 아닌 문서(계산서 본문의 단어 언급 등)에 규칙이 닿지 않게 하는 관문
 _DECL_GATE_KWS = ('화물관리번호', '송품장부호', '적재의무기한')
 _DECL_EXPORT_KWS = ('송품장부호', '수출대행자', '적재의무기한')
 _DECL_SAMPLE_KWS = ('이문서는임시용견본입니다', '견본(수입)', '견본(수출)')
+# 신고필증에만 인쇄되는 마커 (수리 후 발급본의 증거)
+_DECL_RECEIPT_MARKS = ('발급된신고필증입니다', '시점확인필', '발행번호')
+_CERT_TYPES = ('수입신고필증', '수출신고필증', '반송신고필증')
+
+# 화물관리번호 서식 (예: 26ZIMU0112I-7057, 26TW008222I-0005-0001)
+# ④B/L(AWB)번호 바로 오른쪽 칸이라 AI 가 한 칸 밀려 집어오는 일이 잦다.
+RE_CARGO_MGMT_NO = re.compile(r'^\d{2}[A-Z0-9]{4,10}[IE]-\d{4}(?:-\d{4})?$')
 
 
-def classify_declaration(text):
-    """수입/수출/반송 신고서·신고필증을 텍스트 레이어로 확정 판별.
-
-    판정 불가(스캔본, 신고 서식 아님)면 None 을 반환해 AI 판정을 그대로 쓴다 (fail-open).
-    """
+def declaration_evidence(text):
+    """신고 서식에서 종류 판별 증거만 수집. 신고 서식이 아니면 None."""
     if not text:
         return None
     t = ''.join(text.split())  # 모든 공백 제거 ("수 입 신 고 서" → "수입신고서")
@@ -176,30 +179,67 @@ def classify_declaration(text):
 
     is_export = any(k in t for k in _DECL_EXPORT_KWS)
 
-    # 1순위: 임시용 견본 — 제목이 "신고필증" 으로 적혀 있어도 견본이 우선한다
+    sample_type = None
     if any(k in t for k in _DECL_SAMPLE_KWS):
         if '견본(수입)' in t:
-            return '수입신고서'
-        if '견본(수출)' in t or is_export:
-            return '수출신고서'
-        return '수입신고서'
+            sample_type = '수입신고서'
+        elif '견본(수출)' in t or is_export:
+            sample_type = '수출신고서'
+        else:
+            sample_type = '수입신고서'
 
-    # 2순위: 신고필증 (수리 후 발급본)
-    for name in ('반송신고필증', '수입신고필증', '수출신고필증'):
-        if name in t:
-            return name
+    return {
+        'is_export': is_export,
+        'sample_type': sample_type,
+        'title_decl': ('수출신고서' if '수출신고서' in t
+                       else ('수입신고서' if '수입신고서' in t else None)),
+        'title_cert': next((n for n in _CERT_TYPES if n in t), None),
+        'receipt_marks': sum(1 for m in _DECL_RECEIPT_MARKS if m in t),
+    }
 
-    # 3순위: 신고서 (수리 전)
-    for name in ('수입신고서', '수출신고서'):
-        if name in t:
-            return name
 
+def correct_misread_declaration(ai_doc_type, text):
+    """AI 가 신고필증으로 읽은 결과가 명백히 틀렸을 때만 교정값을 반환.
+
+    뒤집는 경우는 아래 둘뿐이다.
+      (1) 임시용 견본 표기가 있는데 신고필증이라 한 경우
+      (2) 제목이 신고서이고 문서 어디에도 '신고필증' 제목이 없는데 신고필증이라 한 경우
+    그 밖에는 None 을 반환해 AI 판정을 그대로 쓴다. 반대 방향(AI 가 신고서라
+    한 것을 신고필증으로 올리는 것)은 다루지 않는다.
+
+    [주의] 상단 안내문("본 신고필증은 전자문서…")과 "시점확인필" 문구는 신고서
+    출력물에도 그대로 인쇄되는 서식 보일러플레이트다 (실측 신고서 573건 중 246건).
+    판정 근거로 쓰면 안 되며, receipt_marks 는 진단·로그용으로만 남긴다.
+    """
+    if ai_doc_type not in _CERT_TYPES:
+        return None
+    ev = declaration_evidence(text)
+    if not ev:
+        return None
+    if ev['sample_type']:
+        return ev['sample_type'] if ev['sample_type'] != ai_doc_type else None
+    if ev['title_decl'] and not ev['title_cert']:
+        return ev['title_decl']
     return None
 
 
-def classify_declaration_file(fp):
-    """파일 경로로 신고서/신고필증 확정 판별. 실패 시 None."""
+def correct_misread_declaration_file(ai_doc_type, fp):
+    """파일 경로로 신고필증 오분류 보완. 실패/판단불가면 None."""
     try:
-        return classify_declaration(_first_page_text(fp))
+        return correct_misread_declaration(ai_doc_type, _first_page_text(fp))
     except Exception:
         return None
+
+
+def is_cargo_mgmt_no(value, text):
+    """AI 가 B/L 로 집어온 값이 실제로는 ⑤화물관리번호인지 판단.
+
+    서식(연도2자리+선사코드+I/E-숫자)과 문서 원문 등장 여부를 **둘 다** 만족할
+    때만 True. 정상 B/L 을 잘못 거부하지 않도록 보수적으로 판단한다.
+    """
+    if not value or not text:
+        return False
+    v = value.replace(' ', '').upper()
+    if not RE_CARGO_MGMT_NO.match(v):
+        return False
+    return v in ''.join(text.split()).upper()

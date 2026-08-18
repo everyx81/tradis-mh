@@ -21,10 +21,17 @@ from .utils import pdf_lock, cache_lock
 _hash_memo = {}
 _HASH_MEMO_MAX = 2000
 
-# 서류 종류 판별 로직 버전. 값을 올리면 캐시에 남아 있는 신고서/신고필증 분류를
-# 다음 조회 때 텍스트 레이어로 1회 재검증한다 (AI 재호출 없음).
-DOC_CLASSIFIER_VER = 2
+# 보완 로직 버전. 값을 올리면 캐시에 남아 있는 신고 계열 결과를 다음 조회 때 1회 재점검한다.
+DOC_CLASSIFIER_VER = 3
 _DECL_TYPES = ('수입신고필증', '수출신고필증', '반송신고필증', '수입신고서', '수출신고서')
+
+# B/L 자리에 화물관리번호를 집어왔을 때 모델에게 되묻는 문구
+RETRY_BL_HINT = """
+
+[재확인 요청 — 반드시 반영]
+직전 분석은 identifier 로 '{wrong}' 를 반환했으나, 이 값은 ⑤**화물관리번호** 입니다.
+필요한 값은 그 왼쪽 칸인 ④**B/L(AWB)번호** 입니다. 두 칸은 나란히 붙어 있어 혼동하기 쉽습니다.
+④번 칸의 값을 다시 읽어 identifier 로 반환하세요. 그 칸이 비어 있으면 'Unknown' 을 반환하세요."""
 
 
 def _compute_file_hash(fp):
@@ -83,7 +90,10 @@ class GeminiOCR:
    - 문서 내에서 B/L 번호 또는 Invoice 번호를 반드시 찾아 추출하세요.
 
    [★ 수입신고서 / 수입신고필증 특별 안내 ★]
-   - 수입신고서·수입신고필증은 반드시 **"B/L(AWB)번호"** 필드를 찾아 추출하세요.
+   - 수입신고서·수입신고필증은 반드시 **④"B/L(AWB)번호"** 칸의 값을 추출하세요.
+   - [★ 최다 오독 지점 ★] ④B/L(AWB)번호 칸 **바로 오른쪽**이 ⑤화물관리번호 칸입니다. 한 칸 밀려 읽지 마세요.
+     라벨과 값의 세로 위치를 반드시 맞춰 확인하고, 값이 '26ZIMU0112I-7057' 처럼
+     연도2자리+코드+I/E-숫자 형태면 그것은 화물관리번호이므로 identifier 가 아닙니다.
    - 보통 신고번호 근처의 박스 안에 기재되며, 영문 선사코드 + 숫자 조합입니다.
      • 예시: HDMU1234567890, COSU98765432, MAEU12345678, ONEY123456789
      • 항공건은 AWB 번호 (숫자 11자리): 123-45678901
@@ -107,6 +117,9 @@ class GeminiOCR:
    - 값 사이에 공백/구분자가 있으면 확실히 다른 번호임. 절대 합쳐서 하나로 처리 금지.
 
    [주의] 다음은 B/L 번호가 아닙니다. 절대 identifier로 추출하지 마세요:
+     • **화물관리번호** (⑤번 칸) — ④B/L(AWB)번호 바로 오른쪽 칸이라 가장 혼동하기 쉬움. 절대 identifier 로 쓰지 마세요.
+       형태: 연도 2자리 + 선사/터미널 코드 + I(수입)/E(수출) + '-' + 숫자4자리 [+ '-' + 숫자4자리]
+       예: 26ZIMU0112I-7057, 26TW008222I-0005-0001, 26SHIFT597I-0510-0011
      • 신고번호 (예: 13133-26-000199X, HSIV-26011513133-26-000199X) — '-'로 구분된 형태
      • 접수번호, 승인번호, 관리번호, 세관번호, 신고확인번호
      • 적하목록관리번호(MRN) — 세관 관리용
@@ -319,18 +332,41 @@ class GeminiOCR:
             if "doc_type" in result:
                 result["doc_type"] = normalize_doc_type(result["doc_type"])
 
-            # --- 신고서/신고필증 직독 확정 (AI 판정보다 우선) ---
-            # 이미지 판독은 자간이 넓은 "수 입 신 고 서" 를 빈번형인 "수입신고필증" 으로
-            # 정규화해 읽는 오분류가 반복된다. 제목·견본 문구는 텍스트 레이어에 그대로
-            # 들어 있으므로 확정 판별되면 AI 값을 덮어쓴다. (스캔본은 None → AI 값 유지)
-            from .form_parser import classify_declaration
-            confirmed = classify_declaration(page_text)
-            if confirmed:
-                if result.get("doc_type") != confirmed:
-                    print(f"[직독] 신고 서류 교정: {result.get('doc_type')} → {confirmed} "
-                          f"({os.path.basename(fp)})")
-                result["doc_type"] = confirmed
-                result["doc_type_src"] = "text_layer"
+            # --- 보완: 신고필증 오분류가 명백할 때만 교정 ---
+            # 판별 주체는 AI 다. 임시용 견본 표기가 있거나, 신고필증 전용 마커가
+            # 하나도 없는데 제목이 신고서인 경우에만 뒤집는다. 그 외에는 AI 값을 그대로 둔다.
+            from .form_parser import correct_misread_declaration, is_cargo_mgmt_no
+            fixed = correct_misread_declaration(result.get("doc_type"), page_text)
+            if fixed:
+                print(f"[보완] 신고필증 오분류 교정: {result.get('doc_type')} → {fixed} "
+                      f"({os.path.basename(fp)})")
+                result["doc_type"] = fixed
+                result["doc_type_src"] = "text_layer_fix"
+
+            # --- 보완: B/L 자리에 ⑤화물관리번호를 집어온 경우 1회 재질의 ---
+            # 코드가 값을 만들어 넣지 않고, 무엇을 잘못 읽었는지 알려 모델에게 다시 묻는다.
+            if is_cargo_mgmt_no(result.get("identifier"), page_text):
+                wrong = result.get("identifier")
+                print(f"[보완] identifier 가 화물관리번호로 확인됨 - 재질의: {wrong} "
+                      f"({os.path.basename(fp)})")
+                try:
+                    retry = self._ask_model(client, types, prompt + RETRY_BL_HINT.format(wrong=wrong),
+                                            pdf_bytes)
+                    new_id = retry.get("identifier", "Unknown")
+                    if (new_id and new_id != wrong and new_id != "Unknown"
+                            and not is_cargo_mgmt_no(new_id, page_text)):
+                        print(f"[보완] 재질의 성공: {wrong} → {new_id}")
+                        result = retry
+                        if "doc_type" in result:
+                            result["doc_type"] = normalize_doc_type(result["doc_type"])
+                        if fixed:
+                            result["doc_type"] = fixed
+                            result["doc_type_src"] = "text_layer_fix"
+                        result["identifier_src"] = "ai_retry"
+                    else:
+                        print(f"[보완] 재질의로도 확정 못함 - 기존 값 유지: {new_id}")
+                except Exception as e:
+                    print(f"[보완] 재질의 오류: {e}")
 
             # 신고필증 3종은 business_no 키를 보장 — 모델이 키를 생략해도
             # 'Unknown'으로 확정 저장해 캐시가 영구 유효하도록 (재분석 루프 방지)
@@ -344,6 +380,29 @@ class GeminiOCR:
         except Exception as e:
             print(f"AI 분석 오류: {e}")
             return {"company_name": "Unknown", "identifier": "Unknown", "id_type": "Unknown", "doc_type": "Unknown"}
+
+    def _ask_model(self, client, types, prompt, pdf_bytes):
+        """모델에 한 번 더 질의하고 JSON 을 파싱해 반환.
+
+        보완 레이어가 '무엇을 잘못 읽었는지' 알려주고 다시 물을 때 쓴다.
+        값을 만들어 채워 넣는 것이 아니라, 판단은 계속 모델이 한다.
+        """
+        response = client.models.generate_content(
+            model=f"models/{self.model_id}",
+            contents=[
+                prompt,
+                types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf")
+            ],
+            config=types.GenerateContentConfig(
+                media_resolution=types.MediaResolution.MEDIA_RESOLUTION_HIGH
+            )
+        )
+        txt = response.text.strip()
+        txt = re.sub(r'```(?:json)?\n?(.*?)\n?```', r'\1', txt, flags=re.DOTALL).strip()
+        m = re.search(r'\{.*\}', txt, re.DOTALL)
+        if m:
+            txt = m.group(0)
+        return json.loads(txt)
 
     def _extract_first_page_bytes(self, fp):
         """1페이지 PDF 바이트 반환. 단일 페이지 PDF 는 원본 바이트 그대로.
@@ -488,7 +547,8 @@ class GeminiOCR:
             if (result and result.get('doc_type') in _DECL_TYPES
                     and result.get('doc_type_src') != 'manual'
                     and entry.get('cls_ver', 0) < DOC_CLASSIFIER_VER):
-                self._revalidate_declaration(fp, filename, result)
+                if self._revalidate_declaration(fp, filename, result):
+                    return None  # 캐시 폐기 → 모델에게 다시 물어 값을 받는다
 
             # 수입신고필증에 levy_type 필드가 없는 구 캐시는 재분석을 위해 무효화
             if result and result.get('doc_type') == '수입신고필증':
@@ -506,34 +566,48 @@ class GeminiOCR:
             return None
 
     def _revalidate_declaration(self, fp, filename, result):
-        """구 버전 캐시의 신고서/신고필증 분류를 텍스트 레이어로 1회 재검증.
+        """구 버전 캐시의 신고 계열 결과를 1회 재점검 (보완 레이어).
 
-        AI 재호출 없이 doc_type 만 교정하고 cls_ver 를 각인해 다음부터는 건너뛴다.
-        판정 불가(스캔본)면 기존 값을 그대로 두되 cls_ver 는 각인해 반복 검사를 막는다.
+        - 신고필증 오분류가 명백하면 doc_type 만 교정 (AI 재호출 없음)
+        - B/L 자리에 화물관리번호가 들어 있으면 캐시를 버리고 재분석하도록 True 반환
+          (값은 코드가 아니라 모델이 다시 만든다)
+        어느 쪽도 아니면 그대로 두고 cls_ver 만 각인해 반복 검사를 막는다.
         """
-        from .form_parser import classify_declaration_file
-        verdict = classify_declaration_file(fp)
-        if verdict:
-            if result.get('doc_type') != verdict:
-                print(f"[직독] 캐시 종류 교정: {result.get('doc_type')} → {verdict} ({filename})")
-            result['doc_type'] = verdict
-            result['doc_type_src'] = 'text_layer'
-            # 신고필증 3종은 캐시 유효 판정 조건상 아래 두 키가 있어야 한다
-            if verdict in ('수입신고필증', '수출신고필증', '반송신고필증'):
-                result.setdefault('levy_type', 'Unknown')
-                result.setdefault('business_no', 'Unknown')
+        from .form_parser import (correct_misread_declaration, is_cargo_mgmt_no,
+                                  _first_page_text)
+        try:
+            text = _first_page_text(fp) or ''
+        except Exception:
+            text = ''
+
+        fixed = correct_misread_declaration(result.get('doc_type'), text)
+        if fixed:
+            print(f"[보완] 캐시 오분류 교정: {result.get('doc_type')} → {fixed} ({filename})")
+            result['doc_type'] = fixed
+            result['doc_type_src'] = 'text_layer_fix'
+
+        drop = is_cargo_mgmt_no(result.get('identifier'), text)
+        if drop:
+            print(f"[보완] 캐시의 identifier 가 화물관리번호 - 재분석 요청: "
+                  f"{result.get('identifier')} ({filename})")
+
         with cache_lock:
             try:
                 cache = self._load_cache()
                 entry = cache.get(filename)
                 if entry is None:
-                    return
-                if verdict:
-                    entry['result'] = copy.deepcopy(result)
-                entry['cls_ver'] = DOC_CLASSIFIER_VER
+                    return drop
+                if drop:
+                    # 재분석 후 _save_to_cache 가 새 결과로 덮어쓴다
+                    del cache[filename]
+                else:
+                    if fixed:
+                        entry['result'] = copy.deepcopy(result)
+                    entry['cls_ver'] = DOC_CLASSIFIER_VER
                 self._write_cache()
             except Exception as e:
-                print(f"캐시 재검증 저장 오류: {e}")
+                print(f"캐시 재점검 저장 오류: {e}")
+        return drop
 
     def _save_to_cache(self, fp, result):
         """결과를 캐시에 저장 (최적화: indent 제거, O(n) 정리)"""

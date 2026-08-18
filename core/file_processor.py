@@ -176,12 +176,21 @@ class AutoRenamer:
                 # BL 이 이미 파일명에 있음 — 이름 변경 불필요
                 # 하지만 OCR 캐시가 없으면 billing_items 기반 매칭이 작동 안 하므로
                 # 캐시만 채우고 종료 (rename X, OCR O)
+                _res = None
                 try:
-                    if gemini_ocr._get_cached_result(fp) is None:
+                    _res = gemini_ocr._get_cached_result(fp)
+                    if _res is None:
                         self.log(f"[재분석] BL 있지만 캐시 없음 - OCR 실행: {fn}")
-                        extract_document_info_ai(fp)  # _save_to_cache 자동 호출
+                        _res = extract_document_info_ai(fp)  # _save_to_cache 자동 호출
                 except Exception as e:
                     self.log(f"[재분석 실패] {fn}: {e}")
+
+                # 신고서/신고필증이 텍스트 레이어로 확정됐는데 파일명의 서류 종류가
+                # 다르면 파일명까지 교정한다. BL 이 있다는 이유로 리네임을 건너뛰던
+                # 탓에 과거 오분류로 굳어진 이름(신고서인데 …수입신고필증.pdf)이
+                # 영구히 남던 문제를 여기서 푼다.
+                if _res and _res.get('doc_type_src') == 'text_layer':
+                    self._fix_doctype_in_filename(fp, fn, d, _res.get('doc_type'))
                 # 캐시 유무와 무관하게 UI 갱신 — 외부(탐색기 등)에서 리네임된 파일도
                 # 카드 스냅샷에 반영되도록 함. 콜백은 1초 디바운스라 부담 없음.
                 if self.rename_complete_callback and not is_initial:
@@ -373,6 +382,27 @@ class AutoRenamer:
         finally:
             if fp in self.processing_files:
                 self.processing_files.remove(fp)
+
+    def _fix_doctype_in_filename(self, fp, fn, old_dt, new_dt):
+        """파일명에 박힌 서류 종류를 확정 값으로 교정.
+
+        직독으로 확정된 doc_type 에 대해서만 호출한다. 파일명 패턴(커스텀 포함)을
+        건드리지 않도록, 종류 토큰 자리만 문자열 치환한다.
+        """
+        if not new_dt or not old_dt or new_dt == old_dt or old_dt not in fn:
+            return
+        pos = fn.rfind(old_dt)
+        nn = fn[:pos] + new_dt + fn[pos + len(old_dt):]
+        np = os.path.join(os.path.dirname(fp), nn)
+        if os.path.exists(np):
+            np = get_unique_filename(np)
+            nn = os.path.basename(np)
+        try:
+            os.rename(fp, np)
+            gemini_ocr._update_cache_key(fp, np)
+            self.log(f" -> [종류 교정] {fn} → {nn}")
+        except Exception as e:
+            self.log(f" -> [실패] 종류 교정 이름 변경 오류: {e}")
 
     def trigger_intelligent_merge(self, dr):
         files = [f for f in os.listdir(dr) if f.lower().endswith('.pdf')]

@@ -21,6 +21,11 @@ from .utils import pdf_lock, cache_lock
 _hash_memo = {}
 _HASH_MEMO_MAX = 2000
 
+# 서류 종류 판별 로직 버전. 값을 올리면 캐시에 남아 있는 신고서/신고필증 분류를
+# 다음 조회 때 텍스트 레이어로 1회 재검증한다 (AI 재호출 없음).
+DOC_CLASSIFIER_VER = 2
+_DECL_TYPES = ('수입신고필증', '수출신고필증', '반송신고필증', '수입신고서', '수출신고서')
+
 
 def _compute_file_hash(fp):
     """파일 내용 해시 반환 (md5, 16진수 문자열).
@@ -114,8 +119,13 @@ class GeminiOCR:
 3. id_type: 'BL' 또는 'Invoice'
 
 4. doc_type (문서 종류 결정 - [매우 중요]):
-   A-0. [최우선 선행 체크 — 신고필증/신고서]: 신고필증·신고서류로 보이면 doc_type을 정하기 전에 반드시 문서 전체에서 "견 본" / "견본" / "임시용 견본" / "SAMPLE" 표기 유무를 먼저 확인하세요.
-        표기가 하나라도 있으면 제목이 무엇이든 무조건 '수입신고서'(수입건) 또는 '수출신고서'(수출건)입니다. 이 체크를 건너뛰고 '수입신고필증'으로 반환하는 것은 오류입니다.
+   A-0. [최우선 선행 체크 — 신고필증/신고서]: 신고 서식(수입/수출)으로 보이면 doc_type을 정하기 전에 아래 순서로 확인하세요.
+        (1) 제목 칸이 "견   본 (수입)" / "견   본 (수출)" 으로 인쇄되어 있거나, 문서 맨 위 또는 맨 아래에 "이 문서는 임시용 견본입니다" 문구가 있으면
+            → 제목이 무엇이든 무조건 '수입신고서'(수입건) 또는 '수출신고서'(수출건)
+        (2) 견본 표기가 없으면 제목 글자를 그대로 읽으세요. 제목은 자간을 넓게 인쇄합니다 ("수 입 신 고 서", "수 입 신 고 필 증").
+            공백을 지우고 읽되 **"필 증" 두 글자의 유무** 만으로 판정하세요.
+        [경고] 견본 표기가 없다는 사실은 신고필증의 근거가 **아닙니다**. 견본 표기가 전혀 없는 정상 '수 입 신 고 서' 가 흔하게 존재합니다.
+        '수입신고서'는 '수입신고필증'보다 드물다는 이유로 필증 쪽으로 기울이지 마세요. 글자에 '필증'이 없으면 신고서입니다.
    A. [절대 기준] 문서 제목을 그대로 정확히 읽어 반환하세요:
       - 자주 등장하는 제목 예시: '수입신고필증', '수입신고서', '수출신고필증', '수출신고서', '반송신고필증', '자금정산서', '자금청구서', '납부고지서', '수입세금계산서', '적합성평가확인서', '이체증'
       - [이체증 특별 규칙] 은행 이체 확인증/이체증인 경우:
@@ -127,15 +137,17 @@ class GeminiOCR:
         • '자금정산서'와 '자금청구서'는 **다른 문서**입니다. 제목을 정확히 읽어 구분하세요.
         • '수입신고서'와 '수입신고필증'은 **다른 문서**입니다. 구분하세요.
         • '수출신고서'와 '수출신고필증'은 **다른 문서**입니다. 구분하세요.
-      - [★ 절대 규칙 — "견 본" / "견본" 표기 감지 ★]
-        문서 어디에라도 (제목 옆/위/아래/배경 워터마크/표 상단 등) **"견 본"** 또는 **"견본"** 또는 **"SAMPLE"** 또는 **"SPECIMEN"** 표기가 보이면:
+      - [★ 절대 규칙 — 임시용 견본 감지 ★]
+        제목 칸이 "견   본 (수입)" / "견   본 (수출)" 이거나, 문서 최상단·최하단에 "이 문서는 임시용 견본입니다" 문구가 있으면:
         • 제목이 "수입신고필증" 으로 적혀 있어도 → 반드시 **doc_type: "수입신고서"** 로 반환
         • 제목이 "수출신고필증" 으로 적혀 있어도 → 반드시 **doc_type: "수출신고서"** 로 반환
-        • 이유: "견 본" 은 신고수리 전 단계인 신고서임을 의미. 신고필증은 신고수리 후 발급되며 "견 본" 표기가 없음.
+        • 이유: 견본은 신고수리 전 단계의 임시 출력물이며, 신고필증은 수리 후 발급됩니다.
         • 이 규칙은 제목 텍스트보다 **우선** 합니다.
-      - [참고 — 수입/수출신고필증 vs 신고서의 추가 식별 단서]:
-        • 신고필증: "수리일자" 가 채워져 있음, 세관 직인/도장, "신고수리" 상태
-        • 신고서: "수리일자" 비어 있거나 없음, "신고일자" 만 기재, "견 본" 워터마크/표기, 세관 직인 없음
+      - [참고 — 신고필증 vs 신고서 판정 근거 (있는 것만 근거로 쓰세요)]:
+        • 신고필증에만 있는 것: 최상단 "* 본 신고필증은 전자문서(PDF파일)로 발급된 신고필증입니다" 안내문,
+          "시점확인필" 스템프, 하단 "발 행 번 호 : ..." 줄, 그리고 "수리일자" 칸에 날짜가 채워져 있음.
+        • 신고서: 위 안내문·스템프·발행번호가 **전혀 없고**, "수리일자" 칸이 비어 있으며, 문서 상단이 업태/종목·신고번호 줄로 시작.
+        • 임시용 견본(구서식): 제목 자리가 "견   본 (수입)" 이고 상·하단에 "이 문서는 임시용 견본입니다" → '수입신고서'
       - [★ 한글이 깨져 보이는 문서 — 오분류 금지 ★]
         폰트 문제로 한글 라벨/제목이 거의 렌더링되지 않고 숫자·영문만 보이는 문서는, 제목을 추측해 '수입신고필증'으로 단정하지 마세요.
         • 좌우 2개의 사업자등록번호 박스(공급자=세관 / 공급받는자) + 큰 금액(과세표준)과 그 약 1/10 금액(세액) + 수납계좌·customs.go.kr 안내 구조 → 세관 발행 **'수입세금계산서'**
@@ -271,6 +283,7 @@ class GeminiOCR:
             # (해외거래처를 수입자로, 성명을 상호로)을 원문 문자열로 교정.
             # 스캔본(텍스트 없음)은 기존과 동일하게 이미지만 전송.
             prompt = self.base_prompt
+            page_text = ''
             try:
                 from .form_parser import _first_page_text
                 page_text = (_first_page_text(fp) or '').strip()
@@ -305,6 +318,19 @@ class GeminiOCR:
             from .utils import normalize_doc_type
             if "doc_type" in result:
                 result["doc_type"] = normalize_doc_type(result["doc_type"])
+
+            # --- 신고서/신고필증 직독 확정 (AI 판정보다 우선) ---
+            # 이미지 판독은 자간이 넓은 "수 입 신 고 서" 를 빈번형인 "수입신고필증" 으로
+            # 정규화해 읽는 오분류가 반복된다. 제목·견본 문구는 텍스트 레이어에 그대로
+            # 들어 있으므로 확정 판별되면 AI 값을 덮어쓴다. (스캔본은 None → AI 값 유지)
+            from .form_parser import classify_declaration
+            confirmed = classify_declaration(page_text)
+            if confirmed:
+                if result.get("doc_type") != confirmed:
+                    print(f"[직독] 신고 서류 교정: {result.get('doc_type')} → {confirmed} "
+                          f"({os.path.basename(fp)})")
+                result["doc_type"] = confirmed
+                result["doc_type_src"] = "text_layer"
 
             # 신고필증 3종은 business_no 키를 보장 — 모델이 키를 생략해도
             # 'Unknown'으로 확정 저장해 캐시가 영구 유효하도록 (재분석 루프 방지)
@@ -455,6 +481,15 @@ class GeminiOCR:
             if result and 'doc_type' in result:
                 from .utils import normalize_doc_type
                 result['doc_type'] = normalize_doc_type(result['doc_type'])
+            # 신고서/신고필증 분류 로직이 바뀌었으면 텍스트 레이어로 1회 재검증한다
+            # (AI 재호출 없음). 사용자가 수동 교정한 값은 건드리지 않는다.
+            # levy_type 무효화 검사보다 먼저 수행해야, 실제로는 신고서인 항목이
+            # levy_type 없다는 이유로 통째 재OCR 되는 낭비를 막는다.
+            if (result and result.get('doc_type') in _DECL_TYPES
+                    and result.get('doc_type_src') != 'manual'
+                    and entry.get('cls_ver', 0) < DOC_CLASSIFIER_VER):
+                self._revalidate_declaration(fp, filename, result)
+
             # 수입신고필증에 levy_type 필드가 없는 구 캐시는 재분석을 위해 무효화
             if result and result.get('doc_type') == '수입신고필증':
                 if 'levy_type' not in result:
@@ -469,6 +504,36 @@ class GeminiOCR:
         except Exception as e:
             print(f"캐시 읽기 오류: {e}")
             return None
+
+    def _revalidate_declaration(self, fp, filename, result):
+        """구 버전 캐시의 신고서/신고필증 분류를 텍스트 레이어로 1회 재검증.
+
+        AI 재호출 없이 doc_type 만 교정하고 cls_ver 를 각인해 다음부터는 건너뛴다.
+        판정 불가(스캔본)면 기존 값을 그대로 두되 cls_ver 는 각인해 반복 검사를 막는다.
+        """
+        from .form_parser import classify_declaration_file
+        verdict = classify_declaration_file(fp)
+        if verdict:
+            if result.get('doc_type') != verdict:
+                print(f"[직독] 캐시 종류 교정: {result.get('doc_type')} → {verdict} ({filename})")
+            result['doc_type'] = verdict
+            result['doc_type_src'] = 'text_layer'
+            # 신고필증 3종은 캐시 유효 판정 조건상 아래 두 키가 있어야 한다
+            if verdict in ('수입신고필증', '수출신고필증', '반송신고필증'):
+                result.setdefault('levy_type', 'Unknown')
+                result.setdefault('business_no', 'Unknown')
+        with cache_lock:
+            try:
+                cache = self._load_cache()
+                entry = cache.get(filename)
+                if entry is None:
+                    return
+                if verdict:
+                    entry['result'] = copy.deepcopy(result)
+                entry['cls_ver'] = DOC_CLASSIFIER_VER
+                self._write_cache()
+            except Exception as e:
+                print(f"캐시 재검증 저장 오류: {e}")
 
     def _save_to_cache(self, fp, result):
         """결과를 캐시에 저장 (최적화: indent 제거, O(n) 정리)"""
@@ -492,6 +557,7 @@ class GeminiOCR:
                 }
                 if file_hash is not None:
                     entry['hash'] = file_hash
+                entry['cls_ver'] = DOC_CLASSIFIER_VER
                 cache[filename] = entry
 
                 if len(cache) > MAX_CACHE_SIZE:
@@ -529,7 +595,10 @@ class GeminiOCR:
                 if new_doc_type in ('수입신고필증', '수출신고필증', '반송신고필증'):
                     res.setdefault('levy_type', 'Unknown')
                     res.setdefault('business_no', 'Unknown')
+                # 수동 교정은 직독 재검증이 덮어쓰지 않도록 출처를 각인한다
+                res['doc_type_src'] = 'manual'
                 entry['result'] = res
+                entry['cls_ver'] = DOC_CLASSIFIER_VER
                 try:
                     entry['mtime'] = os.path.getmtime(new_path)
                     entry['size'] = os.path.getsize(new_path)

@@ -144,3 +144,62 @@ def parse_standard_form(fp):
         return _parse_notice(text) or _parse_import_tax_invoice(text)
     except Exception:
         return None
+
+
+# ── 신고서 / 신고필증 확정 판별 ──
+# 실측 근거 (E:\수입신고·E:\수출신고 아카이브 1,879건 개봉, 오판 0건):
+#   A. 신고필증  : 최상단 "* 본 신고필증은 전자문서(PDF파일)로 발급된 신고필증입니다"
+#                  + 제목 "수 입 신 고 필 증" + "시점확인필" + 하단 "발 행 번 호"
+#   B. 신고서    : 제목 "수 입 신 고 서" (견본 표기 없음 — 신형 UNI-PASS 출력물)
+#   C. 임시용견본: 제목 칸이 "견   본 (수입)" 이고 상·하단에 "이 문서는 임시용 견본입니다"
+#                  (수리 전 단계이므로 신고서와 동일 취급)
+#   D. 스캔본    : 텍스트 레이어 없음 → None 반환, 기존 AI 판정으로 폴백
+# AI 이미지 판독은 자간이 넓은 "수 입 신 고 서" 를 빈번형인 "수입신고필증" 으로
+# 정규화해 읽는 오분류가 반복되므로, 텍스트 레이어가 있으면 이쪽을 신뢰한다.
+
+# 신고 서식이 아닌 문서(계산서 본문의 단어 언급 등)에 규칙이 오작동하지 않도록 하는 관문
+_DECL_GATE_KWS = ('화물관리번호', '송품장부호', '적재의무기한')
+_DECL_EXPORT_KWS = ('송품장부호', '수출대행자', '적재의무기한')
+_DECL_SAMPLE_KWS = ('이문서는임시용견본입니다', '견본(수입)', '견본(수출)')
+
+
+def classify_declaration(text):
+    """수입/수출/반송 신고서·신고필증을 텍스트 레이어로 확정 판별.
+
+    판정 불가(스캔본, 신고 서식 아님)면 None 을 반환해 AI 판정을 그대로 쓴다 (fail-open).
+    """
+    if not text:
+        return None
+    t = ''.join(text.split())  # 모든 공백 제거 ("수 입 신 고 서" → "수입신고서")
+    if not any(k in t for k in _DECL_GATE_KWS):
+        return None
+
+    is_export = any(k in t for k in _DECL_EXPORT_KWS)
+
+    # 1순위: 임시용 견본 — 제목이 "신고필증" 으로 적혀 있어도 견본이 우선한다
+    if any(k in t for k in _DECL_SAMPLE_KWS):
+        if '견본(수입)' in t:
+            return '수입신고서'
+        if '견본(수출)' in t or is_export:
+            return '수출신고서'
+        return '수입신고서'
+
+    # 2순위: 신고필증 (수리 후 발급본)
+    for name in ('반송신고필증', '수입신고필증', '수출신고필증'):
+        if name in t:
+            return name
+
+    # 3순위: 신고서 (수리 전)
+    for name in ('수입신고서', '수출신고서'):
+        if name in t:
+            return name
+
+    return None
+
+
+def classify_declaration_file(fp):
+    """파일 경로로 신고서/신고필증 확정 판별. 실패 시 None."""
+    try:
+        return classify_declaration(_first_page_text(fp))
+    except Exception:
+        return None

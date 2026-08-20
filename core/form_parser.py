@@ -9,6 +9,7 @@ AI 이미지 인식은 상호/성명 라벨-값 짝짓기를 틀릴 수 있으�
 실패하면 None을 반환해 기존 AI OCR 경로로 폴백한다 (fail-open).
 """
 
+import os
 import re
 
 from .utils import pdf_lock, cleanup_company_name
@@ -229,6 +230,40 @@ def correct_misread_declaration_file(ai_doc_type, fp):
         return correct_misread_declaration(ai_doc_type, _first_page_text(fp))
     except Exception:
         return None
+
+
+# ── 신고번호 직독 추출 ──
+# 신고번호 서식: 신고인부호(5) - 연도(2) - 일련번호(6) + 검증문자(1)
+# 예: 13133-26-002604X, 13133-26-001733M
+RE_DECLARATION_NO = re.compile(r'\b(\d{5}-\d{2}-\d{6}[0-9A-Z])\b')
+
+_DECL_NO_MEMO = {}  # {(경로, mtime): 신고번호} — 스캔 주기마다 PDF 재개봉 방지
+
+
+def extract_declaration_no(fp):
+    """신고필증/신고서 1페이지 텍스트 레이어에서 신고번호 추출.
+
+    통관수수료계산서 등 비용 계산서가 BL 대신 신고번호를 괄호 ID 로 달고
+    오는 경우가 있어, 카드(그룹)의 보조 ID 로 등록해 편입 근거로 쓴다.
+    텍스트 레이어가 없거나(스캔본) 서식이 다르면 "" 반환 (fail-open).
+    """
+    try:
+        key = (fp, os.path.getmtime(fp))
+    except OSError:
+        return ""
+    if key in _DECL_NO_MEMO:
+        return _DECL_NO_MEMO[key]
+    val = ""
+    try:
+        text = _first_page_text(fp)
+        if text:
+            m = RE_DECLARATION_NO.search(text)
+            if m:
+                val = m.group(1).upper()
+    except Exception:
+        val = ""
+    _DECL_NO_MEMO[key] = val
+    return val
 
 
 def is_cargo_mgmt_no(value, text):

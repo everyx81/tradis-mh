@@ -415,6 +415,7 @@ class AutoRenamer:
         import json as _json
         from core.validator import parse_amount as _parse_amount, build_search_kws as _build_search_kws
         from .constants import ANCHOR_DOC_TYPES, REQUIREMENT_FEE_SPECIFIC, REQUIREMENT_FEE_GENERIC
+        from .form_parser import extract_declaration_no as _extract_decl_no
         _GENERIC_COMPANIES = {"Unknown", "알수없는상호", "알수없는", "미상", ""}
         _FIXED_SLOT = {"수입세금계산서", "납부고지서", "자금정산서", "정산서",
                         "수입신고필증", "수출신고필증", "반송신고필증"}
@@ -536,14 +537,26 @@ class AutoRenamer:
             else:
                 uncl.append(f)
 
+        def _norm_id(x):
+            """ID 비교용 정규화 — 영숫자만 남기고 대문자화 (하이픈/공백 표기차 흡수)."""
+            return _re.sub(r'[^0-9A-Z]', '', str(x or '').upper())
+
         def _find_group_key(i):
-            """기존 그룹 중 ID가 일치(유사/prefix)하는 그룹 키 반환. 없으면 None."""
+            """기존 그룹 중 ID가 일치(유사/prefix/보조ID)하는 그룹 키 반환. 없으면 None."""
             # 1차: 기존 유사도 매칭 (suffix 일치 필수)
             fk = next((k for k in groups if is_similar_id(k, i)), None)
             # 2차: prefix 포함 매칭 (정확 매칭 실패 시, 후보가 1개일 때만)
             if fk is None:
                 prefix_candidates = [k for k in groups if is_prefix_match_id(k, i)]
                 fk = prefix_candidates[0] if len(prefix_candidates) == 1 else None
+            # 3차: 신고필증 신고번호(보조 ID) 일치 — 통관수수료계산서 등이
+            #      BL 대신 신고번호를 괄호 ID 로 달고 온 경우 (후보가 1개일 때만)
+            if fk is None:
+                ni = _norm_id(i)
+                if ni:
+                    aux_candidates = [k for k, v in groups.items()
+                                      if ni in v.get('aux_ids', set())]
+                    fk = aux_candidates[0] if len(aux_candidates) == 1 else None
             return fk
 
         def _add_to_group(fk, f, c, d, s, trusted_company=True):
@@ -598,6 +611,12 @@ class AutoRenamer:
                 groups[i] = groups.pop(fk)
                 fk = i
             _add_to_group(fk, f, c, d, s)
+            # 신고필증의 신고번호를 그룹 보조 ID 로 등록 —
+            # 비용 계산서가 BL 대신 신고번호를 괄호 ID 로 달고 와도 편입되도록
+            if "신고필증" in (d or ""):
+                decl_no = _extract_decl_no(os.path.join(dr, f))
+                if decl_no:
+                    groups[fk].setdefault('aux_ids', set()).add(_norm_id(decl_no))
 
         # ── 2차: 비용 계산서류 — 앵커 그룹과 ID 일치 시에만 편입 ──
         # BL 일치가 회사명보다 우선: 회사명이 정산업체·영문이어도 BL 이 맞으면 편입

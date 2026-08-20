@@ -1020,8 +1020,8 @@ def _cleanup_empty_marked_folders(parent, folders):
 class GroupCard(GlassFrame):
     # 상태 변경 시그널 (필터 카운트 갱신용)
     status_changed = pyqtSignal()
-    # 사업자번호 추출 완료 (워커 스레드 → GUI 스레드 마샬링용)
-    _biz_no_ready = pyqtSignal(str)
+    # 사업자번호·신고번호 추출 완료 (워커 스레드 → GUI 스레드 마샬링용)
+    _biz_no_ready = pyqtSignal(str, str)
 
     def __init__(self, parent_widget, renamer, directory, text_id, data, unclassified, parent=None):
         super().__init__(parent)
@@ -1380,7 +1380,7 @@ class GroupCard(GlassFrame):
         )
         self.lbl_biz_no.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.lbl_biz_no.setCursor(Qt.CursorShape.IBeamCursor)
-        self.lbl_biz_no.setToolTip("사업자등록번호 — 드래그하여 선택 후 Ctrl+C로 복사")
+        self.lbl_biz_no.setToolTip("사업자등록번호 · 신고번호 — 드래그하여 선택 후 Ctrl+C로 복사")
         self.lbl_biz_no.hide()
         header.addSpacing(6)
         header.addWidget(self.lbl_biz_no)
@@ -1715,8 +1715,8 @@ class GroupCard(GlassFrame):
             return
         fpath = os.path.join(self.directory, target)
 
-        if fpath in GroupCard._BIZ_FAILED:
-            return
+        # 사업자번호 추출이 실패했던 파일도 신고번호(텍스트 직독)는 표시
+        skip_ai = fpath in GroupCard._BIZ_FAILED
         with GroupCard._BIZ_LOCK:
             if fpath in GroupCard._BIZ_INFLIGHT:
                 return
@@ -1724,6 +1724,13 @@ class GroupCard(GlassFrame):
 
         def run():
             b = ""
+            decl = ""
+            try:
+                # 신고번호: 신고필증 텍스트 레이어 직독 (AI 불필요)
+                from core.form_parser import extract_declaration_no
+                decl = extract_declaration_no(fpath)
+            except Exception:
+                pass
             try:
                 from auto_rename import gemini_ocr
                 from core.config import get_client
@@ -1733,7 +1740,7 @@ class GroupCard(GlassFrame):
                 except Exception:
                     pass
                 b = str((cached or {}).get('business_no', '') or '')
-                if (not b) and get_client() is not None:
+                if (not b) and (not skip_ai) and get_client() is not None:
                     with GroupCard._BIZ_SEM:
                         # 구 캐시(필드 없음)면 force 재분석으로 백필, 캐시 없으면 일반 분석
                         res = gemini_ocr.analyze_pdf(fpath, force=bool(cached)) or {}
@@ -1750,17 +1757,25 @@ class GroupCard(GlassFrame):
             if b == 'Unknown':
                 b = ""
             try:
-                self._biz_no_ready.emit(b)
+                self._biz_no_ready.emit(b, decl)
             except RuntimeError:
                 pass
 
         threading.Thread(target=run, daemon=True).start()
 
-    def _set_biz_no(self, biz: str):
-        """사업자등록번호 라벨 갱신 (없으면 숨김 유지). 하이픈 없이 숫자만 표시."""
+    def _set_biz_no(self, biz: str, decl_no: str = ""):
+        """사업자등록번호·신고번호 라벨 갱신 (둘 다 없으면 숨김 유지).
+        사업자번호는 하이픈 없이 숫자만, 신고번호는 표준 표기(하이픈 포함)."""
         try:
-            if biz and hasattr(self, 'lbl_biz_no'):
-                self.lbl_biz_no.setText(biz.replace('-', '').replace(' ', ''))
+            if not hasattr(self, 'lbl_biz_no'):
+                return
+            parts = []
+            if biz:
+                parts.append(biz.replace('-', '').replace(' ', ''))
+            if decl_no:
+                parts.append(decl_no)
+            if parts:
+                self.lbl_biz_no.setText(" · ".join(parts))
                 self.lbl_biz_no.show()
         except RuntimeError:
             pass

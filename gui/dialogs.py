@@ -1765,7 +1765,8 @@ class GroupCard(GlassFrame):
 
     def _set_biz_no(self, biz: str, decl_no: str = ""):
         """사업자등록번호·신고번호 라벨 갱신 (둘 다 없으면 숨김 유지).
-        사업자번호는 하이픈 없이 숫자만, 신고번호는 표준 표기(하이픈 포함)."""
+        둘 다 하이픈 없이 표시 — 하이픈이 있으면 더블클릭 선택이 단어 단위로
+        쪼개져 번호 전체를 한 번에 복사할 수 없다."""
         try:
             if not hasattr(self, 'lbl_biz_no'):
                 return
@@ -1773,7 +1774,7 @@ class GroupCard(GlassFrame):
             if biz:
                 parts.append(biz.replace('-', '').replace(' ', ''))
             if decl_no:
-                parts.append(decl_no)
+                parts.append(decl_no.replace('-', '').replace(' ', ''))
             if parts:
                 self.lbl_biz_no.setText(" · ".join(parts))
                 self.lbl_biz_no.show()

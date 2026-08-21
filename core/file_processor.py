@@ -1553,6 +1553,15 @@ class AutoRenamer:
                     m.append({'label': "[요건] 요건서류 (1건 이상 필요)",
                               'filename': '', 'requirement_doc': True})
 
+            # 수수료 항목이 없어도 도착해 있는 요건 서류는 병합에 포함
+            # (무료 서비스로 처리한 전파인증 적합성평가확인서 등).
+            # 슬롯/누락 표시는 만들지 않음 — 있을 때만 태우는 동반 서류.
+            for f in list(_req_candidates):
+                _req_candidates.remove(f)
+                af.append(f)
+                m.append({'label': f"[요건] {_req_display_name(f)}",
+                          'filename': f, 'requirement_doc': True})
+
         return m
 
     def execute_merge_task(self, dr, of, fo, export_docs_root=None, marked_files=None,

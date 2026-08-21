@@ -2635,8 +2635,11 @@ class GroupCard(GlassFrame):
             if "포함" in label and not filename:
                 sub = "(수수료계산서 포함)"
             # 기본 not_applicable (징수형태 / 월납업체 기반)
+            # 월납 면제는 수수료 '계산서'(비용 항목)만 — 요건 증빙서류([요건] 등
+            # 대괄호 라벨)는 월납과 무관하게 필요하므로 NA 대상에서 제외.
+            # (_compute_na_set 의 ':' 라벨 한정 판정과 기준 일치)
             default_na = name in na_set
-            if is_monthly and _is_fee_item(name):
+            if is_monthly and ']' not in label and _is_fee_item(name):
                 default_na = True
             # 사용자 override 적용
             ov = overrides.get(name, "")

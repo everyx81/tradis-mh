@@ -232,6 +232,26 @@ def correct_misread_declaration_file(ai_doc_type, fp):
         return None
 
 
+# ── 서식 제목 직독 서류 종류 확정 ──
+# 1페이지에 서식 제목이 그대로 인쇄되는 문서는 그 제목을 서류 종류로 쓴다.
+# AI 가 실행마다 비슷한 다른 종류(적합성평가확인서 등)로 스냅하는 오분류 차단.
+TITLE_DOC_TYPES = [
+    "전기용품 및 생활용품 세관장확인물품 확인 신청서",
+]
+
+
+def correct_doc_type_by_title(ai_doc_type, text):
+    """1페이지 텍스트에 등록된 서식 제목이 있으면 그 제목을 서류 종류로 반환.
+    제목이 없거나 AI 분류가 이미 일치하면 None (AI 판정 유지)."""
+    if not text:
+        return None
+    t = ''.join(text.split())
+    for title in TITLE_DOC_TYPES:
+        if title.replace(' ', '') in t:
+            return title if title != (ai_doc_type or '') else None
+    return None
+
+
 # ── 신고번호 직독 추출 ──
 # 신고번호 서식: 신고인부호(5) - 연도(2) - 일련번호(6) + 검증문자(1)
 # 예: 13133-26-002604X, 13133-26-001733M

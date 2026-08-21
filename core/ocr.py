@@ -335,12 +335,21 @@ class GeminiOCR:
             # --- 보완: 신고필증 오분류가 명백할 때만 교정 ---
             # 판별 주체는 AI 다. 임시용 견본 표기가 있거나, 신고필증 전용 마커가
             # 하나도 없는데 제목이 신고서인 경우에만 뒤집는다. 그 외에는 AI 값을 그대로 둔다.
-            from .form_parser import correct_misread_declaration, is_cargo_mgmt_no
+            from .form_parser import (correct_misread_declaration, is_cargo_mgmt_no,
+                                      correct_doc_type_by_title)
             fixed = correct_misread_declaration(result.get("doc_type"), page_text)
             if fixed:
                 print(f"[보완] 신고필증 오분류 교정: {result.get('doc_type')} → {fixed} "
                       f"({os.path.basename(fp)})")
                 result["doc_type"] = fixed
+                result["doc_type_src"] = "text_layer_fix"
+
+            # --- 보완: 서식 제목이 문서에 인쇄된 서류는 제목을 그대로 서류 종류로 ---
+            title_fix = correct_doc_type_by_title(result.get("doc_type"), page_text)
+            if title_fix:
+                print(f"[보완] 서식 제목 직독 교정: {result.get('doc_type')} → {title_fix} "
+                      f"({os.path.basename(fp)})")
+                result["doc_type"] = title_fix
                 result["doc_type_src"] = "text_layer_fix"
 
             # --- 보완: B/L 자리에 ⑤화물관리번호를 집어온 경우 1회 재질의 ---
@@ -361,6 +370,9 @@ class GeminiOCR:
                             result["doc_type"] = normalize_doc_type(result["doc_type"])
                         if fixed:
                             result["doc_type"] = fixed
+                            result["doc_type_src"] = "text_layer_fix"
+                        if title_fix:
+                            result["doc_type"] = title_fix
                             result["doc_type_src"] = "text_layer_fix"
                         result["identifier_src"] = "ai_retry"
                     else:

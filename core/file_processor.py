@@ -892,6 +892,21 @@ class AutoRenamer:
                     self.log(f" -> [수동 확정] {fk_acc} / {doc_key}: {f}")
                     continue
 
+            # [tier0] 본문 BL 매칭 — OCR이 문서 내용에서 읽은 BL이 기존 카드와
+            # 일치하면 회사명(영문 표기 등)·금액과 무관하게 그 카드로 편입.
+            # 본문 BL은 회사명·금액보다 강한 증거 (v1.1.67 본문 BL 검증의 역방향).
+            cached_u = _cache_lookup(f)
+            if cached_u and cached_u.get('id_type') == 'BL':
+                _doc_id = str(cached_u.get('identifier', '') or '')
+                if _doc_id and _doc_id != 'Unknown':
+                    fk_bl = _doc_id if _doc_id in groups else _find_group_key(_doc_id)
+                    if fk_bl:
+                        _doc_guess = f[len("미분류_"):].split("_")[0] or "문서"
+                        doc_key = _assign_with_counter(fk_bl, _doc_guess, f)
+                        _uncl_moved.append(f)
+                        self.log(f" -> [자동 매칭/본문BL] 미분류 → {fk_bl} / {doc_key}: {f}")
+                        continue
+
             m = _re.match(r'^미분류_([^_]+)_(.+?)_(\d+|확인필요|[^_]+)\.pdf$', f, _re.IGNORECASE)
             if not m:
                 continue

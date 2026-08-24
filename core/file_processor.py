@@ -1302,6 +1302,7 @@ class AutoRenamer:
 
             picked = None
             bundle_rest = []
+            included_rest = []  # 대표 파일 총액에 이미 포함된 구성요소 (검증 합산 제외)
             item_amt = _parse_item_amount(item_amount)
 
             if candidates:
@@ -1317,6 +1318,27 @@ class AutoRenamer:
                     bundle = _find_supplier_bundle(candidates, item_amt)
                     if bundle:
                         picked, bundle_rest = bundle[0], bundle[1:]
+                # [전체금액 입금표 매칭] 우성마리타임 등 일부 선사는 선임 전체
+                # 금액을 입금표로 발행하고 그중 일부 금액만 세금계산서로 발행함.
+                # 키워드 후보(계산서)는 일부 금액이라 불일치 → 항목 금액과
+                # total_amount 가 정확히 일치하는 미배정 파일이 유일하면 그 파일을
+                # 대표로 배정. 대표 파일 내역(billing_items)에 금액이 등장하는
+                # 키워드 후보는 총액에 이미 포함된 구성요소로 동반 편입한다.
+                if not picked and item_amt > 0:
+                    exact_others = [
+                        f for f in allp
+                        if f not in af and f not in candidates
+                        and not is_merge_excluded_file(f)
+                        and not any(x in f for x in ("신고필증", "정산서", "납부고지서", "수입세금계산서"))
+                        and _get_file_amount(f) == item_amt
+                    ]
+                    if len(exact_others) == 1:
+                        picked = exact_others[0]
+                        master_amts = {_parse_item_amount(bi.get('amount', 0))
+                                       for bi in file_billing_map.get(picked, [])}
+                        included_rest = [c for c in candidates
+                                         if _get_file_amount(c) > 0
+                                         and _get_file_amount(c) in master_amts]
                 # 금액 매칭 실패 또는 금액 없음 → 첫 번째 후보
                 if not picked:
                     picked = candidates[0]
@@ -1329,6 +1351,12 @@ class AutoRenamer:
                 # — 금액 검증기가 (추가) 파일 금액을 부모 항목에 합산 비교함
                 for extra in bundle_rest:
                     m.append({'label': f'비용: {item_name} (추가)', 'filename': extra, 'item_amount': 0})
+                    af.append(extra)
+                # 입금표 구성요소는 대표 파일 총액에 이미 포함된 금액
+                # — included_in_parent 플래그로 검증기 합산에서 제외
+                for extra in included_rest:
+                    m.append({'label': f'비용: {item_name} (추가)', 'filename': extra,
+                              'item_amount': 0, 'included_in_parent': True})
                     af.append(extra)
             else:
                 m.append({'label': f'비용: {item_name}', 'filename': '', 'item_amount': item_amount})

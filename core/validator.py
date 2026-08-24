@@ -41,7 +41,8 @@ def validate_mapping_amounts(mapping, directory):
     for item in mapping:
         label = item.get('label', '')
         filename = item.get('filename', '')
-        if '(추가)' in label and filename and '비용: ' in label:
+        # included_in_parent: 부모 파일(입금표 등) 총액에 이미 포함된 구성요소 → 합산 제외
+        if '(추가)' in label and filename and '비용: ' in label and not item.get('included_in_parent'):
             expense_name = label.split('비용: ')[-1].split(' (')[0]
             file_path = os.path.join(directory, filename)
             cached_add = gemini_ocr._get_cached_result(file_path)
@@ -66,12 +67,14 @@ def validate_mapping_amounts(mapping, directory):
 
         if is_fee_included:
             # [FIX] "(추가)" 항목에 자체 파일이 있으면 sum_files에 포함
+            # (단, included_in_parent 구성요소는 부모 총액에 이미 포함 → 합산 제외)
             if filename and filename not in _summed_files:
-                file_path = os.path.join(directory, filename)
-                cached_add = gemini_ocr._get_cached_result(file_path)
-                if cached_add:
-                    file_total = parse_amount(cached_add.get('total_amount', 0))
-                    result['sum_files'] += file_total
+                if not item.get('included_in_parent'):
+                    file_path = os.path.join(directory, filename)
+                    cached_add = gemini_ocr._get_cached_result(file_path)
+                    if cached_add:
+                        file_total = parse_amount(cached_add.get('total_amount', 0))
+                        result['sum_files'] += file_total
                 _summed_files.add(filename)
             continue
 

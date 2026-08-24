@@ -832,6 +832,22 @@ class AutoRenamer:
                     file_amount = _parse_amount(cached.get('total_amount', 0))
                 chosen, chosen_tier = _tier_match_group(d, file_company, file_amount,
                                                         _file_business_no(f))
+                # [본문 BL 검증] 문서 내용에서 읽은 ID가 BL 종류인데 대상 카드의
+                # BL과 다르면 남의 건 서류 → 흡수 금지. (자매 컨테이너는 선임
+                # 금액이 동일해 회사+금액만으로는 구분 불가 — 본문 인쇄 BL이 증거)
+                # 접수번호류 파일은 OCR identifier가 Unknown이라 이 검증을 통과해
+                # 기존 구제 동작이 유지된다.
+                if chosen and cached:
+                    _doc_id = str(cached.get('identifier', '') or '')
+                    if (cached.get('id_type') == 'BL'
+                            and _doc_id and _doc_id != 'Unknown'):
+                        _doc_id_n = normalize_id(_doc_id)
+                        _chosen_n = normalize_id(chosen)
+                        if (_doc_id_n != _chosen_n
+                                and not is_prefix_match_id(_doc_id_n, _chosen_n)
+                                and not is_similar_id(_doc_id, chosen)):
+                            self.log(f" -> [재배정 보류] 본문 BL '{_doc_id}' ≠ 카드 {chosen}: {f}")
+                            chosen, chosen_tier = None, None
                 if chosen_tier == "tier3":
                     # 금액-only 매칭은 자동 편입하지 않고 사용자 확인 제안으로
                     if not _is_rejected(f, chosen):

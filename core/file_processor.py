@@ -1332,6 +1332,18 @@ class AutoRenamer:
                         and not any(x in f for x in ("신고필증", "정산서", "납부고지서", "수입세금계산서"))
                         and _get_file_amount(f) == item_amt
                     ]
+                    # 자매 건 파일이 ID 재배정 등으로 카드에 섞여 같은 금액이
+                    # 2건 이상이면 파일명 BL이 현재 건과 정확히 일치하는 쪽 우선
+                    # (자매 컨테이너는 선임이 동일한 경우가 흔함)
+                    if len(exact_others) > 1 and ti:
+                        _ti_n = normalize_id(ti)
+                        _own = []
+                        for _f in exact_others:
+                            _fm = RE_ID_PAREN.search(_f)
+                            if _fm and normalize_id(_fm.group(1).strip()) == _ti_n:
+                                _own.append(_f)
+                        if _own:
+                            exact_others = _own
                     if len(exact_others) == 1:
                         picked = exact_others[0]
                         master_amts = {_parse_item_amount(bi.get('amount', 0))

@@ -901,10 +901,40 @@ class AutoRenamer:
                 if _doc_id and _doc_id != 'Unknown':
                     fk_bl = _doc_id if _doc_id in groups else _find_group_key(_doc_id)
                     if fk_bl:
-                        _doc_guess = f[len("미분류_"):].split("_")[0] or "문서"
-                        doc_key = _assign_with_counter(fk_bl, _doc_guess, f)
+                        _doc_guess = (cached_u.get('doc_type') or '').strip()
+                        if not _doc_guess or _doc_guess == 'Unknown':
+                            _doc_guess = f[len("미분류_"):].split("_")[0] or "문서"
+                        # 카드 앵커 파일의 한글 상호를 빌려와 정식 이름으로 변경
+                        # (영문 상호 탓에 미분류_ 이름을 받은 파일 정상화)
+                        _new_f = f
+                        _card_comp = ""
+                        for _v in groups[fk_bl].get('docs', {}).values():
+                            _c1, _i1, _d1, _s1 = parse_renamed_filename(_v)
+                            if _c1 and _c1 != "Unknown" and _re.search(r'[가-힣]', _c1):
+                                _card_comp = _c1
+                                break
+                        if _card_comp:
+                            _nn = f"{_card_comp}({fk_bl}){_doc_guess}.pdf"
+                            _np = os.path.join(dr, _nn)
+                            if os.path.exists(_np):
+                                _np = get_unique_filename(_np)
+                                _nn = os.path.basename(_np)
+                            try:
+                                os.rename(os.path.join(dr, f), _np)
+                                gemini_ocr._update_cache_key(os.path.join(dr, f), _np)
+                                _new_f = _nn
+                                self.log(f" -> [성공] {_nn}")
+                                # 영문 표기 ↔ 한글 상호 별칭 학습 (본문 BL 일치 = 강증거)
+                                _file_comp = cleanup_company_name(
+                                    cached_u.get('company_name', '') or '')
+                                if _file_comp and _file_comp != 'Unknown':
+                                    from core.match_memory import learn_alias
+                                    learn_alias(_file_comp, _card_comp)
+                            except Exception as _e:
+                                self.log(f" -> [실패] 이름 변경 오류: {_e}")
+                        doc_key = _assign_with_counter(fk_bl, _doc_guess, _new_f)
                         _uncl_moved.append(f)
-                        self.log(f" -> [자동 매칭/본문BL] 미분류 → {fk_bl} / {doc_key}: {f}")
+                        self.log(f" -> [자동 매칭/본문BL] 미분류 → {fk_bl} / {doc_key}: {_new_f}")
                         continue
 
             m = _re.match(r'^미분류_([^_]+)_(.+?)_(\d+|확인필요|[^_]+)\.pdf$', f, _re.IGNORECASE)

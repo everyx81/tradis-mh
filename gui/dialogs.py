@@ -3607,15 +3607,19 @@ class GroupCard(GlassFrame):
             if not cached:
                 return ("Unknown", True)
             lt = str(cached.get("levy_type", "Unknown")).strip()
-            # 관세 + 부가세 → has_tax
             def _to_int(x):
                 try:
                     return int(str(x).replace(',', '').replace('원', '').strip())
                 except (ValueError, AttributeError):
                     return 0
-            duty = _to_int(cached.get("customs_duty", 0))
-            vat = _to_int(cached.get("vat", 0))
-            has_tax = (duty + vat) > 0
+            # 텍스트 직독 총세액합계가 있으면 그 값이 확정 (감면액 오독 무관),
+            # 없으면(구 캐시) 관세 + 부가세 합으로 판단
+            if cached.get("total_tax") is not None:
+                has_tax = _to_int(cached.get("total_tax")) > 0
+            else:
+                duty = _to_int(cached.get("customs_duty", 0))
+                vat = _to_int(cached.get("vat", 0))
+                has_tax = (duty + vat) > 0
             return (lt, has_tax)
         except Exception:
             return ("Unknown", True)

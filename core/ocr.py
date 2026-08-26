@@ -231,8 +231,12 @@ class GeminiOCR:
 1. levy_type (징수형태):
    - 문서에 기재된 "징수형태" 코드 2자리 숫자를 추출 (예: "11", "14", "43")
    - 징수형태가 명시되어 있지 않으면 "Unknown"
-2. customs_duty (관세): 관세 금액 (숫자만, 없으면 0)
-3. vat (부가세): 부가가치세 금액 (숫자만, 없으면 0)
+2. customs_duty (관세): 실제 납부하는 관세 세액 (숫자만, 없으면 0)
+3. vat (부가세): 실제 납부하는 부가가치세 세액 (숫자만, 없으면 0)
+   - [매우 중요] customs_duty/vat 는 반드시 '세액' 칸의 값을 읽으세요.
+     '감면액' 칸의 금액을 세액으로 반환하면 절대 안 됩니다.
+     감면율이 100 이면 세액은 0 입니다 (예: 세율 10.00, 감면율 100.00, 감면액 19,392,130 → vat: 0)
+   - '63 총세액합계'가 0 이면 customs_duty 와 vat 모두 0 입니다
 
 [2-2단계: 사업자등록번호 (수입신고필증/수출신고필증/반송신고필증 전용)]
 - business_no: 사업자등록번호를 "123-45-67890" 형식 그대로 추출
@@ -379,6 +383,23 @@ class GeminiOCR:
                         print(f"[보완] 재질의로도 확정 못함 - 기존 값 유지: {new_id}")
                 except Exception as e:
                     print(f"[보완] 재질의 오류: {e}")
+
+            # --- 보완: 수입신고필증 징수형태·세액 텍스트 직독 ---
+            # AI 가 감면 필증의 '감면액'을 세액으로 오독하는 사례 차단.
+            # 텍스트 레이어에서 확정된 필드만 덮어쓰고, 못 읽은 필드는 AI 값 유지.
+            if result.get('doc_type') == '수입신고필증' and page_text:
+                from .form_parser import extract_import_cert_tax
+                tax = extract_import_cert_tax(page_text)
+                if tax:
+                    if tax.get('levy_type'):
+                        result['levy_type'] = tax['levy_type']
+                    for k in ('total_tax', 'customs_duty', 'vat'):
+                        if tax.get(k) is not None:
+                            result[k] = tax[k]
+                    result['tax_src'] = 'text_layer'
+                    print(f"[직독] 필증 세액 확정: 징수형태 {result.get('levy_type')}, "
+                          f"관세 {result.get('customs_duty')}, 부가세 {result.get('vat')}, "
+                          f"총세액 {result.get('total_tax')} ({os.path.basename(fp)})")
 
             # 신고필증 3종은 business_no 키를 보장 — 모델이 키를 생략해도
             # 'Unknown'으로 확정 저장해 캐시가 영구 유효하도록 (재분석 루프 방지)

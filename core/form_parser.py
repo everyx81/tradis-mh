@@ -252,6 +252,65 @@ def correct_doc_type_by_title(ai_doc_type, text):
     return None
 
 
+# ── 수입신고필증 징수형태·세액 직독 ──
+# AI 가 감면 필증에서 '세액' 칸(감면 후 납부세액) 대신 '감면액' 칸을 부가세로
+# 읽는 오독이 있어 (감면율 100% → 실제 세액 0 인데 감면액 19,392,130 을 vat 로 반환),
+# 텍스트 레이어가 있는 전자발급 필증은 세액 필드를 직독으로 확정한다.
+# 찾지 못한 필드는 None 으로 두어 AI 값을 유지한다 (fail-open).
+
+# '63 총세액합계' 라벨 뒤 첫 숫자 (값은 보통 다음 줄 첫 토큰)
+RE_TOTAL_TAX = re.compile(r'총\s*세\s*액\s*합\s*계[\s\S]{0,12}?([\d,]+)')
+
+
+def _leading_amount(line):
+    """줄 맨 앞의 금액 토큰만 추출 (예: '0 67 담당자' → 0). 없으면 None."""
+    m = re.match(r'([\d,]+)', line.strip())
+    return int(m.group(1).replace(',', '')) if m else None
+
+
+def extract_import_cert_tax(text):
+    """수입신고필증 텍스트 레이어에서 징수형태·세액을 직독.
+
+    반환: {'levy_type', 'total_tax', 'customs_duty', 'vat'} (미확인 필드는 None).
+    수입신고필증 텍스트가 아니거나 아무 필드도 못 읽으면 None.
+    """
+    if not text:
+        return None
+    t_flat = ''.join(text.split())
+    if '수입신고필증' not in t_flat or '징수형태' not in t_flat:
+        return None
+
+    lines = [ln.strip() for ln in text.split('\n')]
+    info = {'levy_type': None, 'total_tax': None, 'customs_duty': None, 'vat': None}
+
+    # 징수형태: 라벨 줄 이후 8줄 안의 단독 2자리 숫자
+    # (사이에 B/L·화물관리번호·날짜 값이 끼지만 어느 것도 단독 2자리가 아님)
+    for i, ln in enumerate(lines):
+        if ''.join(ln.split()) in ('징수형태', '9징수형태'):
+            for nxt in lines[i + 1:i + 9]:
+                if re.fullmatch(r'\d{2}', nxt):
+                    info['levy_type'] = nxt
+                    break
+            break
+
+    # 62 세액 블록: '관   세' / '부가가치세' 단독 라벨 줄 다음 줄 첫 숫자
+    # ('관세법…', '부가가치세과표' 등 다른 등장은 단독 라벨이 아니라 걸리지 않음)
+    for i, ln in enumerate(lines[:-1]):
+        key = ''.join(ln.split())
+        if key == '관세' and info['customs_duty'] is None:
+            info['customs_duty'] = _leading_amount(lines[i + 1])
+        elif key == '부가가치세' and info['vat'] is None:
+            info['vat'] = _leading_amount(lines[i + 1])
+
+    m = RE_TOTAL_TAX.search(text)
+    if m:
+        info['total_tax'] = int(m.group(1).replace(',', ''))
+
+    if all(v is None for v in info.values()):
+        return None
+    return info
+
+
 # ── 신고번호 직독 추출 ──
 # 신고번호 서식: 신고인부호(5) - 연도(2) - 일련번호(6) + 검증문자(1)
 # 예: 13133-26-002604X, 13133-26-001733M

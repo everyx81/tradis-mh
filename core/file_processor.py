@@ -268,6 +268,16 @@ class AutoRenamer:
                         cn = new_cn
                     self.log(f" -> [OCR 재시도 성공] BL 확보: {new_iden}")
 
+            # 수출신고필증 송품장부호 부재 대응: 송품장부호가 인쇄되지 않은
+            # 수출필증은 identifier 가 영구 Unknown → 미분류로 굳어지므로,
+            # 텍스트 레이어의 수출신고번호(직독)를 identifier 로 대체
+            if dt == "수출신고필증" and iden == "Unknown":
+                from core.form_parser import extract_declaration_no
+                _decl_no = extract_declaration_no(fp)
+                if _decl_no:
+                    iden = _decl_no
+                    self.log(f" -> [신고번호 대체] 송품장부호 없음 → 수출신고번호 사용: {_decl_no}")
+
             # 수입자명이 전체 영문인지 판단 (한글이 포함되지 않음)
             # cn이 "Unknown"이면 무시하고 판별
             import re
@@ -935,6 +945,38 @@ class AutoRenamer:
                         doc_key = _assign_with_counter(fk_bl, _doc_guess, _new_f)
                         _uncl_moved.append(f)
                         self.log(f" -> [자동 매칭/본문BL] 미분류 → {fk_bl} / {doc_key}: {_new_f}")
+                        continue
+
+            # 수출신고필증 신고번호 대체 — 송품장부호가 없어 미분류로 남은
+            # 수출필증은 텍스트 레이어의 수출신고번호를 ID 삼아 정식 이름을
+            # 부여하고 앵커로 편입/그룹 생성 (process_pdf 의 대체 로직과 동일 근거)
+            if f.startswith("미분류_수출신고필증_"):
+                _decl_no = _extract_decl_no(os.path.join(dr, f))
+                if _decl_no:
+                    _comp = f[len("미분류_수출신고필증_"):-4].split("_")[0] or "알수없는상호"
+                    _nn = f"{_comp}({_decl_no})수출신고필증.pdf"
+                    _np = os.path.join(dr, _nn)
+                    if os.path.exists(_np):
+                        _np = get_unique_filename(_np)
+                        _nn = os.path.basename(_np)
+                    try:
+                        os.rename(os.path.join(dr, f), _np)
+                        gemini_ocr._update_cache_key(os.path.join(dr, f), _np)
+                    except Exception as _e:
+                        self.log(f" -> [실패] 신고번호 대체 이름 변경 오류: {_e}")
+                        _nn = None
+                    if _nn:
+                        fk_decl = _decl_no if _decl_no in groups else _find_group_key(_decl_no)
+                        if fk_decl is None:
+                            fk_decl = _decl_no
+                        _add_to_group(fk_decl, _nn, _comp, "수출신고필증", "")
+                        groups[fk_decl].setdefault('aux_ids', set()).add(_norm_id(_decl_no))
+                        # 이 루프는 company 표시 문자열 계산(875행 부근) 이후라
+                        # 신규 그룹은 UI 스키마 보완 필요
+                        if 'company' not in groups[fk_decl]:
+                            groups[fk_decl]['company'] = cleanup_company_name(_comp) or _comp
+                        _uncl_moved.append(f)
+                        self.log(f" -> [자동 매칭/신고번호] 미분류 → {fk_decl} / 수출신고필증: {_nn}")
                         continue
 
             m = _re.match(r'^미분류_([^_]+)_(.+?)_(\d+|확인필요|[^_]+)\.pdf$', f, _re.IGNORECASE)

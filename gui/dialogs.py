@@ -2400,6 +2400,12 @@ class GroupCard(GlassFrame):
                         if not item_name or any(k in item_name for k in ["관세", "부가세"]):
                             continue
 
+                        # 금액 0원 항목은 발생하지 않은 비용 — 체크 대상 아님
+                        # (OCR 프롬프트는 0원 제외를 지시하지만 AI 가 간헐적으로
+                        #  0원 항목을 반환하는 케이스 방어)
+                        if not isinstance(item_data, str) and parse_amount(item_data.get("amount", 0)) <= 0:
+                            continue
+
                         # 통관수수료 항목 체크
                         item_clean = item_name.replace(" ", "")
                         is_fee = (item_clean in FEE_INVOICE_ITEMS or

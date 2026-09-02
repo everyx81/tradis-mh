@@ -1263,6 +1263,29 @@ class AutoRenamer:
                         return _parse_item_amount(bi.get('amount', 0))
             return _get_file_amount(filename)
 
+        def _component_files(parent, files):
+            """대표 파일 총액에 이미 포함된 구성요소 파일 목록.
+
+            예: 창고료 세금계산서 비고 <보험료: 2500> 으로 총액 29,901 에 보험료가
+            합산 기재되고, 보세화물 화재보험료 영수증 2,500 이 별도 파일로 존재하면
+            영수증 총액이 세금계산서 청구항목에 이미 들어 있으므로 합산에서 제외.
+            조건: 0 < 자식 총액 < 대표 총액, 자식 총액 ∈ 대표 청구항목 금액
+            (총액이 같은 파일은 중복 스캔본일 수 있으므로 제외하지 않음 → 경고 유지)
+            """
+            parent_total = _get_file_amount(parent)
+            parent_amts = {_parse_item_amount(bi.get('amount', 0))
+                           for bi in file_billing_map.get(parent, [])}
+            if parent_total <= 0 or not parent_amts:
+                return []
+            result = []
+            for f in files:
+                if f == parent:
+                    continue
+                f_total = _get_file_amount(f)
+                if 0 < f_total < parent_total and f_total in parent_amts:
+                    result.append(f)
+            return result
+
         def _supplier_key(fn):
             """공급자 식별 키 — 사업자번호 우선, 없으면 상호"""
             cached = _ocr_cache.get(fn)
@@ -1415,6 +1438,14 @@ class AutoRenamer:
                         if _get_comparable_amount(c, search_kws) == item_amt:
                             picked = c
                             break
+                    # 청구항목 금액 불일치 → 파일 총액 정확 일치 후보
+                    # (세금계산서 비고에 보험료 등이 합산 기재되어 총액만 정산서와
+                    #  맞는 경우 — 청구항목 '창고료' 27,401 ≠ 29,901, 총액 29,901 = 29,901)
+                    if not picked:
+                        for c in candidates:
+                            if _get_file_amount(c) == item_amt:
+                                picked = c
+                                break
                 # 개별 금액 불일치 → 같은 공급자 분할 발행 묶음의 합계 비교
                 # (예: 포워더가 해상운임/부대비용을 두 장으로 발행, 정산서엔 합계 한 줄)
                 if not picked:
@@ -1457,6 +1488,13 @@ class AutoRenamer:
                 # 금액 매칭 실패 또는 금액 없음 → 첫 번째 후보
                 if not picked:
                     picked = candidates[0]
+
+                # 대표 파일 총액이 항목 금액과 정확히 일치하면 나머지 키워드 후보 중
+                # 대표 총액에 이미 포함된 구성요소(영수증 등)는 합산 제외로 편입
+                # — 그대로 두면 2-2단계에서 "(추가)" 로 흡수되어 이중 집계됨
+                if (picked and not bundle_rest and not included_rest
+                        and item_amt > 0 and _get_file_amount(picked) == item_amt):
+                    included_rest = _component_files(picked, candidates)
 
             if picked:
                 m.append({'label': f'비용: {item_name}', 'filename': picked, 'item_amount': item_amount})
@@ -1549,7 +1587,26 @@ class AutoRenamer:
 
                         mi, item = picked
                         short_name = item['label'].split('비용: ')[-1].split(' (')[0]
-                        m.insert(mi + 1, {'label': f'비용: {short_name} (추가)', 'filename': pdf, 'item_amount': 0})
+                        extra_entry = {'label': f'비용: {short_name} (추가)', 'filename': pdf, 'item_amount': 0}
+                        # 부모 파일 총액이 그 파일이 담당하는 정산서 항목 금액 합계와
+                        # 정확히 일치하고 (단독 항목, 또는 분리형 "(…계산서 포함)" 항목
+                        # 합산), 이 파일 총액이 부모 청구항목에 이미 포함되어 있으면
+                        # 검증 합산 제외 — 대표가 정해진 뒤 남은 영수증이 흡수되는 경로
+                        _parent_file = item['filename']
+                        _covered = 0
+                        for _x in m:
+                            if '비용: ' not in _x.get('label', ''):
+                                continue
+                            if _x.get('filename') == _parent_file and '(추가)' not in _x['label']:
+                                _covered += _parse_item_amount(_x.get('item_amount', 0))
+                            elif (not _x.get('filename')
+                                    and f'({short_name}계산서 포함)' in _x['label']):
+                                _covered += _parse_item_amount(_x.get('item_amount', 0))
+                        if (_covered > 0
+                                and _get_file_amount(_parent_file) == _covered
+                                and pdf in _component_files(_parent_file, [pdf])):
+                            extra_entry['included_in_parent'] = True
+                        m.insert(mi + 1, extra_entry)
                         af.append(pdf)
                         absorbed = True
                 if absorbed:

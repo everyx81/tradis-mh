@@ -2987,7 +2987,8 @@ class JarvisGUI(QMainWindow):
     def _start_everything(self):
         try:
             result = subprocess.run(["tasklist", "/FI", "IMAGENAME eq Everything.exe"], capture_output=True, text=True, timeout=5, creationflags=subprocess.CREATE_NO_WINDOW)
-            if "Everything.exe" in result.stdout: return
+            # 콘솔 없는 실행 환경에서 stdout 이 None 으로 올 수 있음 → 빈 문자열로 취급
+            if "Everything.exe" in (result.stdout or ""): return
             
             everything_paths = [
                 os.path.join(get_run_dir(), "Everything.exe"),

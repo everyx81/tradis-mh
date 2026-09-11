@@ -1540,7 +1540,6 @@ class GroupCard(GlassFrame):
         )
         self.lbl_biz_no.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.lbl_biz_no.setCursor(Qt.CursorShape.IBeamCursor)
-        self.lbl_biz_no.setToolTip("사업자등록번호 · 신고번호 — 드래그하여 선택 후 Ctrl+C로 복사")
         self.lbl_biz_no.hide()
         header.addSpacing(6)
         header.addWidget(self.lbl_biz_no)

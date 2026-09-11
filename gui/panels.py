@@ -855,7 +855,8 @@ class FileManagerWidget(QWidget):
 
         lbl_skip_desc = QLabel(
             "파일명에 이 키워드 중 하나라도 포함되면 AI 이름 변경을 건너뜁니다.\n"
-            "(시스템 내장: 10., 미분류_, 이미 변경된 파일은 항상 제외)"
+            "(시스템 내장: 10., 미분류_, 이미 변경된 파일, 직접 바꾼 이름은 항상 제외.\n"
+            " 인보이스·계약서 등 정산 무관 서류는 AI 판독 후 원본 이름을 유지합니다.)"
         )
         lbl_skip_desc.setStyleSheet(
             f"color: {CT['fg_3']}; font-size: 9pt; background: transparent; border: none;"

@@ -1571,10 +1571,12 @@ class MK3MemoOnlyWidget(QWidget):
         
         # 백그라운드 스레드에서 AI 호출
         from PyQt6.QtCore import QThread, pyqtSignal
-        
+        from .utils import keep_thread_alive
+
         class OrganizeWorker(QThread):
-            finished = pyqtSignal(str)
-            error = pyqtSignal(str)
+            # QThread.finished 를 가리지 않도록 별도 이름 (실행 중 소멸 → qFatal 방지)
+            result_ready = pyqtSignal(str)
+            failed = pyqtSignal(str)
             
             def __init__(self, text):
                 super().__init__()
@@ -1585,7 +1587,7 @@ class MK3MemoOnlyWidget(QWidget):
                     from core.config import get_client
                     client = get_client()
                     if client is None:
-                        self.error.emit("API 키가 설정되지 않았습니다.")
+                        self.failed.emit("API 키가 설정되지 않았습니다.")
                         return
                     
                     prompt = f"""다음 메모를 깔끔하게 정리해주세요.
@@ -1609,10 +1611,10 @@ class MK3MemoOnlyWidget(QWidget):
                     )
                     
                     result = response.text.strip()
-                    self.finished.emit(result)
-                    
+                    self.result_ready.emit(result)
+
                 except Exception as e:
-                    self.error.emit(str(e))
+                    self.failed.emit(str(e))
         
         def on_finished(result):
             editor.setReadOnly(False)
@@ -1628,7 +1630,8 @@ class MK3MemoOnlyWidget(QWidget):
             self.worker = None
         
         self.worker = OrganizeWorker(content)
-        self.worker.finished.connect(on_finished)
-        self.worker.error.connect(on_error)
+        keep_thread_alive(self.worker)
+        self.worker.result_ready.connect(on_finished)
+        self.worker.failed.connect(on_error)
         self.worker.start()
 

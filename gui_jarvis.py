@@ -208,7 +208,8 @@ class JarvisGUI(QMainWindow):
                     "━━━ 제외 키워드 ━━━\n"
                     "키워드 포함 파일은 AI 이름 변경 건너뜀\n"
                     "• 예: '월별납부' → 해당 파일 제외\n"
-                    "• 시스템 내장: '10.', '미분류_', BL 포함 파일\n\n"
+                    "• 시스템 내장: '10.', '미분류_', BL 포함 파일, 직접 바꾼 이름\n"
+                    "• 정산 무관 서류(인보이스·계약서 등)는 원본 이름 유지\n\n"
                     "━━━ 월납업체 ━━━\n"
                     "월납 계약 업체의 매출 수수료를 '해당없음'으로 표시\n"
                     "• 대상: 통관/검역/요건대행/폐기수수료, 원산지증명서 등\n"
@@ -981,6 +982,13 @@ class JarvisGUI(QMainWindow):
     def closeEvent(self, event):
         try:
             self.stop_monitoring()
+            # 실행 중인 워커 QThread(금액 검증·메모 정리)를 기다린다 —
+            # 실행 중 소멸되면 Qt 가 qFatal 로 종료 크래시를 낸다
+            try:
+                from gui.utils import wait_live_threads
+                wait_live_threads(3000)
+            except Exception as e:
+                print(f"워커 대기 오류: {e}")
             # 메모 강제 저장 (디바운스 타이머 만료 전 유실 방지)
             if hasattr(self, 'mk3_memo_widget'):
                 self.mk3_memo_widget.save_all_memos()
@@ -2283,6 +2291,9 @@ class JarvisGUI(QMainWindow):
         # ── 중앙 스택: 0=그룹 카드 스크롤, 1=파일 브라우저 ──
         from gui.file_browser import FileBrowserWidget
         self.center_file_browser = FileBrowserWidget(path_callback=lambda: self.line_path.text())
+        # [파일] 뷰의 목록·검색창은 ESC 를 escape_pressed 로 바꿔 소비하므로
+        # 여기서 창 내리기에 연결해야 그룹 뷰와 동일하게 동작 (검색어가 있으면 먼저 지움)
+        self.center_file_browser.escape_pressed.connect(self._show_mini_window)
         self.center_stack = QStackedWidget()
         self.center_stack.addWidget(self.merge_scroll)
         self.center_stack.addWidget(self.center_file_browser)
@@ -3468,6 +3479,14 @@ class JarvisGUI(QMainWindow):
 
 
 if __name__ == "__main__":
+    # 크래시 안전망 — 미처리 파이썬 예외를 data/logs/crash_*.log 에 남기고 앱은 계속 실행
+    # (PyQt6 는 excepthook 이 기본값이면 qFatal 로 즉시 종료함. 반드시 QApplication 이전에 설치)
+    try:
+        from core.crash_guard import install as _install_crash_guard
+        _install_crash_guard()
+    except Exception as _e:
+        print(f"[crash_guard] 설치 실패: {_e}")
+
     # Windows 작업 표시줄에 TRADIS 고유 아이콘·이름이 표시되도록 앱 ID 등록
     # (미등록 시 python 실행에서 기본 아이콘으로 묶이고 '작업 표시줄에 고정'이 깨짐)
     try:

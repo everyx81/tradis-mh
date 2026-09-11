@@ -225,3 +225,42 @@ FIXED_SLOT_KEYS = [
 RENAME_SKIP_KEYWORDS = [
     "월별납부",
 ]
+
+# ── 자동 이름 변경 대상 서류 (v1.1.74) ──
+# is_rename_target() 을 통과하는 서류만 정식 이름(회사(BL)종류.pdf) 또는
+# 미분류_ 대기 이름을 부여한다. 목록 밖 서류(인보이스·패킹리스트·계약서·
+# 견적서·사업자등록증 등 정산과 무관한 파일)는 원본 파일명을 그대로 둔다.
+# 미분류_ 대기 → 카드 편입 흐름(요건 서류·BL 없는 계산서)은 목록 안 서류에
+# 한해 기존과 동일하게 동작한다.
+RENAME_TARGET_KEYWORDS = [
+    # 정산 구성 서류
+    "계산서", "신고필증", "신고서", "고지서", "정산서", "청구서",
+    "명세서", "명세표",
+    # 금전 증빙 (AI 가 범용 제목을 그대로 돌려주는 경우 대비)
+    "입금표", "입금증", "영수증", "이체증", "receipt", "debit note",
+    # 요건·통관 부속 증빙
+    "확인증", "증명서", "확인서", "허가서", "승인서", "신청서",
+]
+
+
+def is_rename_target(doc_type: str) -> bool:
+    """AI 가 판독한 서류 종류가 자동 이름 변경 대상인지 판정.
+
+    - 표준 서류 / 교정 후보 목록에 있으면 대상
+    - 요건 서류 키워드(식물검역·적합성평가 등), 운송 부속 서류 키워드(운송의뢰 등)
+    - RENAME_TARGET_KEYWORDS 부분 일치 (공백 제거, 영문 대소문자 무시)
+    Unknown 은 여기서 판정하지 않는다 (호출측에서 별도 처리).
+    """
+    if not doc_type or doc_type == "Unknown":
+        return False
+    if doc_type in STANDARD_DOC_TYPES or doc_type in DOC_TYPE_CORRECTION_CHOICES:
+        return True
+    import re as _re
+    # 공백·괄호 제거 후 비교 ("물품폐기승인(신청)서" → "물품폐기승인신청서")
+    name = _re.sub(r'[\s()（）\[\]]', '', str(doc_type))
+    low = name.lower()
+    if any(k in name for k in REQUIREMENT_DOC_KEYWORDS):
+        return True
+    if any(k in name for k in MERGE_EXCLUDE_KEYWORDS):
+        return True
+    return any(k.replace(" ", "").lower() in low for k in RENAME_TARGET_KEYWORDS)

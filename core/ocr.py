@@ -720,6 +720,49 @@ class GeminiOCR:
             except Exception as e:
                 print(f"캐시 종류 교정 오류: {e}")
 
+    def peek_cached_result(self, fp):
+        """파일 존재/해시 검증 없이 캐시 결과만 조회 (이미 사라진 옛 이름 조회용)."""
+        try:
+            with cache_lock:
+                cache = self._load_cache()
+                entry = cache.get(os.path.basename(fp))
+            if isinstance(entry, dict) and isinstance(entry.get('result'), dict):
+                return copy.deepcopy(entry['result'])
+        except Exception as e:
+            print(f"캐시 조회 오류: {e}")
+        return None
+
+    def set_result_fields(self, fp, **fields):
+        """캐시 결과에 필드를 각인. 엔트리가 없으면 현재 파일 기준으로 생성.
+
+        이름 정책(name_policy: preserve/unreadable/manual) 표시에 사용 —
+        원본 이름을 유지하기로 한 파일이 재시작·수정 이벤트마다 재분석·재변경되지
+        않도록 결정을 파일과 함께 보존한다."""
+        with cache_lock:
+            try:
+                cache = self._load_cache()
+                name = os.path.basename(fp)
+                entry = cache.get(name)
+                if not isinstance(entry, dict):
+                    entry = {'cached_at': time.time(), 'result': {}}
+                    try:
+                        entry['mtime'] = os.path.getmtime(fp)
+                        entry['size'] = os.path.getsize(fp)
+                        file_hash = _compute_file_hash(fp)
+                        if file_hash is not None:
+                            entry['hash'] = file_hash
+                    except OSError:
+                        pass
+                res = entry.get('result')
+                if not isinstance(res, dict):
+                    res = {}
+                res.update(fields)
+                entry['result'] = res
+                cache[name] = entry
+                self._write_cache()
+            except Exception as e:
+                print(f"캐시 필드 각인 오류: {e}")
+
     def _update_cache_key(self, old_path, new_path):
         """파일 이름 변경 시 캐시 키도 업데이트"""
         with cache_lock:

@@ -172,6 +172,23 @@ class AutoRenamer:
                 return
 
             c, i, d, s = parse_renamed_filename(fn)
+
+            # 이미 독립 문서 형식(이체증_회사_금액[(n)].pdf) — 재변경 금지.
+            # 같은 회사·금액 이체증이 2건이면 (n) 접미어 이름이 파싱에 실패해
+            # (1)↔(2) 로 무한 리네임되던 문제와, 재OCR 값이 달라져 이름이 흔들리는
+            # 문제를 함께 막는다. 캐시만 보장하고 종료.
+            # (아래쪽 지역 import 가 같은 이름을 함수 지역 변수로 만들어 별칭 사용)
+            from core.constants import INDEPENDENT_DOC_TYPES as _INDIE_TYPES
+            if any(fn.startswith(t + "_") for t in _INDIE_TYPES):
+                try:
+                    if gemini_ocr._get_cached_result(fp) is None:
+                        extract_document_info_ai(fp)
+                except Exception as e:
+                    self.log(f"[재분석 실패] {fn}: {e}")
+                if self.rename_complete_callback and not is_initial:
+                    self.rename_complete_callback()
+                return
+
             if i:
                 # BL 이 이미 파일명에 있음 — 이름 변경 불필요
                 # 하지만 OCR 캐시가 없으면 billing_items 기반 매칭이 작동 안 하므로
@@ -188,7 +205,9 @@ class AutoRenamer:
                 # 보완 레이어가 신고필증 오분류를 교정한 건에 한해 파일명도 맞춘다.
                 # BL 이 이름에 있다는 이유로 리네임을 건너뛰던 탓에 과거 오분류로
                 # 굳어진 이름(신고서인데 …수입신고필증.pdf)이 영구히 남던 문제를 푼다.
-                if _res and _res.get('doc_type_src') == 'text_layer_fix':
+                # 사용자가 직접 정한 이름(name_policy=manual)은 종류 토큰도 건드리지 않는다.
+                if (_res and _res.get('doc_type_src') == 'text_layer_fix'
+                        and _res.get('name_policy') != 'manual'):
                     self._fix_doctype_in_filename(fp, fn, d, _res.get('doc_type'))
                 # 캐시 유무와 무관하게 UI 갱신 — 외부(탐색기 등)에서 리네임된 파일도
                 # 카드 스냅샷에 반영되도록 함. 콜백은 1초 디바운스라 부담 없음.
@@ -203,6 +222,14 @@ class AutoRenamer:
             # 이름 변경 여부와 무관하게 금액 매칭용 데이터가 캐싱되었으므로 UI 갱신 필요
             if self.rename_complete_callback:
                 self.rename_complete_callback()
+
+            # 이름 정책이 각인된 파일은 재처리하지 않는다 —
+            #  preserve   : 정산 무관 서류, 원본 이름 유지 결정
+            #  unreadable : 종류·상호·BL·금액 모두 판독 실패, 원본 이름 유지
+            #  manual     : 사용자가 직접 바꾼 이름
+            # (재시작 초기 스캔·수정 이벤트마다 재분석·재변경되던 것을 차단)
+            if (res or {}).get('name_policy') in ('preserve', 'unreadable', 'manual'):
+                return
 
             dt = res.get("doc_type", "Unknown")
             cn = res.get("company_name", "Unknown")
@@ -278,6 +305,14 @@ class AutoRenamer:
                     iden = _decl_no
                     self.log(f" -> [신고번호 대체] 송품장부호 없음 → 수출신고번호 사용: {_decl_no}")
 
+            # [v1.1.74] 이름 변경 대상 서류만 정식/미분류 이름을 부여한다.
+            # 인보이스·패킹리스트·계약서 등 정산과 무관한 서류는 원본 파일명 유지.
+            # (목록: core.constants.is_rename_target)
+            from core.constants import is_rename_target
+            if dt != "Unknown" and not is_rename_target(dt):
+                self._preserve_name(fp, fn, 'preserve', f"정산 무관 서류({dt})")
+                return
+
             # 수입자명이 전체 영문인지 판단 (한글이 포함되지 않음)
             # cn이 "Unknown"이면 무시하고 판별
             import re
@@ -324,7 +359,15 @@ class AutoRenamer:
                 comp_name = sanitize_filename(res.get("company_name", "알수없는상호")).replace(" ", "")
                 if comp_name == "Unknown":
                     comp_name = "알수없는상호"
-                
+
+                # 종류·상호·BL·금액을 하나도 못 읽은 파일은 미분류_ 이름을 줘도
+                # 어떤 매칭에도 쓰이지 않는다 (상호 없는 미분류는 매처가 건너뜀).
+                # 원본 이름만 잃으므로 그대로 둔다. 하나라도 읽혔으면 기존대로 대기.
+                if (dt == "Unknown" and comp_name == "알수없는상호"
+                        and iden == "Unknown" and amt_val <= 0):
+                    self._preserve_name(fp, fn, 'unreadable', "종류·상호·BL·금액 판독 실패")
+                    return
+
                 base_name = f"미분류_{doc_name}_{comp_name}"
 
                 # 품목명이 있으면 금액 대신 품목명 사용 (요건 증빙서류)
@@ -391,6 +434,55 @@ class AutoRenamer:
         finally:
             if fp in self.processing_files:
                 self.processing_files.remove(fp)
+
+    def _preserve_name(self, fp, fn, policy, reason):
+        """원본 파일명 유지 결정을 캐시에 각인하고 로그. 이후 재처리 시 조기 종료된다."""
+        try:
+            gemini_ocr.set_result_fields(fp, name_policy=policy)
+        except Exception as e:
+            self.log(f" -> [보존 각인 실패] {fn}: {e}")
+        self.log(f" -> [보존] {reason} — 원본 이름 유지: {fn}")
+
+    @staticmethod
+    def _is_tradis_named(name):
+        """TRADIS 가 부여하는 이름 형식인지 (정식 회사(BL)종류 / 미분류_ / 이체증_)."""
+        if not name:
+            return False
+        if name.startswith("미분류_"):
+            return True
+        if any(name.startswith(t + "_") for t in INDEPENDENT_DOC_TYPES):
+            return True
+        try:
+            return bool(parse_renamed_filename(name)[1])
+        except Exception:
+            return False
+
+    def protect_user_rename(self, src, dest):
+        """폴더 안 이름 변경이 사용자 의도인지 판정하고, 그렇다면 되돌리지 않도록 보호.
+
+        TRADIS 형식 이름(또는 이미 이름 정책이 각인된 파일)을 형식 밖 이름으로 바꾼
+        경우만 사용자 변경으로 본다. TRADIS 자신의 변경은 항상 형식 안으로 향하므로
+        여기서 걸리지 않는다. 캐시 키를 새 이름으로 옮기고 manual 정책을 각인한다.
+        True 를 돌려주면 호출측은 process_pdf 를 돌리지 않는다."""
+        src_name = os.path.basename(src or "")
+        dest_name = os.path.basename(dest or "")
+        if not src_name or not dest_name or self._is_tradis_named(dest_name):
+            return False
+        src_policy = None
+        if not self._is_tradis_named(src_name):
+            prev = gemini_ocr.peek_cached_result(src)
+            src_policy = (prev or {}).get('name_policy')
+            if src_policy not in ('preserve', 'unreadable', 'manual'):
+                return False
+        try:
+            gemini_ocr._update_cache_key(src, dest)
+            gemini_ocr.set_result_fields(dest, name_policy='manual')
+        except Exception as e:
+            self.log(f" -> [수동 이름 보호 각인 실패] {dest_name}: {e}")
+        self.log(f" -> [수동 이름 보호] {src_name} → {dest_name} (되돌리지 않음)")
+        if self.rename_complete_callback:
+            self.rename_complete_callback()
+        return True
 
     def _fix_doctype_in_filename(self, fp, fn, old_dt, new_dt):
         """파일명에 박힌 서류 종류를 확정 값으로 교정.
@@ -1632,6 +1724,10 @@ class AutoRenamer:
                     # (이체증은 BL이 없어 아래 BL 필터를 통과하므로 여기서 차단 필수)
                     if is_merge_excluded_file(f):
                         continue
+                    # 원본 이름을 유지한 정산 무관/판독 불가 서류는 BL 이 이름에 없어
+                    # 아래 BL 필터를 통과하므로, 캐시 금액만으로 흡수되지 않게 차단
+                    if (_ocr_cache.get(f) or {}).get('name_policy') in ('preserve', 'unreadable'):
+                        continue
                     # 파일에 BL번호가 있으면서 현재 건과 다른 BL이면 제외
                     f_match = RE_ID_PAREN.search(f)
                     if f_match and normalized_ti:
@@ -2222,6 +2318,12 @@ class PDFHandler(FileSystemEventHandler):
 
     def on_moved(self, e):
         if not e.is_directory and e.dest_path.lower().endswith('.pdf'):
+            # 사용자가 직접 바꾼 이름은 되돌리지 않는다 (TRADIS 형식 → 형식 밖)
+            try:
+                if self.r.protect_user_rename(e.src_path, e.dest_path):
+                    return
+            except Exception as _e:
+                self.r.log(f"[수동 이름 보호 판정 오류] {_e}")
             self.r.executor.submit(self.r.process_pdf, e.dest_path)
 
     def on_modified(self, e):

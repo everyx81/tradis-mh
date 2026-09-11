@@ -1152,7 +1152,7 @@ class GroupCard(GlassFrame):
             vw = getattr(self, '_validator_worker', None)
             if vw is not None:
                 try:
-                    vw.finished.disconnect()
+                    vw.result_ready.disconnect()
                 except (TypeError, RuntimeError):
                     pass
         except Exception:
@@ -2503,6 +2503,9 @@ class GroupCard(GlassFrame):
                                                 continue
                                         fp = os.path.join(self.directory, f)
                                         f_cached = gemini_ocr._get_cached_result(fp)
+                                        # 원본 이름 유지 파일(정산 무관/판독 불가)은 금액 매칭 제외
+                                        if f_cached and f_cached.get('name_policy') in ('preserve', 'unreadable'):
+                                            continue
                                         f_amt = 0
                                         if f_cached:
                                             f_amt = parse_amount(f_cached.get('total_amount', 0))
@@ -4667,14 +4670,17 @@ class GroupCard(GlassFrame):
 
         if hasattr(self, '_validator_worker'):
             try:
-                self._validator_worker.finished.disconnect()
+                self._validator_worker.result_ready.disconnect()
             except (RuntimeError, TypeError):
                 pass
 
         from PyQt6.QtCore import QThread, pyqtSignal
+        from .utils import keep_thread_alive
 
         class ValidatorWorker(QThread):
-            finished = pyqtSignal(dict)
+            # QThread.finished 를 가리지 않도록 결과 시그널은 별도 이름 사용
+            # (실행 중 워커 소멸 → qFatal 크래시 방지, gui/utils.keep_thread_alive 참조)
+            result_ready = pyqtSignal(dict)
             def __init__(self, mapping, directory):
                 super().__init__()
                 self.mapping = mapping
@@ -4691,10 +4697,11 @@ class GroupCard(GlassFrame):
                 except Exception as e:
                     print("validator error:", e)
                     res = {}
-                self.finished.emit(res)
+                self.result_ready.emit(res)
 
         # NA 항목 제외한 매핑으로 검증 (월납업체/징수형태별)
         self._validator_worker = ValidatorWorker(list(validation_mapping), self.directory)
+        keep_thread_alive(self._validator_worker)
 
         def _on_validated(res):
             try:
@@ -4729,12 +4736,13 @@ class GroupCard(GlassFrame):
                         names_str += f" 외 {len(mismatched)-2}건"
                     self._set_warning("red", f"{names_str} 금액 불일치, 합산 차이 {diff:,}원")
                     self._validation_status = 'red'
+                # 금액 검증 결과에 따라 상태 배지 갱신 (파일 누락도 _compute_status에서 반영)
+                self._update_status_badge()
             except Exception:
+                # 카드가 이미 삭제된 뒤 늦게 도착한 결과(RuntimeError) 등은 무시
                 pass
-            # 금액 검증 결과에 따라 상태 배지 갱신 (파일 누락도 _compute_status에서 반영)
-            self._update_status_badge()
 
-        self._validator_worker.finished.connect(_on_validated)
+        self._validator_worker.result_ready.connect(_on_validated)
         self._validator_worker.start()
 
 

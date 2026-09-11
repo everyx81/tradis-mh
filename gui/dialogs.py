@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (QWidget, QLabel, QVBoxLayout, QHBoxLayout, QApplica
                               QPushButton, QComboBox, QDialog, QMessageBox, QLineEdit, QTextEdit,
                               QListWidget, QListWidgetItem, QTableWidget, QTableWidgetItem,
                               QFormLayout, QHeaderView, QFrame, QLayout)
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QPropertyAnimation, QEasingCurve, QPoint, QParallelAnimationGroup, QMimeData, QUrl, QSize, QRect
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QPropertyAnimation, QEasingCurve, QPoint, QParallelAnimationGroup, QMimeData, QUrl, QSize, QRect, QEvent
 from PyQt6.QtGui import QPixmap, QImage, QCursor, QColor, QDrag
 
 from .widgets import GlassFrame, NeonButton
@@ -1017,6 +1017,166 @@ def _cleanup_empty_marked_folders(parent, folders):
                 parent.emit_log(f"[폴더 정리 실패] {os.path.basename(folder)}: {e}")
 
 
+class CardMemoField(QWidget):
+    """그룹 카드 헤더의 한 줄 메모 (v1.1.75).
+
+    - '건수' 뒤, 재분석 버튼 앞의 남는 폭만 사용한다 (가로 크기 정책 Ignored + 최소폭 0).
+      → BL·회사·사업자번호·건수·버튼은 메모 때문에 줄어들거나 밀리지 않는다.
+    - 메모가 길면 앞부분만 보이고 끝은 … 으로 자른다. 전체 내용은 툴팁.
+    - 폭이 아예 없으면 아이콘만 남는다.
+    - 클릭 → 그 자리에서 편집. Enter/포커스 아웃 = 저장, Esc = 취소.
+    """
+    memo_changed = pyqtSignal(str)
+
+    def __init__(self, text="", parent=None):
+        super().__init__(parent)
+        from PyQt6.QtWidgets import QSizePolicy
+        from .claude_theme import C as _CT
+        from .claude_icons import pixmap as _icpx
+        self._ct = _CT
+        self._text = (text or "").strip()
+        self._hover = False
+        self._cancelling = False
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self.setMinimumWidth(0)
+        self.setCursor(Qt.CursorShape.IBeamCursor)
+        self.setToolTip("클릭하여 메모 편집")
+
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(4, 0, 4, 0)
+        lay.setSpacing(5)
+
+        self.icon = QLabel()
+        self.icon.setFixedSize(12, 12)
+        self.icon.setStyleSheet("background: transparent; border: none;")
+        try:
+            self.icon.setPixmap(_icpx("File", size=12, color=_CT['fg_3']))
+        except Exception:
+            pass
+        lay.addWidget(self.icon)
+
+        self.label = QLabel()
+        self.label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.label.setMinimumWidth(0)
+        self.label.setWordWrap(False)
+        lay.addWidget(self.label, 1)
+
+        self.edit = QLineEdit()
+        self.edit.setPlaceholderText("메모 입력 후 Enter (Esc 취소)")
+        self.edit.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {_CT['bg_1']};
+                color: {_CT['fg_0']};
+                border: 1px solid {_CT['accent_border']};
+                border-radius: 6px;
+                padding: 2px 7px;
+                font-family: 'Pretendard','Malgun Gothic','Segoe UI',sans-serif;
+                font-size: 8.5pt;
+                selection-background-color: {_CT['accent_lo']};
+            }}
+        """)
+        self.edit.setFixedHeight(22)
+        self.edit.hide()
+        self.edit.editingFinished.connect(self._commit)
+        self.edit.installEventFilter(self)
+        lay.addWidget(self.edit, 1)
+
+        self._refresh()
+
+    # ── 값 ──
+    def text(self):
+        return self._text
+
+    def set_text(self, text):
+        self._text = (text or "").strip()
+        self._refresh()
+
+    # ── 표시 ──
+    def _display(self):
+        return self._text if self._text else "메모 추가"
+
+    def _refresh(self):
+        ct = self._ct
+        if self._text:
+            color = ct['fg_1'] if self._hover else ct['fg_2']
+        else:
+            color = ct['fg_2'] if self._hover else ct['fg_3']
+        self.label.setStyleSheet(
+            f"color: {color}; font-size: 8.5pt; background: transparent; border: none;"
+        )
+        self.setToolTip(self._text if self._text else "클릭하여 메모 추가")
+        self._apply_elide()
+
+    def _apply_elide(self):
+        from PyQt6.QtGui import QFontMetrics
+        w = max(0, self.label.width())
+        fm = QFontMetrics(self.label.font())
+        self.label.setText(fm.elidedText(self._display(), Qt.TextElideMode.ElideRight, w))
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._apply_elide()
+
+    def enterEvent(self, event):
+        self._hover = True
+        self._refresh()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self._hover = False
+        self._refresh()
+        super().leaveEvent(event)
+
+    # ── 편집 ──
+    def mousePressEvent(self, event):
+        # 좌클릭은 여기서 소비 → 헤더의 접기/펼치기로 전달되지 않음
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._begin_edit()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event):
+        event.accept()
+
+    def _begin_edit(self):
+        if self.edit.isVisible():
+            return
+        self._cancelling = False
+        self.label.hide()
+        self.edit.setText(self._text)
+        self.edit.show()
+        self.edit.setFocus()
+        self.edit.selectAll()
+
+    def eventFilter(self, obj, event):
+        if obj is self.edit and event.type() == QEvent.Type.KeyPress \
+                and event.key() == Qt.Key.Key_Escape:
+            self._cancel()
+            return True
+        return super().eventFilter(obj, event)
+
+    def _end_edit(self):
+        self.edit.hide()
+        self.label.show()
+        self._refresh()
+
+    def _cancel(self):
+        self._cancelling = True
+        self._end_edit()
+        self._cancelling = False
+
+    def _commit(self):
+        if self._cancelling or not self.edit.isVisible():
+            return
+        new_text = self.edit.text().strip()
+        self._end_edit()
+        if new_text != self._text:
+            self._text = new_text
+            self._refresh()
+            self.memo_changed.emit(new_text)
+
+
 class GroupCard(GlassFrame):
     # 상태 변경 시그널 (필터 카운트 갱신용)
     status_changed = pyqtSignal()
@@ -1412,7 +1572,14 @@ class GroupCard(GlassFrame):
         header.addSpacing(8)
         header.addWidget(self.lbl_ok_inline)
 
-        header.addStretch(1)
+        # ── 카드 메모 (v1.1.75): '건수' 뒤 남는 폭만 사용, 길면 앞부분만 … ──
+        # 다른 헤더 정보(BL·회사·사업자번호·건수·버튼)는 메모 때문에 줄지 않는다.
+        from core.config import get_card_memo as _get_card_memo, set_card_memo as _set_card_memo
+        header.addSpacing(6)
+        self.memo_field = CardMemoField(_get_card_memo(self.text_id))
+        self.memo_field.memo_changed.connect(
+            lambda t, _bl=self.text_id: _set_card_memo(_bl, t))
+        header.addWidget(self.memo_field, 1)
 
         # 기존 버튼 로직 결정
         docs = self.data['docs']

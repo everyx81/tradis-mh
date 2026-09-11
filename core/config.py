@@ -77,6 +77,33 @@ def remove_rename_skip_keyword(keyword: str) -> list:
 
 
 # ─────────────────────────────────────────────────
+# 카드 메모 (BL별 한 줄 메모 — 그룹 카드 헤더 '건수' 뒤에 표시)
+# 카드는 재스캔마다 다시 만들어지므로 메모는 config.json 에 BL 키로 보관한다.
+# ─────────────────────────────────────────────────
+def get_card_memo(bl_id: str) -> str:
+    memos = CONFIG.get("card_memos", {})
+    if not isinstance(memos, dict) or not bl_id:
+        return ""
+    return str(memos.get(bl_id, "") or "")
+
+
+def set_card_memo(bl_id: str, text: str):
+    """빈 문자열이면 항목 삭제. 저장 후 즉시 config.json 반영."""
+    if not bl_id:
+        return
+    memos = CONFIG.get("card_memos", {})
+    if not isinstance(memos, dict):
+        memos = {}
+    text = (text or "").strip()
+    if text:
+        memos[bl_id] = text
+    else:
+        memos.pop(bl_id, None)
+    CONFIG["card_memos"] = memos
+    _save_config(CONFIG)
+
+
+# ─────────────────────────────────────────────────
 # 월납업체 (매출 수수료 계산서 미발행 업체)
 # ─────────────────────────────────────────────────
 def get_monthly_billing_companies() -> list:

@@ -8,8 +8,8 @@ handoff 번들의 icons.jsx 에 있는 SVG 패스를 그대로 가져와
     btn.setIcon(ic("Folder", color="#c9ccd3"))
     btn.setIconSize(QSize(16, 16))
 """
-from PyQt6.QtCore import QByteArray, Qt, QSize
-from PyQt6.QtGui import QIcon, QPixmap, QColor, QPainter
+from PyQt6.QtCore import QByteArray, Qt
+from PyQt6.QtGui import QIcon, QPixmap, QPainter
 from PyQt6.QtSvg import QSvgRenderer
 
 

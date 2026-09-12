@@ -6,18 +6,17 @@ REPORT 탭 - 일일 보고서 생성 패널 (실시간 미리보기 + 메일 발
 
 import os
 import sys
-import tempfile
 from datetime import datetime
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView, QFileDialog,
-    QFrame, QSpinBox, QDateEdit, QMessageBox, QAbstractItemView,
-    QTextEdit, QSplitter, QScrollArea, QLineEdit, QFormLayout,
+    QSpinBox, QDateEdit, QAbstractItemView,
+    QTextEdit, QSplitter, QScrollArea,
     QCheckBox
 )
 import json
 from PyQt6.QtCore import Qt, QDate, pyqtSignal, QTimer, QSize
-from PyQt6.QtGui import QFont, QColor, QTextDocument, QIcon
+from PyQt6.QtGui import QIcon
 
 from .claude_theme import C as CT
 from .claude_icons import pixmap

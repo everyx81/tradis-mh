@@ -6,7 +6,7 @@ JARVIS 커스텀 알림 팝업 (시그널 기반)
 from PyQt6.QtWidgets import (QWidget, QLabel, QVBoxLayout, QHBoxLayout, 
                               QApplication, QGraphicsDropShadowEffect, QFrame)
 from PyQt6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve, QPoint, pyqtSignal, QObject
-from PyQt6.QtGui import QFont, QColor, QPixmap
+from PyQt6.QtGui import QFont, QColor
 
 
 class JarvisToast(QWidget):

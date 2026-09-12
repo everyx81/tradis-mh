@@ -7,14 +7,11 @@ MK3 일정 관리 시스템 위젯:
 
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
                               QLineEdit, QComboBox, QListWidget, QListWidgetItem,
-                              QTextEdit, QFrame, QSpinBox, QMenu, QDialog, QCheckBox,
+                              QTextEdit, QFrame, QMenu, QDialog, QCheckBox,
                               QTabWidget, QCalendarWidget, QDateEdit, QTimeEdit)
 from PyQt6.QtCore import Qt, QTimer, QDate, QTime, QSize, pyqtSignal
-from PyQt6.QtGui import QFont, QColor, QBrush, QIcon, QTransform
+from PyQt6.QtGui import QColor, QIcon, QTransform
 
-import sys
-import os
-# 상위 디렉토리 추가 (gui 폴더에서 실행 시 calendar_manager 찾기 위함)
 from calendar_manager import LocalScheduleManager, WindowsNotifier
 from core.holidays import is_holiday
 from .claude_theme import C as CT
@@ -155,7 +152,7 @@ class HUDStyleCalendar(QCalendarWidget):
         
     def _force_square_cells(self):
         """모든 셀을 CELL_WIDTH x CELL_HEIGHT 직사각형으로 강제 (배치 처리)"""
-        from PyQt6.QtWidgets import QTableView, QHeaderView
+        from PyQt6.QtWidgets import QTableView
         table = self.findChild(QTableView)
         if not table:
             return
@@ -185,8 +182,8 @@ class HUDStyleCalendar(QCalendarWidget):
         self.updateCells()
         
     def paintCell(self, painter, rect, date):
-        from PyQt6.QtCore import Qt, QRect, QPoint, QDate
-        from PyQt6.QtGui import QColor, QPen, QBrush, QFont
+        from PyQt6.QtCore import Qt, QRect, QDate
+        from PyQt6.QtGui import QColor, QBrush, QFont
         
         painter.save()
 
@@ -295,8 +292,7 @@ class ScheduleEditDialog(QDialog):
         self.init_ui()
 
     def init_ui(self):
-        from PyQt6.QtWidgets import (QDateEdit, QTimeEdit, QCheckBox,
-                                     QGroupBox, QGridLayout)
+        from PyQt6.QtWidgets import QCheckBox, QGroupBox, QGridLayout
         from datetime import datetime
 
         self.setWindowTitle("새 리마인더" if self.is_new else "리마인더 상세 편집")
@@ -544,7 +540,6 @@ class ScheduleCardWidget(QFrame):
         self.init_ui()
         
     def init_ui(self):
-        from PyQt6.QtWidgets import QMenu, QSizePolicy
         from datetime import datetime
         
         # 완전 투명 바탕 테마 (부모 리스트의 밑줄로 구분됨)
@@ -766,8 +761,6 @@ class MK3ScheduleOnlyWidget(QWidget):
             self.schedule_manager.start_reminder_loop(1)
     
     def init_ui(self):
-        from PyQt6.QtWidgets import QDateEdit
-        
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(15)

@@ -17,9 +17,7 @@ from PyQt6.QtWidgets import (QWidget, QFrame, QVBoxLayout, QHBoxLayout,
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QCursor, QGuiApplication
 
-# move_to_recycle_bin, SUB_ROLE은 기존 사용처 호환을 위해 재노출
-from .file_browser import (FileBrowserWidget, move_to_recycle_bin, SUB_ROLE,
-                           ICON_FONT, GLYPH_CLOSE)
+from .file_browser import FileBrowserWidget, ICON_FONT, GLYPH_CLOSE
 from .claude_theme import C as CT, FONT_UI
 from core.config import get_config_path
 

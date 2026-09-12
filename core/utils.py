@@ -64,25 +64,10 @@ RE_COMPANY_CLEAN_3 = re.compile(r'[\(（]\s*주\s*[\)）]')
 RE_COMPANY_KOREAN = re.compile(r'[가-힣]')
 RE_COMPANY_SPLIT = re.compile(r'([가-힣\s]+?)([\s\(]*[a-zA-Z])')
 
-RE_BL_GENERAL = re.compile(r'B/L\s*(No|NO|번호)?[\s.:]*([A-Za-z0-9_\-\(\) \t]+)', re.IGNORECASE)
-RE_INV_GENERAL = re.compile(r'(Invoice|P/O|Ref|송품장)\s*(No|NO|번호|부호)?[\s.:]*([A-Za-z0-9_\-\(\)]+(?:\s*[A-Za-z0-9_\-\(\)]+)*)', re.IGNORECASE)
-
 # File pattern for renamed files: Company(ID)DocType.pdf
 RE_FILE_PATTERN = re.compile(r'^.+?\(.+?\).+?\.pdf$')
 RE_INVALID_CHARS = re.compile(r'[\\/*?:"<>|]')
 RE_ID_PAREN = re.compile(r'\(([^()]+)\)')
-RE_DOC_TYPES_PIPE = "|".join(["정산서", "자금정산서", "수입신고필증", "납부고지서", "수입세금계산서", "통관수수료계산서", "수출신고필증", "반송신고필증", "자금청구서"])
-RE_DOC_MATCH = re.compile(fr'\(.*\)({RE_DOC_TYPES_PIPE})')
-
-RE_TAX_PAYER = re.compile(r'납\s*세\s*의\s*무\s*자')
-RE_SHIPPER = re.compile(r'실\s*화\s*주')
-RE_BIZ_ID = re.compile(r'\s*\d{3}-\d{2}-\d{5}')
-RE_BUSINESS_ID_OR_NUM = re.compile(r'\s*\d+')
-RE_상호 = re.compile(r'\(\s*상\s*호\s*\)')
-RE_수출화주 = re.compile(r'수\s*출\s*화\s*주')
-RE_송품장부호 = re.compile(r'송품장부호')
-RE_BL_IV_NO = re.compile(r'B/L\s*I/V\s*No', re.IGNORECASE)
-
 
 # --- 한글 자모 분해 (OCR 회사명 유사도 비교용) ---
 _CHOSUNG = 'ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ'
@@ -280,21 +265,6 @@ def cleanup_company_name(name: str) -> str:
         if kw in name:
             name = name.split(kw)[0].strip()
     return name.replace(" ", "").replace("_", "").replace("★", "")
-
-
-def extract_text(file_path: str) -> str:
-    """PDF에서 텍스트 추출"""
-    import pdfplumber  # lazy import — 시작 시 로딩 방지
-    text = ""
-    try:
-        with pdfplumber.open(file_path) as pdf:
-            for page in pdf.pages:
-                content = page.extract_text()
-                if content:
-                    text += content + "\n"
-    except Exception as e:
-        print(f"텍스트 추출 오류: {e}")
-    return text
 
 
 def _parse_by_custom_pattern(filename: str, pattern: str) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:

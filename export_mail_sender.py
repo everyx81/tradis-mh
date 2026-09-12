@@ -10,9 +10,7 @@ import imaplib
 import datetime
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from email.mime.base import MIMEBase
 from email.mime.application import MIMEApplication
-from email import encoders
 from email.header import decode_header
 from email.utils import getaddresses, parsedate_to_datetime
 from typing import Optional, Callable, List

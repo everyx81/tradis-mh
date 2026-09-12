@@ -1,24 +1,21 @@
 # JARVIS GUI 다이얼로그 및 카드 위젯
 """
 다이얼로그 및 카드 위젯:
-- IntroWindow: 인트로 애니메이션 창
 - GroupCard: 병합 그룹 카드
 """
 
 import os
 import sys
-import random
 import threading
 
 from PyQt6.QtWidgets import (QWidget, QLabel, QVBoxLayout, QHBoxLayout, QApplication, QAbstractItemView,
-                              QPushButton, QComboBox, QDialog, QMessageBox, QLineEdit, QTextEdit,
+                              QPushButton, QComboBox, QDialog, QLineEdit, QTextEdit,
                               QListWidget, QListWidgetItem, QTableWidget, QTableWidgetItem,
-                              QFormLayout, QHeaderView, QFrame, QLayout)
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QPropertyAnimation, QEasingCurve, QPoint, QParallelAnimationGroup, QMimeData, QUrl, QSize, QRect, QEvent
-from PyQt6.QtGui import QPixmap, QImage, QCursor, QColor, QDrag
+                              QFormLayout, QFrame, QLayout)
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QMimeData, QUrl, QSize, QRect, QEvent
+from PyQt6.QtGui import QColor, QDrag
 
-from .widgets import GlassFrame, NeonButton
-from .utils import resource_path
+from .widgets import GlassFrame
 from core.config import get_config_path
 
 
@@ -72,150 +69,6 @@ _MODERN_BTN_PRIMARY_STYLE = """
     }
     QPushButton:focus { outline: none; }
 """
-
-
-class IntroWindow(QWidget):
-    finished = pyqtSignal()
-    
-    def __init__(self):
-        from PyQt6.QtWidgets import QGraphicsOpacityEffect
-        
-        super().__init__()
-        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        
-        screen = QApplication.primaryScreen().geometry()
-        self.setGeometry(0, 0, screen.width(), screen.height())
-        
-        self.layout = QVBoxLayout(self)
-        self.layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
-        self.lbl_img = QLabel(self)
-        self.lbl_img.setStyleSheet("background-color: transparent;")
-        path = resource_path("intro_jarvis.jpg")
-        if os.path.exists(path):
-            pix = QPixmap(path)
-            pix = pix.scaled(280, 280, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-            
-            img = pix.toImage()
-            img = img.convertToFormat(QImage.Format.Format_ARGB32)
-            
-            width = img.width()
-            height = img.height()
-            
-            if width > 0 and height > 0:
-                bg = img.pixelColor(0, 0)
-                bg_r, bg_g, bg_b = bg.red(), bg.green(), bg.blue()
-                threshold = 30
-                
-                ptr = img.bits()
-                ptr.setsize(img.sizeInBytes())
-                arr = memoryview(ptr).cast('B')
-                
-                bytes_per_line = img.bytesPerLine()
-                
-                for y in range(height):
-                    row_start = y * bytes_per_line
-                    for x in range(width):
-                        idx = row_start + x * 4
-                        b, g, r, a = arr[idx], arr[idx+1], arr[idx+2], arr[idx+3]
-                        
-                        diff = abs(r - bg_r) + abs(g - bg_g) + abs(b - bg_b)
-                        
-                        if diff < threshold:
-                            arr[idx+3] = 0
-            
-            pix = QPixmap.fromImage(img)
-            self.lbl_img.setPixmap(pix)
-            self.lbl_img.setFixedSize(280, 280)
-        else:
-            self.lbl_img.setText("TRADIS MH LOADING...")
-            self.lbl_img.setStyleSheet("color: cyan; font-size: 30pt; font-weight: bold;")
-        
-        self.layout.addWidget(self.lbl_img, 0, Qt.AlignmentFlag.AlignCenter)
-        
-        self.opacity_effect = QGraphicsOpacityEffect(self.lbl_img)
-        self.opacity_effect.setOpacity(0.0)
-        self.lbl_img.setGraphicsEffect(self.opacity_effect)
-        
-        QTimer.singleShot(500, self.start_appear)
-        
-    def start_appear(self):
-        self.anim_appear = QPropertyAnimation(self.opacity_effect, b"opacity")
-        self.anim_appear.setDuration(6000)
-        self.anim_appear.setStartValue(0.0)
-        self.anim_appear.setEndValue(1.0)
-        self.anim_appear.setEasingCurve(QEasingCurve.Type.InOutQuad)
-        self.anim_appear.finished.connect(self.explode)
-        self.anim_appear.start()
-
-    def explode(self):
-        rect = self.lbl_img.geometry()
-        root_x = rect.x()
-        root_y = rect.y()
-        
-        pix = self.lbl_img.pixmap()
-        if not pix:
-            self.on_finished()
-            return
-            
-        w = pix.width()
-        h = pix.height()
-        
-        self.lbl_img.hide()
-        
-        rows = 10
-        cols = 10
-        chunk_w = w // cols
-        chunk_h = h // rows
-        
-        self.anim_group = QParallelAnimationGroup()
-        
-        self.pieces = []
-        
-        center_x = root_x + w // 2
-        center_y = root_y + h // 2
-        
-        for r in range(rows):
-            for c in range(cols):
-                piece_pix = pix.copy(c * chunk_w, r * chunk_h, chunk_w, chunk_h)
-                lbl_piece = QLabel(self)
-                lbl_piece.setPixmap(piece_pix)
-                lbl_piece.setFixedSize(chunk_w, chunk_h)
-                
-                start_x = root_x + c * chunk_w
-                start_y = root_y + r * chunk_h
-                lbl_piece.move(start_x, start_y)
-                lbl_piece.show()
-                
-                vec_x = (start_x + chunk_w//2) - center_x
-                vec_y = (start_y + chunk_h//2) - center_y
-                
-                if vec_x == 0 and vec_y == 0:
-                    vec_x = random.choice([-1, 1])
-                    vec_y = random.choice([-1, 1])
-                
-                dist = (vec_x**2 + vec_y**2)**0.5
-                if dist == 0: dist = 1
-                
-                target_x = start_x + (vec_x / dist) * 1000 * random.uniform(0.8, 1.2)
-                target_y = start_y + (vec_y / dist) * 1000 * random.uniform(0.8, 1.2)
-                
-                anim_pos = QPropertyAnimation(lbl_piece, b"pos")
-                anim_pos.setDuration(1200)
-                anim_pos.setStartValue(QPoint(start_x, start_y))
-                anim_pos.setEndValue(QPoint(int(target_x), int(target_y)))
-                anim_pos.setEasingCurve(QEasingCurve.Type.OutExpo)
-                
-                self.anim_group.addAnimation(anim_pos)
-                self.pieces.append(lbl_piece)
-        
-        self.anim_group.finished.connect(self.on_finished)
-        self.anim_group.start()
-
-    def on_finished(self):
-        self.finished.emit()
-        self.close()
 
 
 class DraggableFileList(QListWidget):
@@ -320,670 +173,6 @@ class FlowLayout(QLayout):
             line_height = max(line_height, hint.height())
         return y + line_height - rect.y() + m.bottom()
 
-
-class IndependentCard(GlassFrame):
-    """BL 독립 문서 카드 (이체증 등) — 드래그앤드롭 지원"""
-
-    # 상태 변경 시그널 (필터 카운트 갱신용 - 독립 카드는 항상 green)
-    status_changed = pyqtSignal()
-
-    def __init__(self, parent_widget, directory, doc_type, file_list):
-        super().__init__()
-        # GlassFrame paintEvent 우회 (stylesheet 사용)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.parent_widget = parent_widget
-        self.directory = directory
-        self.doc_type = doc_type
-        self.file_list = file_list
-        self.is_collapsed = True  # 기본 접힘
-        # 독립 카드(이체증 등)는 사용자가 드래그 해야 함 → 조치 대기 = gray
-        self._status = 'gray'
-        # 파일 변경 추적 (접을 때 전체 재스캔 판단용)
-        self._dirty = False
-
-        # 카드 자체에 모던한 배경 (호버 애니메이션용)
-        self.setObjectName("IndependentCardRoot")
-        self._hover_progress = 0.0
-        self._hover_anim = None
-        self._toggle_in_progress = False
-
-        # 호버 시 카드 주변 파란 glow
-        from PyQt6.QtWidgets import QGraphicsDropShadowEffect
-        from PyQt6.QtGui import QColor
-        self._hover_shadow = QGraphicsDropShadowEffect(self)
-        self._hover_shadow.setBlurRadius(22)
-        self._hover_shadow.setOffset(0, 0)
-        self._hover_shadow.setColor(QColor(0, 180, 230, 0))
-        self.setGraphicsEffect(self._hover_shadow)
-
-        self._apply_card_bg(0.0)
-
-        layout = QVBoxLayout(self)
-        # IndependentCard 카드 내부 여백 — 디자인 .group-head 매칭
-        layout.setContentsMargins(18, 8, 18, 8)
-        layout.setSpacing(4)
-
-        # ── 클릭 가능한 헤더 (Claude Design 톤) ──
-        from .claude_theme import C as _CT
-        from .claude_icons import pixmap as _icpx
-        from PyQt6.QtCore import QSize as _QSize
-        from PyQt6.QtGui import QIcon as _QIcon
-        self.header_widget = QWidget()
-        self.header_widget.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.header_widget.mousePressEvent = self._on_header_click
-        header = QHBoxLayout(self.header_widget)
-        header.setContentsMargins(0, 0, 0, 0)
-        header.setSpacing(12)
-
-        # 접힘/펼침 caret (Chevron)
-        self.lbl_arrow = QLabel()
-        self.lbl_arrow.setFixedSize(18, 18)
-        self.lbl_arrow.setPixmap(_icpx("Chevron", size=14, color=_CT['fg_2']))
-        self.lbl_arrow.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lbl_arrow.setStyleSheet("background: transparent; border: none;")
-        header.addWidget(self.lbl_arrow)
-
-        # ID pill 스타일 컨테이너 (GroupCard와 통일)
-        _pill = QFrame()
-        _pill.setObjectName("IdPill")
-        _pill.setStyleSheet(f"""
-            QFrame#IdPill {{
-                background: {_CT['bg_3']};
-                border: 1px solid {_CT['border_soft']};
-                border-radius: 8px;
-            }}
-        """)
-        _pill_lay = QHBoxLayout(_pill)
-        _pill_lay.setContentsMargins(11, 5, 13, 5)
-        _pill_lay.setSpacing(8)
-
-        self.lbl_badge = QLabel()
-        self.lbl_badge.setFixedSize(8, 8)
-        self.lbl_badge.setStyleSheet(f"background-color: {_CT['fg_3']}; border-radius: 4px; border: none;")
-        _pill_lay.addWidget(self.lbl_badge)
-
-        self.lbl_title = QLabel(doc_type)
-        self.lbl_title.setStyleSheet(f"""
-            color: {_CT['fg_0']};
-            background: transparent;
-            border: none;
-            font-family: 'JetBrains Mono','Consolas','Monaco',monospace;
-            font-size: 10pt;
-            font-weight: 700;
-            letter-spacing: 0.3px;
-        """)
-        self.lbl_title.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
-        _pill_lay.addWidget(self.lbl_title)
-
-        header.addWidget(_pill)
-
-        # count-pill
-        self.lbl_count_pill = QLabel(f"{len(file_list)}건")
-        self.lbl_count_pill.setStyleSheet(f"""
-            color: {_CT['fg_1']};
-            background-color: {_CT['bg_3']};
-            border: 1px solid {_CT['border_soft']};
-            border-radius: 5px;
-            padding: 2px 7px;
-            font-family: 'JetBrains Mono','Consolas',monospace;
-            font-size: 8.5pt;
-        """)
-        header.addSpacing(6)
-        header.addWidget(self.lbl_count_pill)
-        header.addStretch(1)
-
-        layout.addWidget(self.header_widget)
-
-        # ── 본문 (접힘/펼침 대상) ──
-        self.body_widget = QWidget()
-        body_layout = QVBoxLayout(self.body_widget)
-        body_layout.setContentsMargins(4, 4, 4, 4)
-        body_layout.setSpacing(6)
-
-        # 파일 목록 (드래그 가능) — 맥 스타일 통일
-        from PyQt6.QtWidgets import QAbstractItemView
-        self.list_widget = DraggableFileList()
-        self.list_widget.setStyleSheet("""
-            QListWidget {
-                background: rgba(10, 20, 32, 120);
-                border: 1px solid #25303b;
-                border-radius: 10px;
-                color: #c0d0e0;
-                font-size: 9.5pt;
-                padding: 4px;
-                outline: none;
-            }
-            QListWidget::item {
-                padding: 6px 10px;
-                border-radius: 6px;
-                margin: 1px 0;
-            }
-            QListWidget::item:hover {
-                background: rgba(100, 180, 240, 28);
-                color: #e0eaf5;
-            }
-            QListWidget::item:selected {
-                background: rgba(100, 200, 240, 60);
-                color: #ffffff;
-            }
-        """)
-        self.list_widget.setFixedHeight(min(len(file_list) * 32 + 10, 180))
-        self.list_widget.setDragEnabled(True)
-        self.list_widget.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-
-        for f in file_list:
-            item = QListWidgetItem(f)
-            item.setData(Qt.ItemDataRole.UserRole, os.path.join(directory, f))
-            self.list_widget.addItem(item)
-
-        body_layout.addWidget(self.list_widget)
-
-        # 안내 텍스트
-        lbl_hint = QLabel("↑ 드래그하여 사용  ·  우클릭으로 관리")
-        lbl_hint.setStyleSheet("color: rgba(140, 160, 180, 140); font-size: 8.5pt; letter-spacing: 0.2px; background: transparent;")
-        lbl_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        body_layout.addWidget(lbl_hint)
-
-        layout.addWidget(self.body_widget)
-        self.body_widget.setVisible(False)  # 기본 접힘
-
-        # 우클릭 메뉴
-        self.list_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.list_widget.customContextMenuRequested.connect(self._show_context_menu)
-        # 더블 클릭 → 파일 열기
-        self.list_widget.itemDoubleClicked.connect(self._open_item_file)
-
-        # 키보드 단축키
-        from PyQt6.QtGui import QKeySequence, QShortcut
-        shortcut_del = QShortcut(QKeySequence(Qt.Key.Key_Delete), self.list_widget)
-        shortcut_del.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
-        shortcut_del.activated.connect(self._delete_selected)
-        shortcut_f2 = QShortcut(QKeySequence(Qt.Key.Key_F2), self.list_widget)
-        shortcut_f2.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
-        shortcut_f2.activated.connect(self._rename_selected)
-        # Enter → 열기
-        shortcut_enter = QShortcut(QKeySequence(Qt.Key.Key_Return), self.list_widget)
-        shortcut_enter.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
-        shortcut_enter.activated.connect(self._open_selected_file)
-
-    def paintEvent(self, event):
-        """GlassFrame의 글로우 paintEvent를 건너뛰고 스타일시트로 렌더"""
-        from PyQt6.QtWidgets import QStyle, QStyleOption
-        from PyQt6.QtGui import QPainter
-        opt = QStyleOption()
-        opt.initFrom(self)
-        p = QPainter(self)
-        self.style().drawPrimitive(QStyle.PrimitiveElement.PE_Widget, opt, p, self)
-
-    # ── 부드러운 호버 애니메이션 ──
-    def enterEvent(self, event):
-        # 토글 중에는 호버 애니메이션 억제 (덜덜 떨림 방지)
-        if not getattr(self, '_toggle_in_progress', False):
-            self._animate_hover(1.0)
-        super().enterEvent(event)
-
-    def leaveEvent(self, event):
-        if not getattr(self, '_toggle_in_progress', False):
-            self._animate_hover(0.0)
-        super().leaveEvent(event)
-
-    def _suspend_hover_fx(self):
-        """토글 중 호버 애니메이션 + drop shadow 일시 정지 (깜빡임 방지)"""
-        if getattr(self, '_hover_anim', None) is not None:
-            try:
-                self._hover_anim.stop()
-            except RuntimeError:
-                pass
-        if hasattr(self, '_hover_shadow') and self._hover_shadow is not None:
-            self._hover_shadow.setEnabled(False)
-
-    def _resume_hover_fx(self):
-        """토글 완료 후 호버 효과 복원"""
-        self._toggle_in_progress = False
-        if hasattr(self, '_hover_shadow') and self._hover_shadow is not None:
-            self._hover_shadow.setEnabled(True)
-        if self.underMouse():
-            self._animate_hover(1.0)
-        else:
-            self._animate_hover(0.0)
-
-    def _animate_hover(self, target):
-        # 성능: 틱마다 setStyleSheet 재파싱(카드+자식 전체 re-polish)하던
-        # 420ms 애니메이션 제거 — 호버 상태를 즉시 1회만 적용
-        self._apply_card_bg(float(target))
-
-    def cleanup(self):
-        """카드 삭제 직전 호출 — 애니메이션/그래픽효과 안전 해제."""
-        try:
-            anim = getattr(self, '_hover_anim', None)
-            if anim is not None:
-                try:
-                    anim.valueChanged.disconnect()
-                except (TypeError, RuntimeError):
-                    pass
-                try:
-                    anim.stop()
-                except RuntimeError:
-                    pass
-                self._hover_anim = None
-        except Exception:
-            pass
-        try:
-            if hasattr(self, '_hover_shadow') and self._hover_shadow is not None:
-                try:
-                    self.setGraphicsEffect(None)
-                except RuntimeError:
-                    pass
-                self._hover_shadow = None
-        except Exception:
-            pass
-
-    def _apply_card_bg(self, value):
-        """Claude Design warm dark (IndependentCard도 GroupCard와 동일 톤)."""
-        self._hover_progress = float(value)
-        t = max(0.0, min(1.0, float(value)))
-
-        def lerp(a, b):
-            return int(a + (b - a) * t)
-
-        # bg_1 (20,23,29) → bg_2 (27,30,36) on hover
-        r = lerp(20, 27)
-        g = lerp(23, 30)
-        b = lerp(29, 36)
-
-        # border soft → border — 카드 배경과 미리 합성해 불투명으로 (모서리 점 방지)
-        br_r = lerp(45, 63)
-        br_g = lerp(48, 66)
-        br_b = lerp(56, 75)
-        br_a = lerp(150, 200) / 255.0
-        obr_r = round(br_r * br_a + r * (1 - br_a))
-        obr_g = round(br_g * br_a + g * (1 - br_a))
-        obr_b = round(br_b * br_a + b * (1 - br_a))
-
-        self.setStyleSheet(f"""
-            #IndependentCardRoot {{
-                background-color: rgb({r}, {g}, {b});
-                border: 1px solid rgb({obr_r}, {obr_g}, {obr_b});
-                border-radius: 14px;
-            }}
-        """)
-
-        if hasattr(self, '_hover_shadow') and self._hover_shadow is not None:
-            from PyQt6.QtGui import QColor
-            glow_alpha = lerp(0, 60)
-            # accent: #4ba3f7 = rgb(75, 163, 247)
-            self._hover_shadow.setColor(QColor(75, 163, 247, glow_alpha))
-
-    @staticmethod
-    def _make_soft_dot_pixmap(hex_color, size=14):
-        """부드러운 glow 있는 색상 원 QPixmap 생성"""
-        from PyQt6.QtGui import QPixmap, QPainter, QColor, QRadialGradient
-        pm = QPixmap(size, size)
-        pm.fill(Qt.GlobalColor.transparent)
-        p = QPainter(pm)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        c = QColor(hex_color)
-        grad = QRadialGradient(size/2, size/2, size/2)
-        grad.setColorAt(0.0, QColor(c.red(), c.green(), c.blue(), 255))
-        grad.setColorAt(0.35, QColor(c.red(), c.green(), c.blue(), 200))
-        grad.setColorAt(0.65, QColor(c.red(), c.green(), c.blue(), 90))
-        grad.setColorAt(1.0, QColor(c.red(), c.green(), c.blue(), 0))
-        p.setBrush(grad)
-        p.setPen(Qt.PenStyle.NoPen)
-        p.drawEllipse(0, 0, size, size)
-        p.end()
-        return pm
-
-    def _on_header_click(self, event):
-        """헤더 클릭 → 좌클릭: 접기/펼치기 / 우클릭: 컨텍스트 메뉴"""
-        try:
-            if event.button() == Qt.MouseButton.LeftButton:
-                self.toggle_collapse()
-            elif event.button() == Qt.MouseButton.RightButton:
-                self._show_card_context_menu(event.globalPosition().toPoint())
-        except Exception as e:
-            print(f"[IndependentCard._on_header_click] {e}")
-            import traceback; traceback.print_exc()
-
-    def _show_card_context_menu(self, global_pos):
-        """카드 헤더 우클릭 메뉴"""
-        from PyQt6.QtWidgets import QMenu
-        from .claude_theme import C as _CT
-        file_count = len(self.file_list)
-        menu = QMenu(self)
-        menu.setStyleSheet(f"""
-            QMenu {{
-                background-color: {_CT['bg_2']};
-                border: 1px solid {_CT['border']};
-                border-radius: 8px;
-                padding: 6px 0px;
-                color: {_CT['fg_0']};
-                font-size: 9.5pt;
-            }}
-            QMenu::item {{
-                padding: 8px 22px;
-                border-radius: 4px;
-                margin: 2px 6px;
-            }}
-            QMenu::item:selected {{
-                background-color: {_CT['accent_bg']};
-                color: {_CT['accent_hi']};
-            }}
-        """)
-        act_delete = menu.addAction(f"🗑️  카드 전체 삭제 ({file_count}개 파일)")
-        act_delete.triggered.connect(self._delete_card_all_files)
-        menu.exec(global_pos)
-
-    def _delete_card_all_files(self):
-        """IndependentCard 의 모든 파일을 디스크에서 삭제"""
-        from .dialogs import JarvisMessageBox
-        if not self.file_list:
-            return
-        msg = f"'{self.doc_type}' 카드의 파일 {len(self.file_list)}개를 모두 삭제합니다.\n\n"
-        msg += "삭제될 파일:\n"
-        msg += "\n".join(f"  • {f}" for f in self.file_list[:10])
-        if len(self.file_list) > 10:
-            msg += f"\n  ... 외 {len(self.file_list) - 10}개"
-        msg += "\n\n이 작업은 되돌릴 수 없습니다. 계속하시겠습니까?"
-        if not JarvisMessageBox.question(self, "카드 전체 삭제 확인", msg):
-            return
-        deleted = []
-        failed = []
-        for f in self.file_list:
-            fp = os.path.join(self.directory, f)
-            try:
-                if os.path.exists(fp):
-                    os.remove(fp)
-                    deleted.append(f)
-            except Exception as e:
-                failed.append((f, str(e)))
-        try:
-            self.parent_widget.emit_log(
-                f"[카드 삭제] {self.doc_type} — {len(deleted)}개 삭제, {len(failed)}개 실패"
-            )
-        except Exception:
-            pass
-        try:
-            self.parent_widget.rename_trigger_signal.emit()
-        except Exception:
-            pass
-        if failed:
-            JarvisMessageBox.warning(
-                self, "일부 삭제 실패",
-                f"{len(failed)}개 파일 삭제 실패:\n" + "\n".join(f"  • {n}: {e}" for n, e in failed[:5])
-            )
-
-    def toggle_collapse(self):
-        """접기/펼치기 토글"""
-        try:
-            # 토글 중 호버 애니메이션 억제 + drop shadow 일시 비활성화 (덜덜 떨림 방지)
-            self._toggle_in_progress = True
-            self._suspend_hover_fx()
-            was_expanded = not self.is_collapsed
-            self.is_collapsed = not self.is_collapsed
-            self.body_widget.setVisible(not self.is_collapsed)
-            # lbl_arrow 가 pixmap 기반이 된 경우를 대비 — Chevron pixmap 회전
-            try:
-                from .claude_icons import pixmap as _icpx
-                from .claude_theme import C as _CT
-                from PyQt6.QtGui import QTransform
-                pm = _icpx("Chevron", size=14, color=_CT['fg_2'])
-                if not self.is_collapsed:
-                    pm = pm.transformed(QTransform().rotate(90))
-                self.lbl_arrow.setPixmap(pm)
-            except Exception:
-                pass
-            # 레이아웃 안정화 후 플래그 해제 + shadow 복원
-            QTimer.singleShot(120, self._resume_hover_fx)
-            # 펼친 상태에서 파일 변경이 있었고 지금 접히는 중이면 폴더 재스캔
-            if was_expanded and self.is_collapsed and self._dirty:
-                self._dirty = False
-                parent = self.parent_widget
-                if hasattr(parent, 'run_intelligent_merge'):
-                    from PyQt6.QtCore import QTimer
-                    QTimer.singleShot(150, parent.run_intelligent_merge)
-        except Exception as e:
-            print(f"[IndependentCard.toggle_collapse] {e}")
-            import traceback; traceback.print_exc()
-
-    def _update_title_count(self):
-        """헤더의 '(N건)' 카운트 즉시 갱신"""
-        if hasattr(self, 'lbl_count_pill'):
-            self.lbl_count_pill.setText(f"{self.list_widget.count()}건")
-
-    def get_status(self):
-        """필터용 상태 반환 (독립 카드는 항상 green)"""
-        return self._status
-
-    def _show_context_menu(self, pos):
-        """우클릭 메뉴"""
-        item = self.list_widget.itemAt(pos)
-        if not item:
-            return
-        from PyQt6.QtWidgets import QMenu, QInputDialog
-        menu = QMenu(self)
-        menu.setStyleSheet("""
-            QMenu {
-                background-color: rgba(35, 40, 50, 240);
-                border: 1px solid #135166;
-                border-radius: 8px;
-                padding: 6px 0px;
-                color: #ffffff;
-                font-size: 10pt;
-            }
-            QMenu::item {
-                padding: 8px 24px;
-                border-radius: 4px;
-                margin: 2px 6px;
-            }
-            QMenu::item:selected {
-                background-color: rgba(0, 200, 255, 50);
-                color: #00ffff;
-            }
-        """)
-        action_rename = menu.addAction("이름 변경")
-        action_delete = menu.addAction("삭제")
-
-        action = menu.exec(self.list_widget.mapToGlobal(pos))
-        if action == action_rename:
-            self._rename_file(item)
-        elif action == action_delete:
-            self._delete_file(item)
-
-    def _show_rename_dialog(self, old_name):
-        """Frosted Glass 스타일 이름 변경 다이얼로그 (확장자 자동 보존)"""
-        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QWidget, QGraphicsDropShadowEffect
-        from PyQt6.QtGui import QFont
-
-        # 확장자 분리: 입력란에는 확장자 제외, 저장 시 자동으로 다시 붙임
-        base_name, ext = os.path.splitext(old_name)
-        display_name = base_name if ext else old_name
-
-        dlg = QDialog(self)
-        dlg.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
-        dlg.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        dlg.setMinimumWidth(450)
-
-        container = QWidget(dlg)
-        container.setObjectName("rename_dlg2")
-        container.setStyleSheet("""
-            #rename_dlg2 {
-                background-color: rgba(45, 50, 60, 235);
-                border: 1px solid #40464e;
-                border-radius: 16px;
-            }
-        """)
-        shadow = QGraphicsDropShadowEffect(dlg)
-        shadow.setBlurRadius(25)
-        shadow.setXOffset(0)
-        shadow.setYOffset(4)
-        shadow.setColor(Qt.GlobalColor.black)
-        container.setGraphicsEffect(shadow)
-
-        outer = QVBoxLayout(dlg)
-        outer.setContentsMargins(8, 8, 8, 8)
-        outer.addWidget(container)
-
-        layout = QVBoxLayout(container)
-        layout.setContentsMargins(24, 24, 24, 20)
-        layout.setSpacing(12)
-
-        lbl = QLabel("파일 이름 변경")
-        lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lbl.setFont(QFont("Segoe UI", 13, QFont.Weight.Bold))
-        lbl.setStyleSheet("color: #ffffff; background: transparent;")
-        layout.addWidget(lbl)
-
-        input_name = QLineEdit(display_name)
-        input_name.setFont(QFont("Segoe UI", 10))
-        input_name.setStyleSheet(
-            "background: rgba(20,25,35,200); color: #fff; border: 1px solid #555; "
-            "padding: 8px; border-radius: 8px; font-size: 10pt;"
-        )
-        input_name.selectAll()
-        layout.addWidget(input_name)
-
-        btn_row = QHBoxLayout()
-        btn_row.setSpacing(10)
-        result = {"ok": False}
-
-        btn_cancel = QPushButton("취소")
-        btn_cancel.setFixedHeight(38)
-        btn_cancel.setFont(QFont("Segoe UI", 10))
-        btn_cancel.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_cancel.setStyleSheet("""
-            QPushButton { background-color: rgba(100,105,115,180); border: 1px solid #585c64;
-                border-radius: 10px; color: #fff; padding: 6px 20px; }
-            QPushButton:hover { background-color: rgba(120,125,135,200); }
-        """)
-        btn_cancel.clicked.connect(dlg.reject)
-        btn_row.addWidget(btn_cancel)
-
-        btn_ok = QPushButton("변경")
-        btn_ok.setFixedHeight(38)
-        btn_ok.setFont(QFont("Segoe UI", 10, QFont.Weight.Medium))
-        btn_ok.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_ok.setStyleSheet("""
-            QPushButton { background-color: rgba(30,35,45,200); border: 2px solid #00d4ff;
-                border-radius: 10px; color: #00d4ff; padding: 6px 20px; }
-            QPushButton:hover { background-color: rgba(0,212,255,40); border-color: #00ffff; color: #00ffff; }
-        """)
-        btn_ok.clicked.connect(lambda: (result.update({"ok": True}), dlg.accept()))
-        btn_row.addWidget(btn_ok)
-        input_name.returnPressed.connect(lambda: (result.update({"ok": True}), dlg.accept()))
-
-        layout.addLayout(btn_row)
-        dlg.exec()
-        # 확장자 자동 복원
-        new_text = input_name.text().strip()
-        dlg.deleteLater()
-        if new_text and ext:
-            return new_text + ext, result["ok"]
-        return new_text, result["ok"]
-
-    def _rename_file(self, item):
-        """파일 이름 변경"""
-        old_path = item.data(Qt.ItemDataRole.UserRole)
-        old_name = os.path.basename(old_path)
-        new_name, ok = self._show_rename_dialog(old_name)
-        if ok and new_name and new_name != old_name:
-            new_path = os.path.join(os.path.dirname(old_path), new_name)
-            try:
-                os.rename(old_path, new_path)
-                item.setText(new_name)
-                item.setData(Qt.ItemDataRole.UserRole, new_path)
-                self.parent_widget.emit_log(f"[독립문서] 이름 변경: {old_name} → {new_name}")
-                self._dirty = True  # 접을 때 재스캔 트리거
-            except Exception as e:
-                from .dialogs import JarvisMessageBox
-                JarvisMessageBox.warning(self, "이름 변경 실패", str(e))
-
-    def _rename_selected(self):
-        """F2 키로 선택된 파일 이름 변경"""
-        item = self.list_widget.currentItem()
-        if item:
-            self._rename_file(item)
-
-    def _delete_selected(self):
-        """Delete 키로 선택된 파일 삭제 (다중 선택 지원)"""
-        items = self.list_widget.selectedItems()
-        if not items:
-            return
-        if len(items) == 1:
-            self._delete_file(items[0])
-            return
-        # 다중 선택 — 한 번의 확인 후 일괄 삭제
-        from .dialogs import JarvisMessageBox
-        names = [os.path.basename(it.data(Qt.ItemDataRole.UserRole)) for it in items]
-        preview = "\n".join(f"  • {n}" for n in names[:5])
-        if len(names) > 5:
-            preview += f"\n  ... 외 {len(names) - 5}개"
-        if not JarvisMessageBox.question(
-            self, "삭제 확인",
-            f"선택한 {len(items)}개 파일을 삭제할까요?\n\n{preview}"
-        ):
-            return
-        failed = []
-        for item in list(items):
-            path = item.data(Qt.ItemDataRole.UserRole)
-            name = os.path.basename(path)
-            try:
-                os.remove(path)
-                row = self.list_widget.row(item)
-                self.list_widget.takeItem(row)
-                self.parent_widget.emit_log(f"[독립문서] 삭제: {name}")
-            except Exception as e:
-                failed.append((name, str(e)))
-        self._dirty = True
-        self._update_title_count()
-        if failed:
-            msg = f"일부 삭제 실패 ({len(failed)}개):\n"
-            for n, e in failed[:5]:
-                msg += f"  • {n}: {e}\n"
-            JarvisMessageBox.warning(self, "삭제 실패", msg)
-
-    def _open_item_file(self, item):
-        """더블클릭 → OS 기본 프로그램으로 파일 열기."""
-        if not item:
-            return
-        path = item.data(Qt.ItemDataRole.UserRole)
-        self._open_file_path(path)
-
-    def _open_selected_file(self):
-        """Enter 키 → 선택 파일 열기."""
-        item = self.list_widget.currentItem()
-        if item:
-            self._open_item_file(item)
-
-    def _open_file_path(self, path: str):
-        if not path:
-            return
-        import os as _os, subprocess as _sp
-        try:
-            if _os.path.exists(path):
-                if _os.name == 'nt':
-                    _os.startfile(path)
-                else:
-                    _sp.Popen(['xdg-open', path])
-        except Exception as e:
-            print(f"[open file] {e}")
-
-    def _delete_file(self, item):
-        """파일 삭제"""
-        path = item.data(Qt.ItemDataRole.UserRole)
-        name = os.path.basename(path)
-        from .dialogs import JarvisMessageBox
-        if JarvisMessageBox.question(self, "삭제 확인", f"'{name}' 파일을 삭제할까요?"):
-            try:
-                os.remove(path)
-                row = self.list_widget.row(item)
-                self.list_widget.takeItem(row)
-                self.parent_widget.emit_log(f"[독립문서] 삭제: {name}")
-                self._dirty = True  # 접을 때 재스캔 트리거
-                self._update_title_count()  # 헤더 건수 즉시 갱신
-            except Exception as e:
-                JarvisMessageBox.warning(self, "삭제 실패", str(e))
 
 def _cleanup_empty_marked_folders(parent, folders):
     """폴더 정리 후 마킹된 원본 폴더가 비어 있으면 삭제.
@@ -1245,11 +434,6 @@ class GroupCard(GlassFrame):
 
     def _suspend_hover_fx(self):
         """토글 중 호버 애니메이션 + drop shadow 일시 정지 (깜빡임 방지)"""
-        if getattr(self, '_hover_anim', None) is not None:
-            try:
-                self._hover_anim.stop()
-            except RuntimeError:
-                pass
         # drop shadow 일시 비활성화 — 레이아웃 재계산 중 블러 재렌더링 방지
         if hasattr(self, '_hover_shadow') and self._hover_shadow is not None:
             self._hover_shadow.setEnabled(False)
@@ -1275,20 +459,6 @@ class GroupCard(GlassFrame):
         BL 카드가 많을 때 deleteLater() 만 호출하면 살아있는 애니메이션이
         valueChanged 시그널로 deleted 객체의 _apply_card_bg 를 호출해 크래시.
         이 함수가 그것을 방지함."""
-        try:
-            anim = getattr(self, '_hover_anim', None)
-            if anim is not None:
-                try:
-                    anim.valueChanged.disconnect()
-                except (TypeError, RuntimeError):
-                    pass
-                try:
-                    anim.stop()
-                except RuntimeError:
-                    pass
-                self._hover_anim = None
-        except Exception:
-            pass
         try:
             if hasattr(self, '_hover_shadow') and self._hover_shadow is not None:
                 try:
@@ -1401,7 +571,6 @@ class GroupCard(GlassFrame):
         # 카드 자체에 모던한 배경 (호버 시 부드럽게 밝아지는 애니메이션)
         self.setObjectName("GroupCardRoot")
         self._hover_progress = 0.0
-        self._hover_anim = None
         self._toggle_in_progress = False
         self._selected_row = None
 
@@ -1471,11 +640,6 @@ class GroupCard(GlassFrame):
         self.pill_dot.setObjectName("PillDot")
         self.pill_dot.setFixedSize(8, 8)
         pill_layout.addWidget(self.pill_dot)
-
-        # "ID :" 라벨은 Claude Design 시안에 없음 — 호환성 위해 dummy 생성
-        self.pill_label = QLabel("")
-        self.pill_label.setObjectName("PillLabel")
-        self.pill_label.hide()
 
         self.pill_id = QLabel(self.text_id)
         self.pill_id.setObjectName("PillId")
@@ -1645,20 +809,7 @@ class GroupCard(GlassFrame):
 
         self.layout.addWidget(self.header_widget)
 
-        # ── 카드 하단 서브 텍스트 (헤더 group-meta로 대체됨 - 호환성 위해 hidden) ──
-        file_count = len(self.data.get('docs', {}))
-        self.lbl_body_text = QLabel(f"{self.text_id}  ({self.data['company']}) · {file_count}건")
-        self.lbl_body_text.setStyleSheet(
-            "color: #a8bacc; font-size: 10pt; background: transparent; padding-left: 4px;"
-        )
-        self.lbl_body_text.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        self.lbl_body_text.hide()
-        # 레거시 호환 위젯 — 레이아웃에 추가하지 않아 공간 차지 안 함
-
-        # 레거시 호환
-        self.lbl_header = self.pill_id
-        self.lbl_id = self.pill_id
-        self.lbl_arrow = QLabel()    # 더미 (구 코드 호환)
+        # 레거시 호환 (hasattr 가드로 _update_status_badge 호출 여부 결정)
         self.lbl_badge = QLabel()    # 더미 (구 코드 호환)
 
         # ── 본문 (접힘/펼침 대상) — 캐럿 라인 기준 들여쓰기 정렬 ──
@@ -1957,37 +1108,6 @@ class GroupCard(GlassFrame):
         except Exception as e:
             print(f"[sub_action] add file error: {e}")
 
-    def _sub_action_open_folder(self):
-        """폴더 열기 — 카드의 directory를 파일 탐색기에서 열기."""
-        try:
-            import os as _os, subprocess as _sp
-            path = getattr(self, 'directory', '') or ''
-            if path and _os.path.exists(path):
-                if _os.name == 'nt':
-                    _os.startfile(path)  # Windows
-                else:
-                    _sp.Popen(['xdg-open', path])
-        except Exception as e:
-            print(f"[sub_action] open folder error: {e}")
-
-    def _sub_action_reanalyze(self):
-        """다시 분석 — 검증 재실행."""
-        try:
-            self._run_amount_validation()
-            self._update_status_badge()
-        except Exception as e:
-            print(f"[sub_action] reanalyze error: {e}")
-
-    def _sub_action_exclude(self):
-        """제외 — 카드 숨기기."""
-        try:
-            self.hide()
-            # 필터 카운트도 갱신
-            if hasattr(self, 'status_changed'):
-                self.status_changed.emit()
-        except Exception as e:
-            print(f"[sub_action] exclude error: {e}")
-
     # ─────────────────────────────────────────────────
     # Warning banner 스타일 헬퍼 (severity: green/yellow/red/neutral)
     # ─────────────────────────────────────────────────
@@ -2140,7 +1260,6 @@ class GroupCard(GlassFrame):
         self._suspend_hover_fx()
         self.is_collapsed = not self.is_collapsed
         self.body_widget.setVisible(not self.is_collapsed)
-        self.lbl_arrow.setText("▶" if self.is_collapsed else "▼")
         # 정산서 카드: 펼칠 때 매칭 UI가 준비됐는데 아직 안 만들어졌으면 바로 구성
         # (구 펼치기 버튼 대체 — 매칭 UI가 기본 화면)
         if (not self.is_collapsed and getattr(self, 'mapping', None)
@@ -2481,7 +1600,7 @@ class GroupCard(GlassFrame):
                     
                     # 비용 항목별로 해당하는 파일이 폴더에 있는지 확인
                     # 같은 키워드의 파일 사용 횟수 추적 (N:N 매칭 지원)
-                    from core.constants import EXPENSE_SYNONYMS, FEE_INVOICE_ITEMS, FIXED_SLOT_KEYS
+                    from core.constants import FEE_INVOICE_ITEMS, FIXED_SLOT_KEYS
                     from core.validator import parse_amount, build_search_kws
                     used_files = []  # 파일명 키워드 매칭에 사용된 파일 추적
                     used_bi_map = {}  # {filename: set(used_billing_item_indices)} — 한 파일의 billing_items 를 복수 아이템이 나눠쓰는 케이스 지원
@@ -3649,7 +2768,6 @@ class GroupCard(GlassFrame):
 
     def _refresh_file_list(self):
         """파일 목록 위젯 갱신 (통일 디자인: 초록 도트 + 파일명 한 줄)"""
-        from .claude_theme import C as _CT
         from PyQt6.QtCore import QSize as _QSize
         self.file_list.clear()
         docs = self.data.get('docs', {})
@@ -4472,7 +3590,6 @@ class GroupCard(GlassFrame):
         """
         from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFileDialog
         from PyQt6.QtCore import Qt
-        from core.open_file_detector import get_file_type_icon
 
         from PyQt6.QtWidgets import QGraphicsDropShadowEffect
         from PyQt6.QtGui import QFont
@@ -4862,7 +3979,6 @@ class GroupCard(GlassFrame):
                 self.directory = directory
 
             def run(self):
-                import sys
                 core_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
                 if core_path not in sys.path:
                     sys.path.insert(0, core_path)
@@ -4956,8 +4072,8 @@ class FileFolderPickerDialog(QDialog):
 
     def _init_ui(self):
         from PyQt6.QtWidgets import (QGraphicsDropShadowEffect, QTreeView,
-                                     QAbstractItemView, QHeaderView)
-        from PyQt6.QtGui import QFont, QFileSystemModel
+                                     QAbstractItemView)
+        from PyQt6.QtGui import QFileSystemModel
 
         # 컨테이너 (Claude Design — 팝업 통일)
         from .claude_theme import C as _CT
@@ -5466,8 +4582,7 @@ class SendMailDialog(QDialog):
         self._load_mail_settings()
     
     def init_ui(self):
-        from PyQt6.QtWidgets import QFormLayout, QGraphicsDropShadowEffect
-        from PyQt6.QtGui import QFont
+        from PyQt6.QtWidgets import QGraphicsDropShadowEffect
 
         # Claude Design 컨테이너 (팝업 통일)
         from .claude_theme import C as _CT
@@ -5787,7 +4902,6 @@ class SendMailDialog(QDialog):
     def _load_mail_settings(self):
         """저장된 메일 설정 로드"""
         import json
-        from .utils import get_run_dir
         
         config_path = get_config_path()
         # 설정 파일이 없으면 속성이 아예 생기지 않아 발송 버튼에서 AttributeError 나던 결함 → 기본값 선행

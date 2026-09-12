@@ -8,9 +8,8 @@ import sys
 import json
 import subprocess
 import tempfile
-import threading
 import base64
-from urllib import request, error
+from urllib import request
 
 from version import __version__, APP_NAME, GITHUB_REPO
 

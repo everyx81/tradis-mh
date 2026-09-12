@@ -67,17 +67,6 @@ def get_aliases():
         return _load(ALIAS_FILE)
 
 
-def lookup_alias(name):
-    """별칭 표기 → 한글 상호. 1:N 별칭은 판별력 없음으로 간주해 None."""
-    name = (name or '').strip()
-    if not name:
-        return None
-    entry = get_aliases().get(name)
-    if not isinstance(entry, dict) or len(entry) != 1:
-        return None
-    return next(iter(entry))
-
-
 def learn_alias(alias, canonical):
     """병합 확정 시 표기 ↔ 상호 짝 학습. 호출 측에서 강증거(BL 일치) 필터링 필수."""
     alias = (alias or '').strip()

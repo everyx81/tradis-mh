@@ -19,12 +19,6 @@ QToolTip {
 QMainWindow {
     background-color: transparent;
 }
-/* #OuterContainer는 gui_jarvis.py init_ui에서 Claude warm dark로 오버라이드됨 */
-#OuterContainer {
-    background-color: rgba(13, 15, 21, 255);
-    border: none;
-    border-radius: 14px;
-}
 QLabel {
     color: #c1c4c9;
     font-family: 'Pretendard', 'Malgun Gothic', 'Segoe UI', sans-serif;
@@ -106,68 +100,6 @@ QScrollArea {
     border: none;
     background-color: transparent;
 }
-/* 수직 스크롤바 - 평소 투명, 호버 시 표시 */
-QScrollBar:vertical {
-    border: none;
-    background: transparent;
-    width: 8px;
-    margin: 0px;
-    border-radius: 4px;
-}
-QScrollBar::handle:vertical {
-    background: rgba(0, 136, 136, 0);  /* 평소 투명 */
-    min-height: 30px;
-    border-radius: 4px;
-}
-QScrollBar:vertical:hover {
-    background: rgba(0, 20, 40, 100);
-}
-QScrollBar::handle:vertical:hover {
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-        stop:0 #006666, stop:0.5 #00aaaa, stop:1 #006666);
-}
-QScrollBar::handle:vertical:pressed {
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-        stop:0 #008888, stop:0.5 #00ffff, stop:1 #008888);
-}
-QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-    height: 0px;
-    background: none;
-}
-QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
-    background: none;
-}
-/* 수평 스크롤바 - 평소 투명, 호버 시 표시 */
-QScrollBar:horizontal {
-    border: none;
-    background: transparent;
-    height: 8px;
-    margin: 0px;
-    border-radius: 4px;
-}
-QScrollBar::handle:horizontal {
-    background: rgba(0, 136, 136, 0);  /* 평소 투명 */
-    min-width: 30px;
-    border-radius: 4px;
-}
-QScrollBar:horizontal:hover {
-    background: rgba(0, 20, 40, 100);
-}
-QScrollBar::handle:horizontal:hover {
-    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 #006666, stop:0.5 #00aaaa, stop:1 #006666);
-}
-QScrollBar::handle:horizontal:pressed {
-    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 #008888, stop:0.5 #00ffff, stop:1 #008888);
-}
-QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
-    width: 0px;
-    background: none;
-}
-QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
-    background: none;
-}
 /* JARVIS 홀로그램 스타일 알림창 */
 QMessageBox, QDialog {
     background-color: rgba(5, 15, 25, 120);
@@ -178,14 +110,6 @@ QMessageBox QLabel, QDialog QLabel {
     color: #ffffff;
     font-size: 11pt;
     padding: 10px;
-    background: transparent;
-}
-QMessageBox QLabel#qt_msgbox_label {
-    color: #ffffff;
-    font-size: 13pt;
-    font-weight: bold;
-}
-QMessageBox QLabel#qt_msgboxex_icon_label {
     background: transparent;
 }
 QMessageBox QPushButton, QDialog QPushButton {
@@ -310,84 +234,6 @@ DROP_LIST_HIGHLIGHT_STYLESHEET = """
         border: 1px solid #00ffff;
         border-radius: 5px;
     }
-"""
-
-# DraggableSearchResultList 스타일시트
-SEARCH_RESULT_STYLESHEET = """
-    QListWidget {
-        background-color: rgba(2, 11, 20, 30);
-        border: 2px solid #335566;
-        border-radius: 10px;
-        color: #ffffff;
-        font-size: 9pt;
-        padding: 5px;
-        outline: none;
-    }
-    QListWidget:focus {
-        border: 2px solid #335566;
-        outline: none;
-    }
-    QListWidget::item {
-        padding: 4px;
-        border-radius: 3px;
-        outline: none;
-    }
-    QListWidget::item:selected {
-        background-color: rgba(0, 255, 255, 40);
-        color: #00ffff;
-    }
-    QListWidget::item:hover {
-        background-color: rgba(255, 255, 255, 20);
-    }
-    QListWidget::item:focus {
-        outline: none;
-        border: none;
-    }
-"""
-
-# DraggableTreeView 스타일시트
-TREE_VIEW_STYLESHEET = """
-    QTreeView {
-        background-color: rgba(2, 11, 20, 30);
-        border: 2px solid #335566;
-        border-radius: 10px;
-        color: #ffffff;
-        font-size: 10pt;
-        padding: 5px;
-        outline: none;
-    }
-    QTreeView:focus {
-        border: 2px solid #335566;
-        outline: none;
-    }
-    QTreeView::item {
-        padding: 4px;
-        border-radius: 3px;
-        outline: none;
-    }
-    QTreeView::item:selected {
-        background-color: rgba(0, 255, 255, 40);
-        color: #00ffff;
-    }
-    QTreeView::item:hover {
-        background-color: rgba(255, 255, 255, 20);
-    }
-    QTreeView::item:focus {
-        outline: none;
-        border: none;
-    }
-    QTreeView::branch {
-        background-color: transparent;
-    }
-    QTreeView QLineEdit {
-        background-color: #1a2332;
-        border: 2px solid #00ffff;
-        border-radius: 3px;
-        color: #ffffff;
-        padding: 2px 5px;
-        selection-background-color: #00ffff;
-        selection-color: #000000;
-}
 """
 
 # FileManagerWidget list_target 스타일시트 (Claude Design warm dark)

@@ -6,8 +6,6 @@ block_cipher = None
 
 # 리소스 파일들 (이미지, 아이콘, 설정 등)
 datas = [
-    ('intro_jarvis.jpg', '.'),
-    ('jarvis_bg.png', '.'),
     ('app_icon.ico', '.'),
     ('haedo_logo.png', '.'),
     ('es.exe', '.'),  # Everything 검색 도구

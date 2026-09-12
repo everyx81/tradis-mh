@@ -41,12 +41,18 @@ def crash_log_path():
     return os.path.join(log_dir, f"crash_{datetime.datetime.now().strftime('%Y-%m-%d')}.log")
 
 
+_write_lock = threading.Lock()
+
+
 def _write(text):
+    # Windows 'a' 모드는 seek-to-end 후 write 라 원자적이지 않다. 두 스레드가 동시에
+    # 예외를 던지면 한쪽 기록이 덮여 사라지므로 락으로 직렬화한다.
     try:
-        with open(crash_log_path(), 'a', encoding='utf-8') as f:
-            f.write(text)
-            if not text.endswith('\n'):
-                f.write('\n')
+        with _write_lock:
+            with open(crash_log_path(), 'a', encoding='utf-8') as f:
+                f.write(text)
+                if not text.endswith('\n'):
+                    f.write('\n')
     except Exception:
         pass
     # 개발 모드(콘솔 실행)에서는 화면에도 표시

@@ -5,19 +5,13 @@
 
 # --- Network Constants ---
 PORT = 65433
-MAX_RETRIES = 3
-RETRY_DELAY = 1
 
 # --- Document Types Constants ---
-DOC_TYPE_FUNDS_REQUEST = "자금청구서"
-DOC_TYPE_IMPORT_STATEMENT = "자금정산서"
 DOC_TYPE_IMPORT_DECLARATION = "수입신고필증"
 DOC_TYPE_PAYMENT_NOTICE = "납부고지서"
 DOC_TYPE_IMPORT_TAX_INVOICE = "수입세금계산서"
-DOC_TYPE_FEE_TAX_INVOICE = "통관수수료계산서"
 DOC_TYPE_EXPORT_DECLARATION = "수출신고필증"
 DOC_TYPE_RETURN_DECLARATION = "반송신고필증"
-DOC_TYPE_CONFORMITY_CERT = "적합성평가확인서"
 
 # 시스템이 인식하는 표준 서류 목록 (정규화 기준)
 STANDARD_DOC_TYPES = {

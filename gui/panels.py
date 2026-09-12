@@ -15,7 +15,6 @@ from PyQt6.QtGui import *
 
 from .widgets import (DropListWidget, DraggableSearchResultList,
                       DraggableTreeView, NeonButton, get_unique_filename, TargetListWidget)
-from .utils import resource_path, get_run_dir
 from .styles import TARGET_LIST_STYLESHEET
 from .claude_theme import C as CT
 from core.config import get_config_path
@@ -24,7 +23,6 @@ from .report_panel import ReportPanel
 
 class FileManagerWidget(QWidget):
     # Signal for thread-safe UI refresh after export/import
-    refresh_after_move_signal = pyqtSignal(int, list, list, str)  # (count, duplicates, selected_folders, base_path)
     search_result_signal = pyqtSignal(list)  # Everything 검색 결과 전달용 시그널
     search_error_signal = pyqtSignal(str)    # 검색 오류 (스레드 → 메인, singleShot 람다는 실행 안 됨)
     quick_export_complete_signal = pyqtSignal(int, list, list, list)  # (count, duplicates, moved_folders, moved_dst_paths)
@@ -56,7 +54,6 @@ class FileManagerWidget(QWidget):
         self._dir_index_lock = threading.Lock()
         
         # Signal 연결: 백그라운드 쓰레드에서 emit되면 메인 쓰레드에서 슬롯 실행
-        self.refresh_after_move_signal.connect(self._on_move_complete)
         self.search_result_signal.connect(self._display_search_results)
         self.search_error_signal.connect(self._search_error)
         self.quick_export_complete_signal.connect(self._on_quick_export_complete)
@@ -600,7 +597,6 @@ class FileManagerWidget(QWidget):
         mk3_tab.setStyleSheet("background-color: transparent;")
         self.mk3_memo_layout = QVBoxLayout(mk3_tab)
         self.mk3_memo_layout.setContentsMargins(0, 0, 0, 0)
-        self.mk3_tab_widget = mk3_tab
 
         # 일정/통관/REPORT 탭은 항상 생성 (navbar에서 접근 제어)
         self.tabs.addTab(mk3_tab, "일정")
@@ -1427,14 +1423,6 @@ class FileManagerWidget(QWidget):
 
 
 
-    def add_native_files(self):
-        files, _ = QFileDialog.getOpenFileNames(self, "파일 선택", "", "All Files (*)")
-        if files: self.add_dropped_items(files)
-
-    def add_native_folder_new(self):
-        folder = QFileDialog.getExistingDirectory(self, "폴더 선택")
-        if folder: self.add_dropped_items([folder])
-
     def add_dropped_items(self, paths):
         if paths:
             new_paths = [p for p in paths if p not in self.move_list_t1]
@@ -1653,14 +1641,6 @@ class FileManagerWidget(QWidget):
             self.file_browser.navigate_to(path)
             self.current_path_label.setText(f"경로: {path}")
 
-    def delete_selected_items(self):
-        selected_items = self.list_widget.selectedItems()
-        if not selected_items: return
-        for item in selected_items:
-            path = item.data(Qt.ItemDataRole.UserRole)
-            if path in self.move_list_t1: self.move_list_t1.remove(path)
-        self.refresh_list_display()
-
     def refresh_list_display(self):
         self.list_widget.clear()
         for p in self.move_list_t1:
@@ -1670,43 +1650,6 @@ class FileManagerWidget(QWidget):
             item.setData(Qt.ItemDataRole.UserRole, p)
             self.list_widget.addItem(item)
 
-    def execute_move(self):
-        if not hasattr(self, 'current_target_folder') or not self.current_target_folder:
-            current_item = self.list_target.currentItem()
-            if not current_item:
-                JarvisMessageBox.information(self, "파일 이동", "먼저 MOVE TARGET에서 대상 폴더를 선택해 주세요.")
-                return
-            folder_name = current_item.data(Qt.ItemDataRole.UserRole)
-            if not folder_name or folder_name == "(No Folders)": return
-            base_path = self.path_callback() if self.path_callback else ""
-            self.current_target_folder = os.path.join(base_path, folder_name)
-        
-        dst_path = self.current_target_folder
-        if not os.path.exists(dst_path):
-            JarvisMessageBox.warning(self, "오류", f"대상 폴더가 존재하지 않습니다:\n{dst_path}")
-            return
-        
-        selected_items = self.list_widget.selectedItems()
-        if not selected_items:
-            JarvisMessageBox.information(self, "파일 이동", "이동할 파일을 먼저 선택(클릭)해 주세요.")
-            return
-
-        to_move = [item.data(Qt.ItemDataRole.UserRole) for item in selected_items]
-        moved_count = 0
-        for src in to_move:
-            try:
-                dest = os.path.join(dst_path, os.path.basename(src))
-                if os.path.exists(dest): dest = get_unique_filename(dest)
-                shutil.move(src, dest)
-                moved_count += 1
-                if src in self.move_list_t1: self.move_list_t1.remove(src)
-            except Exception as e: print(f"Move Error for {src}: {e}")
-        
-        if moved_count > 0:
-            self._load_folder_contents(dst_path)
-            self.emit_log(f"[완료] {moved_count}개 항목 이동됨")
-
-    def _quick_export_to(self, mode):
         root = self.archiver.import_root if mode == 'import' else self.archiver.export_root
         if not root:
              JarvisMessageBox.warning(self, "오류", f"{'가져오기' if mode == 'import' else '내보내기'} 경로가 설정되지 않았습니다!")
@@ -2553,19 +2496,6 @@ class FileManagerWidget(QWidget):
             if entry:
                 return entry[0], True
         return None, False
-
-    def _on_move_complete(self, count, duplicates, selected_folders, base_path):
-        self.emit_log(f"[상태] 이동 완료 (성공: {count}). UI를 갱신합니다.")
-        for folder in selected_folders:
-            abs_path = os.path.join(base_path, folder)
-            if abs_path in self.move_list_t1: self.move_list_t1.remove(abs_path)
-        self.refresh_targets()
-        self.refresh_list_display()
-        if count > 0 or duplicates:
-            msg = f"{count}개의 폴더를 성공적으로 이동했습니다."
-            if duplicates: msg += f"\n\n[알림] 중복으로 인한 제외: {len(duplicates)}건"
-            JarvisMessageBox.information(self, "작업 완료", msg)
-        else: self.emit_log("[알림] 이동된 항목이 없습니다.")
 
     def set_root(self, mode):
         d = QFileDialog.getExistingDirectory(self, f"Select {mode.upper()} Root")
@@ -3474,87 +3404,9 @@ class FileManagerWidget(QWidget):
         dlg.exec()
         dlg.deleteLater()
 
-    def _update_naming_preview(self):
-        """파일 이름 패턴 미리보기 갱신"""
-        pattern = self.input_file_pattern.text() or "{company}({bl}){doctype}.pdf"
-        try:
-            preview = pattern.format(company="케이즈트레이드", bl="STZFE2603048", doctype="운송료계산서", amount="242000")
-            self.lbl_naming_preview.setText(f"미리보기: {preview}")
-            self.lbl_naming_preview.setStyleSheet("color: rgba(255,255,255,0.5); font-size: 8pt;")
-        except (KeyError, ValueError):
-            self.lbl_naming_preview.setText("미리보기: (잘못된 패턴 — {company}, {bl}, {doctype} 사용)")
-            self.lbl_naming_preview.setStyleSheet("color: #ff6666; font-size: 8pt;")
-
-    def _move_merge_order_up(self):
-        row = self.list_merge_order.currentRow()
-        if row > 0:
-            item = self.list_merge_order.takeItem(row)
-            self.list_merge_order.insertItem(row - 1, item)
-            self.list_merge_order.setCurrentRow(row - 1)
-
-    def _move_merge_order_down(self):
-        row = self.list_merge_order.currentRow()
-        if row < self.list_merge_order.count() - 1:
-            item = self.list_merge_order.takeItem(row)
-            self.list_merge_order.insertItem(row + 1, item)
-            self.list_merge_order.setCurrentRow(row + 1)
-
-    def _reset_merge_order(self):
-        self.list_merge_order.clear()
-        for name in ["정산서", "신고필증", "납부고지서", "세금계산서", "비용계산서"]:
-            self.list_merge_order.addItem(name)
-
-    def _save_naming_settings(self):
-        """커스텀 네이밍 설정 저장"""
-        from core.config import get_config_path, DEFAULT_FILE_PATTERN, DEFAULT_MERGE_PATTERN, DEFAULT_MERGE_ORDER
-        import json
-
-        file_pat = self.input_file_pattern.text().strip() or DEFAULT_FILE_PATTERN
-        merge_pat = self.input_merge_pattern.text().strip() or DEFAULT_MERGE_PATTERN
-        order = [self.list_merge_order.item(i).text() for i in range(self.list_merge_order.count())]
-
-        # 패턴 유효성 검증
-        try:
-            file_pat.format(company="test", bl="test", doctype="test", amount="0")
-            merge_pat.format(company="test", bl="test")
-        except (KeyError, ValueError) as e:
-            JarvisMessageBox.warning(self, "패턴 오류", f"잘못된 패턴입니다: {e}\n사용 가능: {{company}}, {{bl}}, {{doctype}}, {{amount}}")
-            return
-
-        cfg_path = get_config_path()
-        try:
-            if os.path.exists(cfg_path):
-                with open(cfg_path, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-            else:
-                data = {}
-            data["custom_naming"] = {
-                "file_pattern": file_pat,
-                "merge_pattern": merge_pat,
-                "merge_order": order,
-            }
-            tmp = cfg_path + ".tmp"
-            with open(tmp, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=4)
-            os.replace(tmp, cfg_path)
-            JarvisMessageBox.information(self, "저장 완료", "네이밍 설정이 저장되었습니다.")
-            self.settings_changed.emit()
-        except Exception as e:
-            JarvisMessageBox.warning(self, "저장 실패", f"설정 저장 오류: {e}")
-
-    def _load_naming_settings(self):
-        """커스텀 네이밍 설정 로드"""
-        from core.config import get_custom_naming
-        naming = get_custom_naming()
-        self.input_file_pattern.setText(naming["file_pattern"])
-        self.input_merge_pattern.setText(naming["merge_pattern"])
-        self.list_merge_order.clear()
-        for name in naming["merge_order"]:
-            self.list_merge_order.addItem(name)
-
     def _show_manual_dialog(self):
         """사용자 매뉴얼 표시 다이얼로그"""
-        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QTextBrowser, QPushButton
+        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QTextBrowser
         
         dlg = QDialog(self)
         dlg.setWindowTitle("TRADIS 정산 매뉴얼")

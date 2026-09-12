@@ -6,15 +6,13 @@ Gemini AI 기반 PDF OCR 분석
 import os
 import sys
 import re
-import io
 import json
 import time
-import threading
 import hashlib
 import copy
 
 from .config import get_client
-from .utils import pdf_lock, cache_lock
+from .utils import cache_lock
 
 # (절대경로, mtime, size) → md5. 같은 파일을 반복문에서 여러 번 검증할 때
 # 전체 재읽기+재해시를 피한다. 파일이 수정되면 mtime/size가 바뀌어 키가 달라짐.

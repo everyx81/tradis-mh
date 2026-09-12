@@ -441,9 +441,6 @@ class FileBrowserWidget(QWidget):
             self._apply_search_style(False)
         self._populate()
 
-    def refresh(self):
-        self._populate()
-
     # ---------- 검색 · 정렬 ----------
     def _apply_search_style(self, has_text):
         """검색어 유무에 따라 입력창 강조 (파란 테두리)"""

@@ -4,7 +4,6 @@
 """
 
 import os
-import sys
 import re
 import time
 import threading
@@ -83,10 +82,7 @@ class AutoRenamer:
 
         if self.executor:
             try:
-                if sys.version_info >= (3, 9):
-                    self.executor.shutdown(wait=False, cancel_futures=True)
-                else:
-                    self.executor.shutdown(wait=False)
+                self.executor.shutdown(wait=False, cancel_futures=True)
             except Exception as e:
                 print(f"[경고] Executor 종료 오류: {e}")
             finally:
@@ -515,7 +511,6 @@ class AutoRenamer:
         _EXCLUDE_DOC_TYPES = {"수입신고서", "자금청구서"}
 
         import re as _re
-        import json as _json
         from core.validator import parse_amount as _parse_amount, build_search_kws as _build_search_kws
         from .constants import ANCHOR_DOC_TYPES, REQUIREMENT_FEE_SPECIFIC, REQUIREMENT_FEE_GENERIC
         from .form_parser import extract_declaration_no as _extract_decl_no

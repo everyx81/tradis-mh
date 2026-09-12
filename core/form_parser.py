@@ -224,14 +224,6 @@ def correct_misread_declaration(ai_doc_type, text):
     return None
 
 
-def correct_misread_declaration_file(ai_doc_type, fp):
-    """파일 경로로 신고필증 오분류 보완. 실패/판단불가면 None."""
-    try:
-        return correct_misread_declaration(ai_doc_type, _first_page_text(fp))
-    except Exception:
-        return None
-
-
 # ── 서식 제목 직독 서류 종류 확정 ──
 # 1페이지에 서식 제목이 그대로 인쇄되는 문서는 그 제목을 서류 종류로 쓴다.
 # AI 가 실행마다 비슷한 다른 종류(적합성평가확인서 등)로 스냅하는 오분류 차단.

@@ -24,11 +24,11 @@ import subprocess
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QGridLayout,
                              QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
                              QFrame, QLineEdit, QTextEdit, QDialog,
-                             QFileDialog, QMessageBox, QScrollArea, QGraphicsOpacityEffect,
+                             QFileDialog, QScrollArea,
                              QStackedWidget, QSizePolicy)
-from PyQt6.QtCore import (Qt, QTimer, pyqtSignal, QPropertyAnimation, QEasingCurve,
-                          QPoint, QParallelAnimationGroup, QEvent, QSize)
-from PyQt6.QtGui import QPixmap, QFont, QIcon, QColor
+from PyQt6.QtCore import (Qt, QTimer, pyqtSignal, QEasingCurve,
+                          QEvent, QSize)
+from PyQt6.QtGui import QFont, QIcon, QColor
 
 # Internal Modules (Logic)
 from core.file_processor import AutoRenamer
@@ -43,14 +43,14 @@ from core.config import get_config_path
 
 # GUI Modules (Refactored)
 from gui.styles import GLOBAL_STYLESHEET
-from gui.claude_theme import C as CT, APP_STYLESHEET, SIDE_TAB_STYLE
+from gui.claude_theme import C as CT
 from gui.utils import resource_path, get_run_dir
 from gui.widgets import GlassFrame, NeonButton
 from gui.mk3_widgets import MK3ScheduleOnlyWidget, MK3MemoOnlyWidget
-from gui.dialogs import IntroWindow, GroupCard
+from gui.dialogs import GroupCard
 from gui.panels import FileManagerWidget
 from gui.jarvis_toast import get_toast_handler, show_custom_toast  # [NEW] Custom Toast Imports
-from version import __version__, APP_NAME
+from version import __version__
 from updater import check_for_update, download_update, apply_update
 
 
@@ -101,9 +101,6 @@ class JarvisGUI(QMainWindow):
         # 카드 [파일 추가] 버튼이 사용하는 첨부 데이터 저장소
         self.marked_data = {}  # {invoice_id: [{'name': str, 'path': str, 'icon': str}, ...]}
         
-        # 메일 모니터 초기화 (기능 제거됨)
-        self.mail_monitor = None
-        
         # ReadyKorea 자동화 초기화 (지연 로딩)
         self.rk_automation = None
         self.last_export_data = None  # 마지막 파싱된 수출 데이터 저장
@@ -119,7 +116,6 @@ class JarvisGUI(QMainWindow):
 
         # Setup UI
         self.init_ui()
-        self.load_background()
         self.load_settings()
         
         # Connect Signals
@@ -152,9 +148,6 @@ class JarvisGUI(QMainWindow):
         except Exception:
             pass
         
-        # 메일 모니터링 자동 시작 (기능 제거됨)
-        # QTimer.singleShot(2000, self._start_mail_monitoring)
-
         # 창을 화면 중앙에 배치
         self._center_on_screen()
         
@@ -538,7 +531,6 @@ class JarvisGUI(QMainWindow):
 
         # 드롭 섀도 (맥 스타일 — 테두리 대신 부드러운 외곽 그림자)
         from PyQt6.QtWidgets import QGraphicsDropShadowEffect
-        from PyQt6.QtGui import QColor
         _shadow = QGraphicsDropShadowEffect(self.outer_container)
         _shadow.setBlurRadius(40)
         _shadow.setOffset(0, 6)
@@ -696,7 +688,6 @@ class JarvisGUI(QMainWindow):
     def _create_vertical_navbar(self):
         """오른쪽 세로 NavBar — Claude Design (icon above label, 세로 스택)"""
         from gui.claude_icons import pixmap as _icpx
-        from PyQt6.QtCore import QSize
         from PyQt6.QtWidgets import QToolButton
 
         self.navbar = QWidget()
@@ -831,7 +822,6 @@ class JarvisGUI(QMainWindow):
             self.emit_log(f"[잠금] '{tab_name}' 탭은 관리자 모드에서만 사용할 수 있습니다.")
             return
         from gui.claude_icons import pixmap as _icpx
-        from PyQt6.QtCore import QSize
         for name, btn in self.nav_buttons.items():
             is_active = (name == tab_name)
             btn.setChecked(is_active)
@@ -1260,7 +1250,6 @@ class JarvisGUI(QMainWindow):
             WH_KEYBOARD_LL = 13
             WM_KEYDOWN = 0x0100
             WM_SYSKEYDOWN = 0x0104
-            WM_QUIT = 0x0012
             VK_CONTROL = 0x11
             VK_SHIFT = 0x10
             VK_MENU = 0x12  # Alt
@@ -1408,8 +1397,6 @@ class JarvisGUI(QMainWindow):
     
     def show_hotkey_settings(self):
         """단축키 설정 다이얼로그 표시 - Nano Banana Style"""
-        from gui.widgets import GlassFrame, NeonButton
-        
         dlg = QDialog(self)
         dlg.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
         dlg.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
@@ -1780,29 +1767,8 @@ class JarvisGUI(QMainWindow):
         else:
             self.showMaximized()
 
-    def load_background(self):
-        # Iron Man 배경 비활성화 — 깔끔한 단색 배경 사용
-        self.bg_pixmap = None
-
-    def start_bg_animation(self):
-        # Iron Man 배경 비활성화 — 전역 GLOBAL_STYLESHEET의 #OuterContainer radial gradient 사용
-        # 이전에 cyan 경계로 덮어쓰던 로직 제거
-        if hasattr(self, 'bg_anim'):
-            self.bg_anim.start()
-            self._update_bg_label()
-
-    def _update_bg_label(self):
-        if hasattr(self, 'bg_label') and self.bg_pixmap:
-            scaled = self.bg_pixmap.scaled(self.size(), Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation)
-            self.bg_label.setPixmap(scaled)
-            x_pos = (self.width() - scaled.width()) // 2
-            y_pos = (self.height() - scaled.height()) // 2
-            x_offset = -15
-            self.bg_label.setGeometry(x_pos + x_offset, y_pos, scaled.width(), scaled.height())
-
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        self._update_bg_label()
         if hasattr(self, 'file_manager'):
             self.file_manager.reposition_search_panel()
 
@@ -1819,23 +1785,6 @@ class JarvisGUI(QMainWindow):
         self.line_path.setReadOnly(True)
         self.line_path.hide()
 
-        self.btn_browse = QPushButton()
-        self.btn_browse.clicked.connect(self.browse_directory)
-        self.btn_browse.hide()
-
-        self.btn_api_settings = QPushButton()
-        self.btn_api_settings.clicked.connect(self.open_api_settings)
-        self.btn_api_settings.hide()
-
-        self.btn_start = QPushButton()
-        self.btn_start.clicked.connect(self.start_monitoring)
-        self.btn_start.hide()
-
-        self.btn_stop = QPushButton()
-        self.btn_stop.clicked.connect(self.stop_monitoring)
-        self.btn_stop.setEnabled(False)
-        self.btn_stop.hide()
-
         # log_area: floating panel 으로 이동하므로 여기서는 QTextEdit 만 생성 (parent=None)
         self.log_area = QTextEdit()
         self.log_area.setReadOnly(True)
@@ -1851,12 +1800,6 @@ class JarvisGUI(QMainWindow):
                 padding: 8px 10px;
             }}
         """)
-
-        # 호환 dummy
-        self.lbl_api_version = QLabel("")
-        self.lbl_api_version.hide()
-        self.lbl_app_version = QLabel(f"{APP_NAME} v{__version__}")
-        self.lbl_app_version.hide()
 
 
     # ─────────────────────────────────────────
@@ -1895,7 +1838,7 @@ class JarvisGUI(QMainWindow):
 
     def _brand_ignite(self):
         """점화 연출 — 순간 번쩍(0→255, 0.15초) → 안정 글로우 정착 → 느린 호흡."""
-        from PyQt6.QtCore import QVariantAnimation, QEasingCurve, QSequentialAnimationGroup
+        from PyQt6.QtCore import QVariantAnimation, QSequentialAnimationGroup
         self._brand_anim_stop()
         seq = QSequentialAnimationGroup(self)
 
@@ -1947,26 +1890,6 @@ class JarvisGUI(QMainWindow):
             if hasattr(self, 'lbl_brand_status'):
                 self.lbl_brand_status.setText(self._status_html_off)
 
-    def _btn_primary_css(self):
-        return f"""
-            QPushButton {{
-                background-color: {CT['accent']};
-                color: #ffffff;
-                border: 1px solid {CT['accent_hi']};
-                border-radius: 8px;
-                padding: 6px 12px;
-                font-size: 9.5pt;
-                font-weight: 600;
-            }}
-            QPushButton:hover {{ background-color: {CT['accent_hi']}; }}
-            QPushButton:pressed {{ background-color: {CT['accent_lo']}; }}
-            QPushButton:disabled {{
-                background-color: {CT['bg_2']};
-                color: {CT['fg_3']};
-                border: 1px solid {CT['border_soft']};
-            }}
-        """
-
     def _btn_secondary_css(self):
         return f"""
             QPushButton {{
@@ -1984,22 +1907,6 @@ class JarvisGUI(QMainWindow):
                 border: 1px solid {CT['border']};
             }}
             QPushButton:disabled {{ color: {CT['fg_3']}; }}
-        """
-
-    def _btn_icon_css(self):
-        return f"""
-            QPushButton {{
-                background-color: transparent;
-                color: {CT['fg_2']};
-                border: 1px solid transparent;
-                border-radius: 6px;
-                font-size: 13pt;
-                padding: 0;
-            }}
-            QPushButton:hover {{
-                background-color: {CT['bg_3']};
-                color: {CT['fg_0']};
-            }}
         """
 
     def setup_middle_panel(self):
@@ -2153,7 +2060,6 @@ class JarvisGUI(QMainWindow):
         # 그룹 수
         self.current_card_filter = 'all'
         self.group_cards = []
-        self.filter_btns = {}  # 레거시 호환 (칩 제거됨)
         self.lbl_section_hint = QLabel("그룹 0")
         self.lbl_section_hint.setStyleSheet(f"color: {CT['fg_3']}; font-size: 9pt; font-weight: 500; background: transparent;")
         title_row.addWidget(self.lbl_section_hint)
@@ -2327,9 +2233,6 @@ class JarvisGUI(QMainWindow):
     def _apply_card_filter(self, key):
         """필터 버튼 클릭 → 해당 상태 카드만 표시"""
         self.current_card_filter = key
-        # 모든 버튼 체크 해제 후 선택된 것만 체크
-        for k, btn in self.filter_btns.items():
-            btn.setChecked(k == key)
         # 카드 표시/숨김
         for card in self.group_cards:
             if not hasattr(card, 'get_status'):
@@ -2339,8 +2242,6 @@ class JarvisGUI(QMainWindow):
 
     def _refresh_filter_counts(self):
         """필터 상태 갱신 (칩 라벨은 숫자 없이 고정, 그룹 수는 section hint에만 표시)"""
-        if not hasattr(self, 'filter_btns'):
-            return
         total = len(self.group_cards)
         # 그룹 수 표시 갱신
         if hasattr(self, 'lbl_section_hint'):
@@ -2479,8 +2380,6 @@ class JarvisGUI(QMainWindow):
 
             # 필터 초기화 후 카운트 갱신
             self.current_card_filter = 'all'
-            for k, btn in self.filter_btns.items():
-                btn.setChecked(k == 'all')
             self._refresh_filter_counts()
             # 스캔 후 메모리 정리 + 추적 로그 (증가 추이 파악용, 파일 로그에만 기록)
             QTimer.singleShot(1500, self._post_scan_memory_cleanup)
@@ -2789,9 +2688,6 @@ class JarvisGUI(QMainWindow):
         # 무거운 모듈 백그라운드 프리로딩 (첫 OCR 지연 방지)
         threading.Thread(target=self._preload_ocr_modules, daemon=True).start()
         self.renamer.start(path)
-        self.btn_start.setEnabled(False)
-        self.btn_start.setText("RUNNING..")
-        self.btn_stop.setEnabled(True)
         # Claude Design: CircleToggle + state label 갱신
         if hasattr(self, '_update_state_ui'):
             self._update_state_ui(True)
@@ -2810,9 +2706,6 @@ class JarvisGUI(QMainWindow):
 
     def stop_monitoring(self):
         self.renamer.stop()
-        self.btn_start.setEnabled(True)
-        self.btn_start.setText("시작")
-        self.btn_stop.setEnabled(False)
         # Claude Design: CircleToggle + state label 갱신
         if hasattr(self, '_update_state_ui'):
             self._update_state_ui(False)
@@ -3011,9 +2904,6 @@ class JarvisGUI(QMainWindow):
                     return
         except (FileNotFoundError, OSError): pass
 
-    # 메일 모니터링 기능 완전히 제거됨
-    
-    # 메일 모니터링 기능(VERONICA UI 업데이트) 제거됨
     def _get_rk_automation(self):
         """ReadyKorea 자동화 지연 초기화"""
         if self.rk_automation is None:
@@ -3291,7 +3181,7 @@ class JarvisGUI(QMainWindow):
     def _save_license_tier(self, tier):
         """config.json에 라이선스 등급 저장"""
         try:
-            cfg = get_config_path()
+            get_config_path()
             from core.config import update_config
             update_config(license_tier=tier)   # 원자적 저장 + 설정 스냅샷 동기화
         except Exception as e:
@@ -3518,19 +3408,8 @@ if __name__ == "__main__":
 
     app = QApplication(sys.argv)
     app.setWindowIcon(QIcon(resource_path("app_icon.ico")))
-    SKIP_INTRO = True 
-    
-    if SKIP_INTRO:
-        window = JarvisGUI()
-        window.show()
-        window.start_bg_animation()
-        window._instance_lock = instance_socket
-    else:
-        intro = IntroWindow()
-        intro.show()
-        window = JarvisGUI()
-        intro.finished.connect(window.show)
-        intro.finished.connect(window.start_bg_animation)
-        window._instance_lock = instance_socket
-    
+    window = JarvisGUI()
+    window.show()
+    window._instance_lock = instance_socket
+
     sys.exit(app.exec())

@@ -1898,7 +1898,7 @@ class GroupCard(GlassFrame):
             except Exception:
                 pass
             try:
-                from auto_rename import gemini_ocr
+                from core.ocr import gemini_ocr
                 from core.config import get_client
                 cached = None
                 try:
@@ -2314,7 +2314,7 @@ class GroupCard(GlassFrame):
             self.parent_widget.rename_trigger_signal.emit()
             return
         # Import gemini_ocr at runtime to avoid circular imports
-        from auto_rename import gemini_ocr
+        from core.ocr import gemini_ocr
         self._analyzing = True
         self._set_btn_toggle("분석 중...")
         self.btn_toggle.setEnabled(False)
@@ -2353,7 +2353,7 @@ class GroupCard(GlassFrame):
     def _auto_analyze_from_cache(self):
         """카드 생성 시 OCR 캐시 기반으로 자동 매핑 → 체크리스트 표시"""
         try:
-            from auto_rename import gemini_ocr
+            from core.ocr import gemini_ocr
 
             statement_file = self.data['docs'].get("자금정산서") or self.data['docs'].get("정산서")
             if not statement_file:
@@ -2470,7 +2470,7 @@ class GroupCard(GlassFrame):
         statement_file = docs.get("자금정산서") or docs.get("정산서")
         if statement_file:
             try:
-                from auto_rename import gemini_ocr
+                from core.ocr import gemini_ocr
                 statement_path = os.path.join(self.directory, statement_file)
                 cached = gemini_ocr._get_cached_result(statement_path)
                 if cached:
@@ -3779,7 +3779,7 @@ class GroupCard(GlassFrame):
             dec_file = docs.get("수입신고필증")
             if not dec_file:
                 return ("Unknown", True)
-            from auto_rename import gemini_ocr
+            from core.ocr import gemini_ocr
             fp = os.path.join(self.directory, dec_file)
             cached = gemini_ocr._get_cached_result(fp)
             if not cached:
@@ -4158,7 +4158,7 @@ class GroupCard(GlassFrame):
             new_path = os.path.join(os.path.dirname(old_path), new_name)
             try:
                 os.rename(old_path, new_path)
-                from auto_rename import gemini_ocr
+                from core.ocr import gemini_ocr
                 gemini_ocr._update_cache_key(old_path, new_path)
                 self.parent_widget.emit_log(f"[파일 변경] {old_name} → {new_name}")
                 self.parent_widget.rename_trigger_signal.emit()
@@ -4192,7 +4192,7 @@ class GroupCard(GlassFrame):
             return
         try:
             os.rename(old_path, new_path)
-            from auto_rename import gemini_ocr
+            from core.ocr import gemini_ocr
             gemini_ocr.override_doc_type(old_path, new_path, new_doc_type,
                                          company_name=company, identifier=bl)
             self.parent_widget.emit_log(f"[종류 교정] {old_name} → {new_name}")

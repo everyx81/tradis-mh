@@ -24,8 +24,7 @@ from PyQt6.QtGui import QColor, QPainter, QPen, QBrush, QFont, QDrag, QFileSyste
 from .styles import (DROP_LIST_STYLESHEET, DROP_LIST_HIGHLIGHT_STYLESHEET,
                      SEARCH_RESULT_STYLESHEET, TREE_VIEW_STYLESHEET, MENU_STYLESHEET)
 
-# get_unique_filename 함수는 auto_rename에서 import
-from auto_rename import get_unique_filename
+from core.utils import get_unique_filename
 
 # 순환 import 방지를 위해 지연 import 사용
 def _get_jarvis_msgbox():

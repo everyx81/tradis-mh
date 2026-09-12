@@ -31,7 +31,10 @@ from PyQt6.QtCore import (Qt, QTimer, pyqtSignal, QPropertyAnimation, QEasingCur
 from PyQt6.QtGui import QPixmap, QFont, QIcon, QColor
 
 # Internal Modules (Logic)
-from auto_rename import AutoRenamer, check_single_instance, set_api_key, Archiver
+from core.file_processor import AutoRenamer
+from core.utils import check_single_instance
+from core.config import set_api_key
+from core.archiver import Archiver
 # calendar_manager: 지연 로딩 (init_ui에서 import)
 from core.config import get_config_path
 

@@ -515,7 +515,17 @@ class GeminiOCR:
         tmp_path = cache_path + ".tmp"
         with open(tmp_path, 'w', encoding='utf-8') as f:
             json.dump(self._cache_data, f, ensure_ascii=False, separators=(',', ':'))
-        os.replace(tmp_path, cache_path)
+        # Windows 에서 다른 프로세스(백신·인덱서)가 파일을 잡고 있으면 교체가 잠시 실패할 수 있음 → 짧게 재시도
+        for _i in range(5):
+            try:
+                os.replace(tmp_path, cache_path)
+                break
+            except PermissionError:
+                if _i == 4:
+                    try: os.unlink(tmp_path)
+                    except OSError: pass
+                    raise
+                time.sleep(0.05 * (_i + 1))
         try:
             self._cache_file_mtime = os.path.getmtime(cache_path)
         except OSError:

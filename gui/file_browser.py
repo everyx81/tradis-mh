@@ -75,12 +75,18 @@ def move_to_recycle_bin(paths):
     op.pFrom = src
     op.pTo = None
     op.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_WANTNUKEWARNING
+    move_to_recycle_bin.aborted = False
     try:
         result = ctypes.windll.shell32.SHFileOperationW(ctypes.byref(op))
+        # 사용자가 경고창에서 취소한 것은 오류가 아님 — 호출측이 오류 창을 띄우지 않도록 구분
+        move_to_recycle_bin.aborted = bool(op.fAnyOperationsAborted)
         return result == 0 and not op.fAnyOperationsAborted
     except Exception as e:
         print(f"휴지통 이동 오류: {e}")
         return False
+
+
+move_to_recycle_bin.aborted = False
 
 
 def _rel_time(ts):

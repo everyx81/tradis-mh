@@ -1761,9 +1761,10 @@ class FileManagerWidget(QWidget):
             if existing_rel is None:
                 # 인덱스는 디스크 캐시 시점 상태라 다른 PC가 그 사이 만든 폴더를 모를 수 있음 →
                 # 정확한 경로만 디스크에서 한 번 더 확인해 기존 '병합/새 폴더' 팝업으로 보낸다 (v1.1.77)
-                _disk_dup = os.path.join(root, comp, fid)
-                if os.path.isdir(_disk_dup):
-                    existing_rel, is_similar = os.path.join(comp, fid), False
+                for _c in dict.fromkeys([comp, comp.replace("★", "").strip()]):
+                    if _c and os.path.isdir(os.path.join(root, _c, fid)):
+                        existing_rel, is_similar = os.path.join(_c, fid), False
+                        break
             if existing_rel:
                 existing_full = os.path.join(root, existing_rel)
                 if is_similar:
@@ -1857,13 +1858,17 @@ class FileManagerWidget(QWidget):
                 dst = os.path.join(dst_parent, fid)
                 try:
                     if os.path.isdir(dst):
-                        # 인덱스가 못 본 폴더가 이미 있으면 그 안으로 중첩(BL/BL)되던 문제 → (n) 이름으로
-                        dst = get_unique_filename(dst)
+                        # 사전 검사와 이동 사이의 짧은 순간에 폴더가 생긴 경우의 최후 방어 —
+                        # 그 안으로 중첩(BL/BL)되지 않게 폴더 이름 전체에 (n) 을 붙인다
+                        _n = 1
+                        while os.path.exists(f"{dst}({_n})"):
+                            _n += 1
+                        dst = f"{dst}({_n})"
                         self.emit_log(f" -> [중복 폴더] 서버에 이미 있음 → {os.path.basename(dst)} 로 이동")
                     shutil.move(src_path, dst)
                     count += 1
                     moved_dst_paths.append(dst)
-                    self._update_index_after_move(root, comp.replace("★", "").strip().upper(), fid, dst_parent)
+                    self._update_index_after_move(root, comp.replace("★", "").strip().upper(), os.path.basename(dst), dst_parent)
                     self.emit_log(f" -> [이동 성공] {folder_name} -> {os.path.basename(dst_parent)}/{fid}")
                 except Exception as e: self.emit_log(f" -> [이동 실패] {folder_name}: {e}")
 
@@ -1903,13 +1908,17 @@ class FileManagerWidget(QWidget):
                 dst = os.path.join(dst_parent, fid)
                 try:
                     if os.path.isdir(dst):
-                        # 인덱스가 못 본 폴더가 이미 있으면 그 안으로 중첩(BL/BL)되던 문제 → (n) 이름으로
-                        dst = get_unique_filename(dst)
+                        # 사전 검사와 이동 사이의 짧은 순간에 폴더가 생긴 경우의 최후 방어 —
+                        # 그 안으로 중첩(BL/BL)되지 않게 폴더 이름 전체에 (n) 을 붙인다
+                        _n = 1
+                        while os.path.exists(f"{dst}({_n})"):
+                            _n += 1
+                        dst = f"{dst}({_n})"
                         self.emit_log(f" -> [중복 폴더] 서버에 이미 있음 → {os.path.basename(dst)} 로 이동")
                     shutil.move(src_path, dst)
                     count += 1
                     moved_dst_paths.append(dst)
-                    self._update_index_after_move(root, comp.replace("★", "").strip().upper(), fid, dst_parent)
+                    self._update_index_after_move(root, comp.replace("★", "").strip().upper(), os.path.basename(dst), dst_parent)
                     self.emit_log(f" -> [새 폴더] {folder_name} -> {comp}/{fid}")
                 except Exception as e: self.emit_log(f" -> [이동 실패] {folder_name}: {e}")
 

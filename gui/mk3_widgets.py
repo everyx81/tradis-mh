@@ -1633,14 +1633,26 @@ class MK3MemoOnlyWidget(QWidget):
             except RuntimeError:   # 진행 중 탭이 다시 만들어져 편집기가 삭제된 경우
                 return False
 
+        _memo_id = editor.property("memo_id")
+
         def on_finished(result):
             self.worker = None
+            # 결과는 메모 id 로 직접 저장 — 진행 중 탭이 다시 만들어져 편집기가 바뀌어도 유실되지 않음
+            if _memo_id:
+                try:
+                    self.schedule_manager.update_memo(_memo_id, content=result)
+                except Exception as e:
+                    print(f"메모 AI 정리 저장 실패: {e}")
             if not _editor_alive():
+                # 편집기가 이미 교체됐으면 화면을 다시 읽어 저장본을 보여준다
+                try: self.reload_memos()
+                except Exception: pass
                 return
             editor.setProperty("ai_busy", False)
             editor.setReadOnly(False)
+            editor.blockSignals(True)
             editor.setPlainText(result)
-            self._save_current_memo()
+            editor.blockSignals(False)
 
         def on_error(error_msg):
             self.worker = None

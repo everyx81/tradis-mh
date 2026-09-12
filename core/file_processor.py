@@ -246,7 +246,9 @@ class AutoRenamer:
             dt = normalize_doc_type(dt)
 
             # OCR 전체 실패 시 1회 재시도 (다운로드 미완료 파일 대응)
+            _retried_all = False
             if dt == "Unknown" and cn == "Unknown" and iden == "Unknown":
+                _retried_all = True
                 self.log(f" -> [OCR 재시도] 전체 Unknown - 5초 후 재분석: {fn}")
                 time.sleep(5)
                 # 캐시 무효화 후 재분석
@@ -267,7 +269,8 @@ class AutoRenamer:
 
             # [NEW] BL 만 Unknown 인 경우 1회 재시도 (AI 비결정성 대응)
             # 자금청구서/정산서 등 일부 문서에서 BL 필드 인식이 간헐적으로 실패 → 재OCR 시 성공하는 케이스
-            elif iden == "Unknown" and dt != "Unknown" and cn != "Unknown":
+            # (전체 Unknown 재시도를 이미 한 파일은 BL 재시도를 또 하지 않음 — 이전 elif 와 동일한 배타성)
+            if not _retried_all and iden == "Unknown" and dt != "Unknown" and cn != "Unknown":
                 self.log(f" -> [OCR 재시도] BL 만 Unknown - 재분석: {fn}")
                 time.sleep(2)
                 gemini_ocr.invalidate(fp)  # 락 안에서 정확한 키만 삭제 (부분 문자열 삭제·락 우회 제거)
@@ -527,9 +530,13 @@ class AutoRenamer:
         def _cache_lookup(fn):
             nonlocal _cache_map
             if _cache_map is None:
+                # 파일을 직접 열지 않고 락 안의 메모리 사본을 복사 — 워커의 원자적 교체(os.replace)와
+                # 열린 파일 핸들이 충돌하던 창을 없앤다
                 try:
-                    with open(gemini_ocr._get_cache_path(dr), 'r', encoding='utf-8') as _cf:
-                        _cache_map = _json.load(_cf)
+                    from core.utils import cache_lock as _cache_lock
+                    import copy as _copy
+                    with _cache_lock:
+                        _cache_map = _copy.deepcopy(gemini_ocr._load_cache())
                 except Exception:
                     _cache_map = {}
             entry = _cache_map.get(fn)

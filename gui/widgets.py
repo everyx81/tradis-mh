@@ -388,6 +388,8 @@ class DropListWidget(QListWidget):
             try:
                 from .file_browser import move_to_recycle_bin
                 if not move_to_recycle_bin([path]):   # 영구 삭제(os.remove/rmtree) 대신 휴지통
+                    if move_to_recycle_bin.aborted:
+                        return   # 사용자가 취소 — 오류 아님
                     raise OSError("휴지통 이동 실패")
                 self.takeItem(self.row(item))
             except Exception as e:
@@ -405,7 +407,8 @@ class DropListWidget(QListWidget):
                 paths = [item.data(Qt.ItemDataRole.UserRole) for item in items]
                 paths = [p for p in paths if p and os.path.exists(p)]
                 if paths and not move_to_recycle_bin(paths):   # 영구 삭제 대신 휴지통
-                    msg_box.warning(self, "오류", "휴지통 이동에 실패했습니다.")
+                    if not move_to_recycle_bin.aborted:      # 사용자 취소는 오류 아님
+                        msg_box.warning(self, "오류", "휴지통 이동에 실패했습니다.")
                     return
                 for item in items:
                     row = self.row(item)
@@ -1291,6 +1294,8 @@ class DraggableTreeView(QTreeView):
         from .file_browser import move_to_recycle_bin
         failed = []
         if not move_to_recycle_bin(paths):
+            if move_to_recycle_bin.aborted:
+                return   # 사용자가 경고창에서 취소 — 오류 아님
             failed = [(os.path.basename(p), "휴지통 이동 실패") for p in paths if os.path.exists(p)]
 
         if failed:
@@ -1406,8 +1411,10 @@ class DraggableTreeView(QTreeView):
                     paths.append(local_path)
         
         if paths:
-            # Ctrl 드래그(복사)나 복사 액션 드롭까지 무조건 이동시키던 결함 → 드롭 액션을 따른다
-            _copy = event.proposedAction() == Qt.DropAction.CopyAction
+            # 기존 동작(끌어다 놓기 = 이동)은 그대로 두고, Ctrl 을 누른 채 놓을 때만 복사.
+            # proposedAction 으로 판정하면 탐색기가 다른 드라이브에서 끌 때 기본 제안이 '복사'라
+            # 평소 하던 이동이 복사로 바뀌므로, 사용자의 명시적 의도(Ctrl)만 본다.
+            _copy = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
             moved_count = 0
             for src in paths:
                 try:

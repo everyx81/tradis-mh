@@ -253,17 +253,20 @@ def load_config():
         pass
     return {}
 
-def _save_config(config):
-    """설정 파일 저장 (atomic write)"""
+def _save_config(config) -> bool:
+    """설정 파일 저장 (atomic write). 실패하면 False (호출측이 '저장 완료'로 오표시하지 않도록)."""
     try:
         cfg = get_config_path()
         tmp = cfg + ".tmp"
         with open(tmp, 'w', encoding='utf-8') as f:
             json.dump(config, f, ensure_ascii=False, indent=4)
         os.replace(tmp, cfg)
-    except OSError:
+        return True
+    except OSError as e:
+        print(f"[설정] 저장 실패: {e}")
         try: os.unlink(get_config_path() + ".tmp")
         except OSError: pass
+        return False
 
 
 def _persist_keys(*keys):
@@ -272,23 +275,42 @@ def _persist_keys(*keys):
     CONFIG 는 시작 시점 스냅샷이라 통째로 저장하면 그 사이 화면이 파일에 직접 쓴
     값(감시 폴더·단축키·관리자 상태 등)이 옛 값으로 되돌아간다(v1.1.77 수정).
     항상 디스크를 다시 읽어 우리 키만 덮어쓰고, 스냅샷도 최신으로 맞춘다."""
-    disk = load_config()
+    disk = _read_disk_or_snapshot()
     for k in keys:
         if k in CONFIG:
             disk[k] = CONFIG[k]
         else:
             disk.pop(k, None)
     _save_config(disk)
-    CONFIG.clear()
-    CONFIG.update(disk)
+    _sync_snapshot(disk)
 
 
 def update_config(**changes):
     """임의 키를 원자적으로 저장 (읽기→갱신→임시파일→교체). 화면 쪽 설정 저장용 단일 창구."""
-    disk = load_config()
+    disk = _read_disk_or_snapshot()
     disk.update(changes)
-    _save_config(disk)
-    CONFIG.clear()
+    if not _save_config(disk):
+        raise OSError("설정 파일 저장 실패: " + get_config_path())
+    _sync_snapshot(disk)
+
+
+def _read_disk_or_snapshot():
+    """디스크 최신본. 파일이 있는데 읽기/파싱에 실패하면 빈 값으로 덮어쓰지 않도록 스냅샷을 쓴다."""
+    try:
+        cp = get_config_path()
+        if not os.path.exists(cp):
+            return {}
+        with open(cp, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else dict(CONFIG)
+    except (OSError, json.JSONDecodeError):
+        return dict(CONFIG)
+
+
+def _sync_snapshot(disk):
+    """CONFIG 를 disk 내용으로 맞추되, 워커 스레드가 빈 dict 를 보는 순간(clear→update 사이)이 없게 한다."""
+    for k in [k for k in CONFIG if k not in disk]:
+        del CONFIG[k]
     CONFIG.update(disk)
 
 # 전역 설정 로드

@@ -145,7 +145,9 @@ def parse_quick_schedule(text: str, base_date: date = None, now: datetime = None
         remaining = RE_COLON_TIME.sub(' ', remaining, count=1)
     else:
         m = RE_HOUR_MIN.search(remaining)
-        if m and 0 <= int(m.group(2)) <= 24:
+        # 분이 0~59 를 벗어나면("9시 75분") 시간 표기로 인정하지 않는다 — 잘못된 시각(09:00)을
+        # 확신 있게 만들어 내거나 datetime() 에서 ValueError 를 내지 않도록
+        if m and 0 <= int(m.group(2)) <= 24 and (not m.group(4) or 0 <= int(m.group(4)) <= 59):
             ampm = m.group(1)
             hour = int(m.group(2))
             if m.group(3):
@@ -153,8 +155,6 @@ def parse_quick_schedule(text: str, base_date: date = None, now: datetime = None
                     minute = 30
                 elif m.group(4):
                     minute = int(m.group(4))
-                    if not 0 <= minute <= 59:   # "9시 75분" → datetime() ValueError 방지
-                        minute = 0
             if ampm == '오후' and hour < 12:
                 hour += 12
             elif ampm == '오전' and hour == 12:

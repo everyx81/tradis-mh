@@ -3477,7 +3477,7 @@ class JarvisGUI(QMainWindow):
             # atexit(_MEI 정리)는 스킵되지만 업데이터 PowerShell이 잔여 _MEI를 정리함.
             import time as _time
             def _force_exit():
-                _time.sleep(10)
+                _time.sleep(25)   # closeEvent 최악(감시 종료 5s + 워커 대기 3s + 훅 종료 2s)보다 넉넉히
                 os._exit(0)
             threading.Thread(target=_force_exit, daemon=True).start()
 

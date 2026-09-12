@@ -1758,6 +1758,12 @@ class FileManagerWidget(QWidget):
             if existing_rel is None:
                 # 정확/유사 매칭 모두 실패 → 전체 캐시에서 유사 검색
                 existing_rel, is_similar = self._find_id_in_company_dir(root, comp, fid, _cache=_get_full_cache())
+            if existing_rel is None:
+                # 인덱스는 디스크 캐시 시점 상태라 다른 PC가 그 사이 만든 폴더를 모를 수 있음 →
+                # 정확한 경로만 디스크에서 한 번 더 확인해 기존 '병합/새 폴더' 팝업으로 보낸다 (v1.1.77)
+                _disk_dup = os.path.join(root, comp, fid)
+                if os.path.isdir(_disk_dup):
+                    existing_rel, is_similar = os.path.join(comp, fid), False
             if existing_rel:
                 existing_full = os.path.join(root, existing_rel)
                 if is_similar:

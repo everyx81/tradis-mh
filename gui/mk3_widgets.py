@@ -1142,6 +1142,9 @@ class MK3ScheduleOnlyWidget(QWidget):
             if current_item:
                 schedule_id = current_item.data(Qt.ItemDataRole.UserRole)
                 if schedule_id:
+                    from .dialogs import JarvisMessageBox
+                    if not JarvisMessageBox.question(self, "일정 삭제", "선택한 일정을 삭제할까요?"):
+                        return
                     self.schedule_manager.delete_schedule(schedule_id)
                     self.refresh_schedules()
         else:
@@ -1446,6 +1449,8 @@ class MK3MemoOnlyWidget(QWidget):
         """탭 이름 변경 (더블클릭)"""
         from .dialogs import JarvisInputDialog
 
+        if index < 0:   # 탭이 없는 빈 영역 더블클릭 → widget(-1) 이 None 이라 AttributeError 나던 결함
+            return
         current_name = self.tab_widget.tabText(index)
         new_name, ok = JarvisInputDialog.get_text(
             self, "메모 이름 변경", "새 이름:", text=current_name
@@ -1475,20 +1480,20 @@ class MK3MemoOnlyWidget(QWidget):
             return
         
         editor = self.tab_widget.widget(index)
-        if not isinstance(editor, QTextEdit):
+        if not isinstance(editor, QTextEdit) or editor.property("ai_busy"):
             return
-        
+
         memo_id = editor.property("memo_id")
         if memo_id:
             content = editor.toPlainText()
             title = self.tab_widget.tabText(index).replace('🔒 ', '')
             self.schedule_manager.update_memo(memo_id, title=title, content=content)
-    
+
     def save_all_memos(self):
         """모든 메모 강제 저장 (앱 종료 시 호출)"""
         for i in range(self.tab_widget.count()):
             editor = self.tab_widget.widget(i)
-            if isinstance(editor, QTextEdit):
+            if isinstance(editor, QTextEdit) and not editor.property("ai_busy"):
                 memo_id = editor.property("memo_id")
                 if memo_id:
                     content = editor.toPlainText()
@@ -1564,9 +1569,14 @@ class MK3MemoOnlyWidget(QWidget):
         if not content:
             return
         
-        # UI 피드백
+        # UI 피드백 — 자리표시 문구가 textChanged → 자동 저장으로 실제 메모를 덮어쓰던 결함:
+        # 신호를 막고 넣고, 저장 타이머를 멈추고, 완료 전까지 이 편집기는 저장 대상에서 제외
         original_text = content
+        self.save_timer.stop()
+        editor.blockSignals(True)
         editor.setPlainText("AI가 정리 중...")
+        editor.blockSignals(False)
+        editor.setProperty("ai_busy", True)
         editor.setReadOnly(True)
         
         # 백그라운드 스레드에서 AI 호출
@@ -1616,18 +1626,32 @@ class MK3MemoOnlyWidget(QWidget):
                 except Exception as e:
                     self.failed.emit(str(e))
         
+        def _editor_alive():
+            try:
+                editor.isVisible()
+                return True
+            except RuntimeError:   # 진행 중 탭이 다시 만들어져 편집기가 삭제된 경우
+                return False
+
         def on_finished(result):
+            self.worker = None
+            if not _editor_alive():
+                return
+            editor.setProperty("ai_busy", False)
             editor.setReadOnly(False)
             editor.setPlainText(result)
             self._save_current_memo()
-            self.worker = None
-        
+
         def on_error(error_msg):
-            editor.setReadOnly(False)
-            editor.setPlainText(original_text)
+            self.worker = None
+            if _editor_alive():
+                editor.setProperty("ai_busy", False)
+                editor.setReadOnly(False)
+                editor.blockSignals(True)
+                editor.setPlainText(original_text)   # 원문 복원 (저장 불필요)
+                editor.blockSignals(False)
             from .dialogs import JarvisMessageBox
             JarvisMessageBox.warning(self, "AI 정리 실패", f"오류: {error_msg}")
-            self.worker = None
         
         self.worker = OrganizeWorker(content)
         keep_thread_alive(self.worker)

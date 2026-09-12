@@ -269,7 +269,8 @@ class GeminiOCR:
         (business_no 백필 등 구 캐시에 새 필드를 채울 때 사용)."""
         client = get_client()
         if client is None:
-            return {"company_name": "Unknown", "identifier": "Unknown", "id_type": "Unknown", "doc_type": "Unknown"}
+            return {"company_name": "Unknown", "identifier": "Unknown", "id_type": "Unknown", "doc_type": "Unknown",
+                    "error": True}  # OCR 자체 실패 — 판독 실패와 구분 (호출측이 이름 변경·각인을 보류)
 
         # --- 캐시 확인 ---
         if not force:
@@ -294,7 +295,8 @@ class GeminiOCR:
             pdf_bytes = self._extract_first_page_bytes(fp)
 
             if not pdf_bytes:
-                return {"company_name": "Unknown", "identifier": "Unknown", "id_type": "Unknown", "doc_type": "Unknown"}
+                return {"company_name": "Unknown", "identifier": "Unknown", "id_type": "Unknown", "doc_type": "Unknown",
+                    "error": True}  # OCR 자체 실패 — 판독 실패와 구분 (호출측이 이름 변경·각인을 보류)
 
             # 텍스트 레이어 동봉: 이미지 인식이 서식의 라벨-값 짝짓기를 틀리는 오독
             # (해외거래처를 수입자로, 성명을 상호로)을 원문 문자열로 교정.
@@ -405,6 +407,9 @@ class GeminiOCR:
             # 'Unknown'으로 확정 저장해 캐시가 영구 유효하도록 (재분석 루프 방지)
             if result.get('doc_type') in ('수입신고필증', '수출신고필증', '반송신고필증'):
                 result.setdefault('business_no', 'Unknown')
+            # 수입신고필증은 levy_type 이 없으면 캐시가 매번 무효 판정돼 스캔마다 재OCR 되므로 보장
+            if result.get('doc_type') == '수입신고필증':
+                result.setdefault('levy_type', 'Unknown')
 
             # --- 결과 캐싱 저장 (모든 파일) ---
             self._save_to_cache(fp, result)
@@ -412,7 +417,8 @@ class GeminiOCR:
             return result
         except Exception as e:
             print(f"AI 분석 오류: {e}")
-            return {"company_name": "Unknown", "identifier": "Unknown", "id_type": "Unknown", "doc_type": "Unknown"}
+            return {"company_name": "Unknown", "identifier": "Unknown", "id_type": "Unknown", "doc_type": "Unknown",
+                    "error": True}  # OCR 자체 실패 — 판독 실패와 구분 (호출측이 이름 변경·각인을 보류)
 
     def _ask_model(self, client, types, prompt, pdf_bytes):
         """모델에 한 번 더 질의하고 JSON 을 파싱해 반환.
@@ -505,12 +511,25 @@ class GeminiOCR:
         """메모리 캐시를 디스크에 기록하고 mtime을 동기화.
         호출자는 cache_lock을 잡은 상태여야 한다."""
         cache_path = self._get_cache_path('')
-        with open(cache_path, 'w', encoding='utf-8') as f:
+        # 원자적 저장: 잘라 쓰는 중 종료되면 캐시 전체가 깨져 모든 파일이 재OCR 되던 문제 방지
+        tmp_path = cache_path + ".tmp"
+        with open(tmp_path, 'w', encoding='utf-8') as f:
             json.dump(self._cache_data, f, ensure_ascii=False, separators=(',', ':'))
+        os.replace(tmp_path, cache_path)
         try:
             self._cache_file_mtime = os.path.getmtime(cache_path)
         except OSError:
             self._cache_file_mtime = None
+
+    def invalidate(self, fp):
+        """파일의 캐시 엔트리 삭제 (재분석 유도). 락 안에서 메모리 사본과 디스크를 함께 갱신."""
+        with cache_lock:
+            try:
+                cache = self._load_cache()
+                if cache.pop(os.path.basename(fp), None) is not None:
+                    self._write_cache()
+            except Exception as e:
+                print(f"캐시 무효화 오류: {e}")
 
     def _get_cached_result(self, fp):
         """캐시에서 결과 조회.

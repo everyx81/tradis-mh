@@ -66,6 +66,9 @@ class JarvisGUI(QMainWindow):
     update_check_done = pyqtSignal(dict)  # 업데이트 확인 완료 시그널
     download_progress_signal = pyqtSignal(int)  # 다운로드 진행률 시그널
     download_complete_signal = pyqtSignal(object)  # 다운로드 완료 시그널 (path or None)
+    # 워커 스레드 → 메인 스레드에서 콜러블 실행. 일반 스레드에서 QTimer.singleShot(0, lambda)
+    # 은 이벤트 루프가 없어 실행되지 않으므로(v1.1.77) 반드시 이 시그널을 쓴다.
+    _ui_call = pyqtSignal(object)
 
     def __init__(self):
         super().__init__()
@@ -125,6 +128,7 @@ class JarvisGUI(QMainWindow):
         self.move_failed_signal.connect(self._on_move_failed)
         self.undo_toast_signal.connect(self._show_undo_toast)
         self.rename_trigger_signal.connect(self.trigger_debounced_refresh)
+        self._ui_call.connect(self._run_ui_call)
         # 메일 모니터링 UI 자동 갱신 (기능 제거됨)
         # self.export_update_signal.connect(self._update_veronica_ui)
         
@@ -992,8 +996,8 @@ class JarvisGUI(QMainWindow):
             # 메모 강제 저장 (디바운스 타이머 만료 전 유실 방지)
             if hasattr(self, 'mk3_memo_widget'):
                 self.mk3_memo_widget.save_all_memos()
-            if hasattr(self, 'schedule_manager'):
-                self.schedule_manager.stop_reminder_loop()
+            if hasattr(self, 'shared_schedule_manager'):   # 속성명 오타로 한 번도 실행되지 않던 코드
+                self.shared_schedule_manager.stop_reminder_loop()
             self.save_settings()
             # 보내기 트레이 정리 (위치 저장 포함)
             if getattr(self, 'send_tray', None):
@@ -1057,14 +1061,8 @@ class JarvisGUI(QMainWindow):
     def _save_hotkey_settings(self):
         """단축키 설정 저장"""
         try:
-            cfg_path = get_config_path()
-            data = {}
-            if os.path.exists(cfg_path):
-                with open(cfg_path, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-            data["hotkeys"] = self.hotkey_settings
-            with open(cfg_path, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
+            from core.config import update_config
+            update_config(hotkeys=self.hotkey_settings)   # 원자적 저장 + 설정 스냅샷 동기화
         except Exception as e:
             print(f"단축키 설정 저장 오류: {e}")
     
@@ -1252,6 +1250,9 @@ class JarvisGUI(QMainWindow):
                 ctypes.wintypes.HINSTANCE, ctypes.wintypes.DWORD
             ]
             user32.SetWindowsHookExW.restype = ctypes.wintypes.HHOOK
+            # 인자 타입 미지정 시 64비트 HHOOK 이 c_int 로 잘려 OverflowError → 훅이 해제되지 않던 결함
+            user32.UnhookWindowsHookEx.argtypes = [ctypes.wintypes.HHOOK]
+            user32.UnhookWindowsHookEx.restype = ctypes.wintypes.BOOL
 
             WH_KEYBOARD_LL = 13
             WM_KEYDOWN = 0x0100
@@ -2661,9 +2662,15 @@ class JarvisGUI(QMainWindow):
         threading.Thread(target=do_prefetch, daemon=True).start()
 
     def _debounced_refresh(self):
-        # 불필요한 반복 로그 제거 (상태 갱신 시마다 로그가 찍혀 리소스 낭비)
+        # 폴더 분석은 무거우므로 화면 스레드에서 직접 돌리지 않는다 (큰 폴더에서 UI 정지).
+        # trigger_intelligent_merge 는 내부 락으로 직렬화되므로 겹쳐 호출돼도 안전.
         path = self.line_path.text()
-        if path: self.renamer.trigger_intelligent_merge(path)
+        if not path:
+            return
+        def _run():
+            try: self.renamer.trigger_intelligent_merge(path)
+            except Exception as e: self.emit_log(f"[재스캔 오류] {e}")
+        threading.Thread(target=_run, daemon=True).start()
             
     def trigger_debounced_refresh(self):
         self.debounce_timer.stop()
@@ -3035,8 +3042,12 @@ class JarvisGUI(QMainWindow):
             # 로그 추가
             self._add_rk_log(f"[{status.value}] {message}")
         
-        QTimer.singleShot(0, update_ui)
-    
+        self._ui_call.emit(update_ui)
+
+    def _run_ui_call(self, fn):
+        """_ui_call 시그널 슬롯 — 메인 스레드에서 콜러블 실행 (예외는 crash_guard 로그로)."""
+        fn()
+
     def _add_rk_log(self, message: str):
         """ReadyKorea 자동화 로그 추가"""
         if hasattr(self.file_manager, 'rk_log'):
@@ -3070,14 +3081,14 @@ class JarvisGUI(QMainWindow):
             try:
                 result = self._get_rk_automation().run_automation(input_data)
                 if result:
-                    QTimer.singleShot(0, lambda: self._add_rk_log("✅ 자동 입력 완료!"))
+                    self._ui_call.emit(lambda: self._add_rk_log("✅ 자동 입력 완료!"))
                 else:
-                    QTimer.singleShot(0, lambda: self._add_rk_log("❌ 자동 입력 실패"))
+                    self._ui_call.emit(lambda: self._add_rk_log("❌ 자동 입력 실패"))
             except Exception as e:
                 error_msg = str(e)
-                QTimer.singleShot(0, lambda: self._add_rk_log(f"❌ 오류: {error_msg}"))
+                self._ui_call.emit(lambda: self._add_rk_log(f"❌ 오류: {error_msg}"))
             finally:
-                QTimer.singleShot(0, lambda: self.file_manager.btn_rk_auto_input.setEnabled(True))
+                self._ui_call.emit(lambda: self.file_manager.btn_rk_auto_input.setEnabled(True))
         
         threading.Thread(target=run_automation, daemon=True).start()
     
@@ -3088,9 +3099,9 @@ class JarvisGUI(QMainWindow):
         def test_connection():
             result = self._get_rk_automation().connect()
             if result:
-                QTimer.singleShot(0, lambda: self._add_rk_log("✅ ReadyKorea 연결 성공!"))
+                self._ui_call.emit(lambda: self._add_rk_log("✅ ReadyKorea 연결 성공!"))
             else:
-                QTimer.singleShot(0, lambda: self._add_rk_log("❌ ReadyKorea를 찾을 수 없습니다. 프로그램이 실행 중인지 확인하세요."))
+                self._ui_call.emit(lambda: self._add_rk_log("❌ ReadyKorea를 찾을 수 없습니다. 프로그램이 실행 중인지 확인하세요."))
         
         threading.Thread(target=test_connection, daemon=True).start()
     
@@ -3209,12 +3220,13 @@ class JarvisGUI(QMainWindow):
                     cc=cc_email
                 )
                 if result:
-                    QTimer.singleShot(0, lambda: self._add_rk_log("✅ 답장 메일 발송 완료!"))
-                    QTimer.singleShot(0, lambda: JarvisMessageBox.information(self, "성공", "답장 메일이 발송되었습니다."))
+                    self._ui_call.emit(lambda: self._add_rk_log("✅ 답장 메일 발송 완료!"))
+                    self._ui_call.emit(lambda: JarvisMessageBox.information(self, "성공", "답장 메일이 발송되었습니다."))
                 else:
-                    QTimer.singleShot(0, lambda: self._add_rk_log("❌ 답장 메일 발송 실패"))
+                    self._ui_call.emit(lambda: self._add_rk_log("❌ 답장 메일 발송 실패"))
             except Exception as e:
-                QTimer.singleShot(0, lambda: self._add_rk_log(f"❌ 메일 발송 오류: {e}"))
+                err_msg = str(e)  # except 블록을 벗어나면 e 가 해제되어 람다 실행 시 NameError
+                self._ui_call.emit(lambda: self._add_rk_log(f"❌ 메일 발송 오류: {err_msg}"))
         
         threading.Thread(target=send_mail, daemon=True).start()
 
@@ -3277,14 +3289,8 @@ class JarvisGUI(QMainWindow):
         """config.json에 라이선스 등급 저장"""
         try:
             cfg = get_config_path()
-            if os.path.exists(cfg):
-                with open(cfg, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-            else:
-                data = {}
-            data["license_tier"] = tier
-            with open(cfg, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=4)
+            from core.config import update_config
+            update_config(license_tier=tier)   # 원자적 저장 + 설정 스냅샷 동기화
         except Exception as e:
             print(f"License tier save error: {e}")
 
@@ -3461,7 +3467,10 @@ class JarvisGUI(QMainWindow):
             # PyInstaller _MEI 폴더 정리를 위해 정상 종료 필수
             # os._exit(0)는 atexit 핸들러를 스킵하여 _MEI 잔존 → DLL 로드 실패 유발
             def _clean_exit_for_update():
-                QApplication.quit()  # Qt 이벤트 루프 종료 → sys.exit() → atexit → _MEI 정리
+                # QApplication.quit() 은 closeEvent 를 거치지 않아 메모 저장·트레이 정리·
+                # 단축키 해제가 생략되던 문제 → 창을 닫아 정상 종료 경로를 태운다
+                # (마지막 창이 닫히면 이벤트 루프 종료 → sys.exit() → atexit → _MEI 정리)
+                self.close()
 
             # 10초 후에도 프로세스가 살아있으면 강제 종료 (스레드 hang 대비)
             # sys.exit()는 서브스레드에서 해당 스레드만 끝내므로 os._exit 사용.

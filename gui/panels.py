@@ -26,6 +26,7 @@ class FileManagerWidget(QWidget):
     # Signal for thread-safe UI refresh after export/import
     refresh_after_move_signal = pyqtSignal(int, list, list, str)  # (count, duplicates, selected_folders, base_path)
     search_result_signal = pyqtSignal(list)  # Everything 검색 결과 전달용 시그널
+    search_error_signal = pyqtSignal(str)    # 검색 오류 (스레드 → 메인, singleShot 람다는 실행 안 됨)
     quick_export_complete_signal = pyqtSignal(int, list, list, list)  # (count, duplicates, moved_folders, moved_dst_paths)
     tab_changed_signal = pyqtSignal(int, str)  # (탭 인덱스, 탭 이름) - 메인 콘텐츠 전환용
     
@@ -57,6 +58,7 @@ class FileManagerWidget(QWidget):
         # Signal 연결: 백그라운드 쓰레드에서 emit되면 메인 쓰레드에서 슬롯 실행
         self.refresh_after_move_signal.connect(self._on_move_complete)
         self.search_result_signal.connect(self._display_search_results)
+        self.search_error_signal.connect(self._search_error)
         self.quick_export_complete_signal.connect(self._on_quick_export_complete)
         self._mail_search_done.connect(self._show_mail_thread_dialog)
 
@@ -293,7 +295,10 @@ class FileManagerWidget(QWidget):
         """
 
         def _update_overlay_visibility():
-            is_empty = self.list_widget.count() == 0
+            try:
+                is_empty = self.list_widget.count() == 0
+            except RuntimeError:
+                return  # 종료 중 모델 리셋 신호가 위젯 삭제 뒤에 도착 (v1.1.77)
             self.drop_overlay.setVisible(is_empty)
             self.list_widget.setStyleSheet(_empty_style if is_empty else _filled_style)
         self.list_widget.model().rowsInserted.connect(lambda *_: _update_overlay_visibility())
@@ -1469,8 +1474,17 @@ class FileManagerWidget(QWidget):
 
         moved_count = 0
         empty_folders = []  # 파일 꺼낸 후 삭제할 빈 폴더
+        _dst_norm = os.path.normcase(os.path.abspath(dst_path))
         for src in paths:
             try:
+                _src_norm = os.path.normcase(os.path.abspath(src))
+                # 같은 폴더에 드롭하면 "이미 있음"으로 오판해 이름(1)로 바꾸던 문제,
+                # 대상 폴더 자체(또는 상위)를 드롭하면 자기 안으로 이동하려던 문제 차단
+                if os.path.dirname(_src_norm) == _dst_norm and not (extract_files and os.path.isdir(src)):
+                    continue
+                if _dst_norm == _src_norm or _dst_norm.startswith(_src_norm + os.sep):
+                    self.emit_log(f"[건너뜀] 대상 폴더가 자기 자신이거나 그 안에 있음: {os.path.basename(src)}")
+                    continue
                 if extract_files and os.path.isdir(src):
                     # 폴더 안의 파일만 이동
                     for item in os.listdir(src):
@@ -1543,15 +1557,15 @@ class FileManagerWidget(QWidget):
                 except UnicodeDecodeError: stderr = result.stderr.decode('utf-8', errors='replace')
                 
                 if stderr:
-                    QTimer.singleShot(0, lambda: self._search_error(f"Everything 오류: {stderr}"))
+                    self.search_error_signal.emit(f"Everything 오류: {stderr}")
                     return
                 paths = [line.strip() for line in output.split('\n') if line.strip()]
                 self.emit_log(f"[Everything] 검색어: {query}, 결과: {len(paths)}개")
                 self.search_result_signal.emit(list(paths))
             except FileNotFoundError:
-                QTimer.singleShot(0, lambda: self._search_error("es.exe를 찾을 수 없습니다."))
+                self.search_error_signal.emit("es.exe를 찾을 수 없습니다.")
             except Exception as e:
-                QTimer.singleShot(0, lambda: self._search_error(f"검색 오류: {e}"))
+                self.search_error_signal.emit(f"검색 오류: {e}")
         
         threading.Thread(target=run_search, daemon=True).start()
 
@@ -1836,6 +1850,10 @@ class FileManagerWidget(QWidget):
 
                 dst = os.path.join(dst_parent, fid)
                 try:
+                    if os.path.isdir(dst):
+                        # 인덱스가 못 본 폴더가 이미 있으면 그 안으로 중첩(BL/BL)되던 문제 → (n) 이름으로
+                        dst = get_unique_filename(dst)
+                        self.emit_log(f" -> [중복 폴더] 서버에 이미 있음 → {os.path.basename(dst)} 로 이동")
                     shutil.move(src_path, dst)
                     count += 1
                     moved_dst_paths.append(dst)
@@ -1878,6 +1896,10 @@ class FileManagerWidget(QWidget):
                 os.makedirs(dst_parent, exist_ok=True)
                 dst = os.path.join(dst_parent, fid)
                 try:
+                    if os.path.isdir(dst):
+                        # 인덱스가 못 본 폴더가 이미 있으면 그 안으로 중첩(BL/BL)되던 문제 → (n) 이름으로
+                        dst = get_unique_filename(dst)
+                        self.emit_log(f" -> [중복 폴더] 서버에 이미 있음 → {os.path.basename(dst)} 로 이동")
                     shutil.move(src_path, dst)
                     count += 1
                     moved_dst_paths.append(dst)
@@ -1901,14 +1923,9 @@ class FileManagerWidget(QWidget):
                                 shutil.copy2(src_item, dst_item)
                                 merged += 1
                             elif os.path.isdir(src_item):
-                                if os.path.exists(dst_item):
-                                    # 하위 폴더도 파일 단위로 병합
-                                    for sub in os.listdir(src_item):
-                                        shutil.copy2(os.path.join(src_item, sub), os.path.join(dst_item, sub))
-                                        merged += 1
-                                else:
-                                    shutil.copytree(src_item, dst_item)
-                                    merged += 1
+                                # 하위 폴더는 통째로 병합 (copy2 는 디렉터리에 실패해 반쪽 병합으로 끝나던 결함)
+                                shutil.copytree(src_item, dst_item, dirs_exist_ok=True)
+                                merged += 1
                         # 원본 폴더 삭제
                         shutil.rmtree(src_path)
                         count += 1
@@ -2603,14 +2620,13 @@ class FileManagerWidget(QWidget):
             import keyring
             keyring.set_password("TRADIS_MH", "email_password", password)
 
-            config['hanbiro_mail'] = {
+            # 원자적 저장 (잘라 쓰는 중 종료되면 config.json 전체가 깨지던 문제)
+            from core.config import update_config
+            update_config(hanbiro_mail={
                 'imap_server': 'raeon.hanbiro.net',
                 'imap_port': 993,
                 'email': email
-            }
-
-            with open(cfg_path, 'w', encoding='utf-8') as f:
-                json.dump(config, f, ensure_ascii=False, indent=4)
+            })
             
             self.lbl_mail_status.setText(f"Status: Saved ({email})")
             self.lbl_mail_status.setStyleSheet("color: #00ff88; font-size: 8pt;")

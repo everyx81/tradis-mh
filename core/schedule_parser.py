@@ -153,6 +153,8 @@ def parse_quick_schedule(text: str, base_date: date = None, now: datetime = None
                     minute = 30
                 elif m.group(4):
                     minute = int(m.group(4))
+                    if not 0 <= minute <= 59:   # "9시 75분" → datetime() ValueError 방지
+                        minute = 0
             if ampm == '오후' and hour < 12:
                 hour += 12
             elif ampm == '오전' and hour == 12:

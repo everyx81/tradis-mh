@@ -16,6 +16,18 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
 # 한글 폰트 등록
+def _to_int(v) -> int:
+    """엑셀 셀 값 → 정수. "1,500,000"·"1,234.50"·"-1000"·None 모두 처리 (int() 직접 호출은 ValueError)."""
+    try:
+        from core.validator import parse_amount
+        return int(parse_amount(v))
+    except Exception:
+        try:
+            return int(float(str(v).replace(',', '').replace('원', '').strip() or 0))
+        except (ValueError, TypeError):
+            return 0
+
+
 def register_korean_font():
     """한글 폰트(맑은 고딕) 등록"""
     font_paths = [
@@ -428,22 +440,22 @@ def load_from_excel(excel_path: str) -> DailyReportData:
         # 당일 실적
         elif '당일' in cell_str or '하루' in cell_str or '금일' in cell_str:
             if '건수' in cell_str and len(row) > 1:
-                data.daily_count = int(row[1] or 0)
+                data.daily_count = _to_int(row[1])
             elif '수수료' in cell_str and len(row) > 1:
-                data.daily_fee = int(row[1] or 0)
+                data.daily_fee = _to_int(row[1])
             else:
                 # 건수와 수수료가 같은 행에
                 if len(row) > 1:
-                    data.daily_count = int(row[1] or 0)
+                    data.daily_count = _to_int(row[1])
                 if len(row) > 2:
-                    data.daily_fee = int(row[2] or 0)
+                    data.daily_fee = _to_int(row[2])
         
         # 월 누계
         elif '월' in cell_str and ('누계' in cell_str or '합계' in cell_str):
             if len(row) > 1:
-                data.monthly_count = int(row[1] or 0)
+                data.monthly_count = _to_int(row[1])
             if len(row) > 2:
-                data.monthly_fee = int(row[2] or 0)
+                data.monthly_fee = _to_int(row[2])
         
         # 미수금 섹션
         elif '미수금' in cell_str:
@@ -456,7 +468,7 @@ def load_from_excel(excel_path: str) -> DailyReportData:
                     break
                 if len(r) > 1 and r[1]:
                     try:
-                        data.add_receivable(str(r[0]), int(r[1] or 0))
+                        data.add_receivable(str(r[0]), _to_int(r[1]))
                     except (ValueError, TypeError):
                         continue
         
@@ -470,7 +482,8 @@ def load_from_excel(excel_path: str) -> DailyReportData:
                     break
                 if len(r) > 1 and r[1]:
                     try:
-                        data.add_advance(str(r[0]), int(r[1] or 0))
+                        # 인수 3개(회사, BL, 금액)인데 2개로 호출해 매 행 TypeError → 대납금이 한 건도 안 읽히던 결함
+                        data.add_advance(str(r[0]), '', _to_int(r[1]))
                     except (ValueError, TypeError):
                         continue
     

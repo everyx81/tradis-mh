@@ -61,6 +61,9 @@ def move_to_recycle_bin(paths):
     FOF_ALLOWUNDO = 0x40
     FOF_NOCONFIRMATION = 0x10
     FOF_SILENT = 0x04
+    # 네트워크 경로 등 휴지통이 없어 영구 삭제되는 경우에는 경고 창을 띄운다
+    # (FOF_NOCONFIRMATION 을 부분적으로 무효화하는 플래그)
+    FOF_WANTNUKEWARNING = 0x4000
     valid = [os.path.abspath(p) for p in paths if p and os.path.exists(p)]
     if not valid:
         return False
@@ -71,7 +74,7 @@ def move_to_recycle_bin(paths):
     op.wFunc = FO_DELETE
     op.pFrom = src
     op.pTo = None
-    op.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT
+    op.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_WANTNUKEWARNING
     try:
         result = ctypes.windll.shell32.SHFileOperationW(ctypes.byref(op))
         return result == 0 and not op.fAnyOperationsAborted

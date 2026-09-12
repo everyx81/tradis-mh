@@ -53,7 +53,7 @@ def set_rename_skip_keywords(keywords: list):
             seen.add(k)
             cleaned.append(k)
     CONFIG["rename_skip_keywords"] = cleaned
-    _save_config(CONFIG)
+    _persist_keys("rename_skip_keywords")
     return cleaned
 
 
@@ -100,7 +100,7 @@ def set_card_memo(bl_id: str, text: str):
     else:
         memos.pop(bl_id, None)
     CONFIG["card_memos"] = memos
-    _save_config(CONFIG)
+    _persist_keys("card_memos")
 
 
 # ─────────────────────────────────────────────────
@@ -124,7 +124,7 @@ def set_monthly_billing_companies(companies: list):
             seen.add(c)
             cleaned.append(c)
     CONFIG["monthly_billing_companies"] = cleaned
-    _save_config(CONFIG)
+    _persist_keys("monthly_billing_companies")
     return cleaned
 
 
@@ -187,7 +187,7 @@ def set_chip_override(bl_id: str, chip_name: str, state: str):
     else:
         all_ov.pop(bl_id, None)
     CONFIG["chip_overrides"] = all_ov
-    _save_config(CONFIG)
+    _persist_keys("chip_overrides")
 
 
 def toggle_chip_applicability(bl_id: str, chip_name: str, default_not_applicable: bool) -> bool:
@@ -265,6 +265,32 @@ def _save_config(config):
         try: os.unlink(get_config_path() + ".tmp")
         except OSError: pass
 
+
+def _persist_keys(*keys):
+    """CONFIG 의 지정 키만 디스크 최신본에 합쳐 저장.
+
+    CONFIG 는 시작 시점 스냅샷이라 통째로 저장하면 그 사이 화면이 파일에 직접 쓴
+    값(감시 폴더·단축키·관리자 상태 등)이 옛 값으로 되돌아간다(v1.1.77 수정).
+    항상 디스크를 다시 읽어 우리 키만 덮어쓰고, 스냅샷도 최신으로 맞춘다."""
+    disk = load_config()
+    for k in keys:
+        if k in CONFIG:
+            disk[k] = CONFIG[k]
+        else:
+            disk.pop(k, None)
+    _save_config(disk)
+    CONFIG.clear()
+    CONFIG.update(disk)
+
+
+def update_config(**changes):
+    """임의 키를 원자적으로 저장 (읽기→갱신→임시파일→교체). 화면 쪽 설정 저장용 단일 창구."""
+    disk = load_config()
+    disk.update(changes)
+    _save_config(disk)
+    CONFIG.clear()
+    CONFIG.update(disk)
+
 # 전역 설정 로드
 CONFIG = load_config()
 
@@ -297,7 +323,7 @@ def _migrate_api_key_to_keyring():
         keyring.set_password(SERVICE_NAME, "gemini_api_key", actual_key)
         # config.json에서 api_key 제거
         CONFIG.pop("api_key", None)
-        _save_config(CONFIG)
+        _persist_keys("api_key")
 
 def get_api_key() -> str:
     """keyring에서 API 키 로드 (없으면 config.json에서 마이그레이션)"""

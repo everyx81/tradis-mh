@@ -293,12 +293,23 @@ class DropListWidget(QListWidget):
         
         if mime_data.hasUrls():
             urls = mime_data.urls()
+            # 잘라내기 모드는 우리가 잘라낸 그 파일에만 적용 — 그 뒤 탐색기에서 복사한 파일이
+            # 클립보드에 있으면 "cut" 상태가 남아 남의 파일을 이동시키던 결함 (v1.1.77)
+            _local = [u.toLocalFile() for u in urls]
+            _is_our_cut = (self._clipboard_mode == "cut" and self._clipboard_path
+                           and os.path.normcase(self._clipboard_path) in {os.path.normcase(p) for p in _local})
+            if not _is_our_cut:
+                self._clipboard_mode = "copy"
             for url in urls:
                 src_path = url.toLocalFile()
                 if os.path.exists(src_path):
                     file_name = os.path.basename(src_path)
                     dest_path = os.path.join(self.current_folder, file_name) if self.current_folder else src_path
-                    
+                    if os.path.normcase(os.path.abspath(dest_path)) == os.path.normcase(os.path.abspath(src_path)):
+                        continue
+                    if os.path.exists(dest_path):
+                        dest_path = get_unique_filename(dest_path)  # 같은 이름 덮어쓰기 방지
+
                     try:
                         if self._clipboard_mode == "cut":
                             shutil.move(src_path, dest_path)
@@ -373,12 +384,11 @@ class DropListWidget(QListWidget):
     def _delete_item(self, item, path):
         """아이템 삭제"""
         msg_box = _get_jarvis_msgbox()
-        if msg_box.question(self, "삭제 확인", "정말 삭제하시겠습니까?"):
+        if msg_box.question(self, "삭제 확인", "휴지통으로 이동하시겠습니까?"):
             try:
-                if os.path.isdir(path):
-                    shutil.rmtree(path)
-                else:
-                    os.remove(path)
+                from .file_browser import move_to_recycle_bin
+                if not move_to_recycle_bin([path]):   # 영구 삭제(os.remove/rmtree) 대신 휴지통
+                    raise OSError("휴지통 이동 실패")
                 self.takeItem(self.row(item))
             except Exception as e:
                 msg_box.critical(self, "오류", f"삭제 실패: {e}")
@@ -390,17 +400,14 @@ class DropListWidget(QListWidget):
             # 선택된 모든 항목 삭제
             count = len(items)
             msg_box = _get_jarvis_msgbox()
-            if msg_box.question(self, "삭제 확인", f"선택한 {count}개 항목을 삭제하시겠습니까?"):
+            if msg_box.question(self, "삭제 확인", f"선택한 {count}개 항목을 휴지통으로 이동하시겠습니까?"):
+                from .file_browser import move_to_recycle_bin
+                paths = [item.data(Qt.ItemDataRole.UserRole) for item in items]
+                paths = [p for p in paths if p and os.path.exists(p)]
+                if paths and not move_to_recycle_bin(paths):   # 영구 삭제 대신 휴지통
+                    msg_box.warning(self, "오류", "휴지통 이동에 실패했습니다.")
+                    return
                 for item in items:
-                    path = item.data(Qt.ItemDataRole.UserRole)
-                    if path and os.path.exists(path):
-                        try:
-                            if os.path.isdir(path):
-                                shutil.rmtree(path)
-                            else:
-                                os.remove(path)
-                        except Exception as e:
-                            print(f"삭제 실패: {e}")
                     row = self.row(item)
                     if row >= 0:
                         self.takeItem(row)
@@ -1270,26 +1277,21 @@ class DraggableTreeView(QTreeView):
 
         if len(paths) == 1:
             name = os.path.basename(paths[0])
-            confirm_msg = f"'{name}'을(를) 삭제하시겠습니까?\n\n이 작업은 되돌릴 수 없습니다."
+            confirm_msg = f"'{name}'을(를) 휴지통으로 이동하시겠습니까?"
         else:
             preview = "\n".join(f"  • {os.path.basename(p)}" for p in paths[:5])
             if len(paths) > 5:
                 preview += f"\n  ... 외 {len(paths) - 5}개"
-            confirm_msg = (f"선택한 {len(paths)}개 항목을 삭제하시겠습니까?\n\n"
-                          f"{preview}\n\n이 작업은 되돌릴 수 없습니다.")
+            confirm_msg = (f"선택한 {len(paths)}개 항목을 휴지통으로 이동하시겠습니까?\n\n{preview}")
 
         if not msg_box.question(self, "삭제 확인", confirm_msg):
             return
 
+        # 영구 삭제(os.remove/rmtree) 대신 휴지통 — 복구 가능 (v1.1.77)
+        from .file_browser import move_to_recycle_bin
         failed = []
-        for path in paths:
-            try:
-                if os.path.isfile(path):
-                    os.remove(path)
-                else:
-                    shutil.rmtree(path)
-            except Exception as e:
-                failed.append((os.path.basename(path), str(e)))
+        if not move_to_recycle_bin(paths):
+            failed = [(os.path.basename(p), "휴지통 이동 실패") for p in paths if os.path.exists(p)]
 
         if failed:
             msg = f"일부 삭제 실패 ({len(failed)}개):\n"
@@ -1404,13 +1406,21 @@ class DraggableTreeView(QTreeView):
                     paths.append(local_path)
         
         if paths:
+            # Ctrl 드래그(복사)나 복사 액션 드롭까지 무조건 이동시키던 결함 → 드롭 액션을 따른다
+            _copy = event.proposedAction() == Qt.DropAction.CopyAction
             moved_count = 0
             for src in paths:
                 try:
                     dest = os.path.join(target_folder, os.path.basename(src))
                     if os.path.exists(dest):
                         dest = get_unique_filename(dest)
-                    shutil.move(src, dest)
+                    if _copy:
+                        if os.path.isdir(src):
+                            shutil.copytree(src, dest)
+                        else:
+                            shutil.copy2(src, dest)
+                    else:
+                        shutil.move(src, dest)
                     moved_count += 1
                 except Exception as e:
                     print(f"이동 실패: {src} -> {e}")

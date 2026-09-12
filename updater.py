@@ -85,15 +85,18 @@ def download_update(download_url, progress_callback=None):
 
             downloaded = 0
             block_size = 65536
-            while True:
-                chunk = resp.read(block_size)
-                if not chunk:
-                    break
-                tmp.write(chunk)
-                downloaded += len(chunk)
-                if progress_callback:
-                    progress_callback(downloaded, total)
-            tmp.close()
+            try:
+                while True:
+                    chunk = resp.read(block_size)
+                    if not chunk:
+                        break
+                    tmp.write(chunk)
+                    downloaded += len(chunk)
+                    if progress_callback:
+                        progress_callback(downloaded, total)
+            finally:
+                # 취소/오류 시에도 핸들을 닫아야 아래 _safe_delete 가 성공 (열린 채면 수십 MB 잔존)
+                tmp.close()
 
         # 파일 크기 검증 (최소 1MB, Content-Length 일치)
         file_size = os.path.getsize(tmp_path)

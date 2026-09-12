@@ -38,6 +38,8 @@ class AutoRenamer:
         self.rename_complete_callback = rename_complete_callback
         self.executor = None
         self.processing_files = set()
+        self._proc_lock = threading.Lock()    # processing_files 검사+추가 원자화 (이중 OCR 방지)
+        self._merge_lock = threading.Lock()   # trigger_intelligent_merge 동시 실행 직렬화
 
 
     def log(self, msg):
@@ -146,9 +148,12 @@ class AutoRenamer:
         except Exception:
             pass
 
-        if fp in self.processing_files:
-            return
-        self.processing_files.add(fp)
+        # 검사와 추가를 한 락 안에서 — 다운로드 중 여러 이벤트가 같은 파일을 여러 워커에
+        # 넣어 두 번 OCR(이중 과금)하고 두 번 rename 하던 경쟁 차단
+        with self._proc_lock:
+            if fp in self.processing_files:
+                return
+            self.processing_files.add(fp)
 
         try:
             if not is_initial:
@@ -231,9 +236,10 @@ class AutoRenamer:
             if (res or {}).get('name_policy') in ('preserve', 'unreadable', 'manual'):
                 return
 
-            dt = res.get("doc_type", "Unknown")
-            cn = res.get("company_name", "Unknown")
-            iden = res.get("identifier", "Unknown")
+            # 모델이 null 을 주면 None 이 흘러 들어와 TypeError / 영구 보존 각인으로 이어짐 → Unknown 취급
+            dt = res.get("doc_type") or "Unknown"
+            cn = res.get("company_name") or "Unknown"
+            iden = res.get("identifier") or "Unknown"
 
             # doc_type 표준 정규화 (이중 안전망)
             from core.utils import normalize_doc_type
@@ -244,44 +250,27 @@ class AutoRenamer:
                 self.log(f" -> [OCR 재시도] 전체 Unknown - 5초 후 재분석: {fn}")
                 time.sleep(5)
                 # 캐시 무효화 후 재분석
-                cache_path = gemini_ocr._get_cache_path(fp)
-                if os.path.exists(cache_path):
-                    try:
-                        import json as _json
-                        with open(cache_path, 'r', encoding='utf-8') as _cf:
-                            _cache = _json.load(_cf)
-                        _keys = [k for k in _cache if os.path.basename(fp) in k]
-                        for _k in _keys:
-                            del _cache[_k]
-                        with open(cache_path, 'w', encoding='utf-8') as _cf:
-                            _json.dump(_cache, _cf, ensure_ascii=False)
-                    except Exception:
-                        pass
+                gemini_ocr.invalidate(fp)  # 락 안에서 정확한 키만 삭제 (부분 문자열 삭제·락 우회 제거)
                 res = extract_document_info_ai(fp)
-                dt = res.get("doc_type", "Unknown")
-                cn = res.get("company_name", "Unknown")
-                iden = res.get("identifier", "Unknown")
+                dt = normalize_doc_type(res.get("doc_type") or "Unknown")
+                cn = res.get("company_name") or "Unknown"
+                iden = res.get("identifier") or "Unknown"
                 if dt != "Unknown" or cn != "Unknown":
                     self.log(f" -> [OCR 재시도 성공] {dt} / {cn} / {iden}")
+
+            # OCR 자체가 실패한 결과(API 키 없음·요청 제한·네트워크)는 판독 실패가 아니다.
+            # 이름을 바꾸거나 '판독 불가'로 각인하면 정상 서류가 영구히 분석 대상에서
+            # 빠지므로(v1.1.74 결함) 아무것도 하지 않고 다음 이벤트에서 다시 시도한다.
+            if res.get('error'):
+                self.log(f" -> [OCR 실패] 일시 오류 — 이름 변경 보류, 다음 이벤트에 재시도: {fn}")
+                return
 
             # [NEW] BL 만 Unknown 인 경우 1회 재시도 (AI 비결정성 대응)
             # 자금청구서/정산서 등 일부 문서에서 BL 필드 인식이 간헐적으로 실패 → 재OCR 시 성공하는 케이스
             elif iden == "Unknown" and dt != "Unknown" and cn != "Unknown":
                 self.log(f" -> [OCR 재시도] BL 만 Unknown - 재분석: {fn}")
                 time.sleep(2)
-                cache_path = gemini_ocr._get_cache_path(fp)
-                if os.path.exists(cache_path):
-                    try:
-                        import json as _json
-                        with open(cache_path, 'r', encoding='utf-8') as _cf:
-                            _cache = _json.load(_cf)
-                        _keys = [k for k in _cache if os.path.basename(fp) in k]
-                        for _k in _keys:
-                            del _cache[_k]
-                        with open(cache_path, 'w', encoding='utf-8') as _cf:
-                            _json.dump(_cache, _cf, ensure_ascii=False)
-                    except Exception:
-                        pass
+                gemini_ocr.invalidate(fp)  # 락 안에서 정확한 키만 삭제 (부분 문자열 삭제·락 우회 제거)
                 res2 = extract_document_info_ai(fp)
                 new_iden = res2.get("identifier", "Unknown")
                 if new_iden != "Unknown":
@@ -324,7 +313,7 @@ class AutoRenamer:
             # 독립 문서 (이체증 등) 전용 이름 패턴
             from core.constants import INDEPENDENT_DOC_TYPES
             if dt in INDEPENDENT_DOC_TYPES:
-                amt = res.get("total_amount", 0)
+                amt = (res.get("total_amount") or 0)
                 try:
                     amt_val = int(str(amt).replace(',', '').replace('원', ''))
                 except ValueError:
@@ -348,7 +337,7 @@ class AutoRenamer:
                 return
 
             if dt == "Unknown" or iden == "Unknown" or is_english_only:
-                amt = res.get("total_amount", 0)
+                amt = (res.get("total_amount") or 0)
                 try:
                     amt_val = int(str(amt).replace(',', '').replace('원', ''))
                 except ValueError:
@@ -356,7 +345,7 @@ class AutoRenamer:
                 
                 # 서류명과 수입자(상호) 처리
                 doc_name = dt if dt != "Unknown" else "알수없는서류"
-                comp_name = sanitize_filename(res.get("company_name", "알수없는상호")).replace(" ", "")
+                comp_name = sanitize_filename((res.get("company_name") or "알수없는상호")).replace(" ", "")
                 if comp_name == "Unknown":
                     comp_name = "알수없는상호"
 
@@ -371,7 +360,7 @@ class AutoRenamer:
                 base_name = f"미분류_{doc_name}_{comp_name}"
 
                 # 품목명이 있으면 금액 대신 품목명 사용 (요건 증빙서류)
-                product_name = res.get("product_name", "")
+                product_name = (res.get("product_name") or "")
                 if product_name:
                     product_clean = sanitize_filename(product_name).replace(" ", "")
                     if len(product_clean) > 20:
@@ -431,9 +420,12 @@ class AutoRenamer:
                         self.rename_complete_callback()
                 except Exception as e:
                     self.log(f" -> [실패] 이름 변경 오류: {e}")
+        except Exception as e:
+            # 스레드 풀에 제출된 작업의 예외는 아무도 확인하지 않아 조용히 사라지던 것을 로그로
+            self.log(f" -> [처리 오류] {fn}: {type(e).__name__}: {e}")
         finally:
-            if fp in self.processing_files:
-                self.processing_files.remove(fp)
+            with self._proc_lock:
+                self.processing_files.discard(fp)
 
     def _preserve_name(self, fp, fn, policy, reason):
         """원본 파일명 유지 결정을 캐시에 각인하고 로그. 이후 재처리 시 조기 종료된다."""
@@ -506,6 +498,12 @@ class AutoRenamer:
             self.log(f" -> [실패] 종류 교정 이름 변경 오류: {e}")
 
     def trigger_intelligent_merge(self, dr):
+        """폴더 분석 → 카드 그룹 보고. 동시 호출은 직렬화한다 — 두 실행이 겹치면 같은
+        미분류 파일을 동시에 리네임하려다 한쪽이 실패하고 보고가 두 번 나가던 문제 방지."""
+        with self._merge_lock:
+            return self._trigger_intelligent_merge_impl(dr)
+
+    def _trigger_intelligent_merge_impl(self, dr):
         files = [f for f in os.listdir(dr) if f.lower().endswith('.pdf')]
         groups = {}
         uncl = []

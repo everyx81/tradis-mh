@@ -3760,7 +3760,10 @@ class GroupCard(GlassFrame):
         self.parent_widget.emit_log(
             f"[제안 {'승인' if accept else '제외'}] {filename} → {self.text_id}")
         try:
-            if hasattr(self.parent_widget, '_debounced_refresh'):
+            # 화면 스레드에서 폴더 분석을 직접 돌리지 않고 디바운스 타이머(→워커 스레드) 경유
+            if hasattr(self.parent_widget, 'trigger_debounced_refresh'):
+                self.parent_widget.trigger_debounced_refresh()
+            elif hasattr(self.parent_widget, '_debounced_refresh'):
                 self.parent_widget._debounced_refresh()
             else:
                 self.renamer.trigger_intelligent_merge(self.directory)
@@ -4408,7 +4411,10 @@ class GroupCard(GlassFrame):
             if missing_files:
                 resolved = self._show_missing_files_dialog(missing_files, export_docs_root)
                 if not resolved:
-                    return  # 사용자가 취소
+                    return
+                # 창에서 "진행"으로 건너뛴 파일은 self.marked_files 에서만 빠지고 복사본 marked 에는
+                # 남아 병합 후 "원본 파일을 찾을 수 없음"으로 보고되던 결함 → 실제 존재하는 것만 넘김
+                marked = [mf for mf in marked if mf.get('path') and os.path.exists(mf['path'])]  # 사용자가 취소
 
         _bl_id = self.text_id
         _target_dir = self.directory
@@ -4672,6 +4678,9 @@ class GroupCard(GlassFrame):
                 resolved = self._show_missing_files_dialog(missing_files, export_docs_root)
                 if not resolved:
                     return
+                # 창에서 "진행"으로 건너뛴 파일은 self.marked_files 에서만 빠지고 복사본 marked 에는
+                # 남아 병합 후 "원본 파일을 찾을 수 없음"으로 보고되던 결함 → 실제 존재하는 것만 넘김
+                marked = [mf for mf in marked if mf.get('path') and os.path.exists(mf['path'])]
 
         _bl_id = self.text_id
         _target_dir = self.directory
@@ -5781,6 +5790,11 @@ class SendMailDialog(QDialog):
         from .utils import get_run_dir
         
         config_path = get_config_path()
+        # 설정 파일이 없으면 속성이 아예 생기지 않아 발송 버튼에서 AttributeError 나던 결함 → 기본값 선행
+        self.smtp_server = 'raeon.hanbiro.net'
+        self.smtp_port = 465
+        self.smtp_user = ''
+        self.smtp_password = ''
         try:
             if os.path.exists(config_path):
                 with open(config_path, 'r', encoding='utf-8') as f:
@@ -5936,21 +5950,23 @@ class SendMailDialog(QDialog):
                         
                         msg.attach(part)
                 else:
-                    self.lbl_status.setText(f"⚠️ 파일 없음: {os.path.basename(filepath)}")
-            
+                    # 첨부가 없는데 그대로 발송해 "발송 완료"로 덮어쓰던 결함 → 중단
+                    self.lbl_status.setText(f"⚠️ 파일 없음: {os.path.basename(filepath)} — 발송 중단")
+                    return
+
             # SMTP SSL 발송 (포트 465)
             # 받는 사람 목록 (To + CC)
             recipients = [addr.strip() for addr in to_addr.split(',') if addr.strip()]
             if cc_addr:
                 recipients.extend([addr.strip() for addr in cc_addr.split(',') if addr.strip()])
             
-            with smtplib.SMTP_SSL(self.smtp_server, self.smtp_port) as server:
+            with smtplib.SMTP_SSL(self.smtp_server, self.smtp_port, timeout=20) as server:
                 server.login(self.smtp_user, self.smtp_password)
                 server.sendmail(self.smtp_user, recipients, msg.as_string())
 
             # 보낸메일함에 IMAP 저장
             try:
-                imap = imaplib.IMAP4_SSL(self.smtp_server, 993)
+                imap = imaplib.IMAP4_SSL(self.smtp_server, 993, timeout=20)
                 imap.login(self.smtp_user, self.smtp_password)
                 # Sent 폴더 찾기 (\Sent 플래그 기반)
                 _, folders = imap.list()

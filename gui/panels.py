@@ -1650,6 +1650,7 @@ class FileManagerWidget(QWidget):
             item.setData(Qt.ItemDataRole.UserRole, p)
             self.list_widget.addItem(item)
 
+    def _quick_export_to(self, mode):
         root = self.archiver.import_root if mode == 'import' else self.archiver.export_root
         if not root:
              JarvisMessageBox.warning(self, "오류", f"{'가져오기' if mode == 'import' else '내보내기'} 경로가 설정되지 않았습니다!")

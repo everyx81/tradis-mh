@@ -281,6 +281,8 @@ class AutoRenamer:
                         dt = new_dt
                     if new_cn != "Unknown":
                         cn = new_cn
+                    if res2.get('haedo_issued'):
+                        res['haedo_issued'] = True
                     self.log(f" -> [OCR 재시도 성공] BL 확보: {new_iden}")
 
             # 수출신고필증 송품장부호 부재 대응: 송품장부호가 인쇄되지 않은
@@ -296,9 +298,17 @@ class AutoRenamer:
             # [v1.1.74] 이름 변경 대상 서류만 정식/미분류 이름을 부여한다.
             # 인보이스·패킹리스트·계약서 등 정산과 무관한 서류는 원본 파일명 유지.
             # (목록: core.constants.is_rename_target)
-            from core.constants import is_rename_target
+            from core.constants import is_rename_target, needs_haedo_issuer
             if dt != "Unknown" and not is_rename_target(dt):
                 self._preserve_name(fp, fn, 'preserve', f"정산 무관 서류({dt})")
+                return
+
+            # [v1.1.80] 청구서·내역서·명세서·정산서 계열은 해도관세사무소 발행분만 이름 변경.
+            # 포워더·창고 등 제3자가 보낸 청구서/BILLING STATEMENT/INVOICE/A/N 은
+            # 계산서가 아니므로 원본 파일명 유지 (미분류_ 대기도 붙이지 않음).
+            # 자금청구서·자금정산서(해도 양식)와 '…계산서' 종류는 검사 대상이 아니다.
+            if dt != "Unknown" and needs_haedo_issuer(dt) and not res.get('haedo_issued'):
+                self._preserve_name(fp, fn, 'preserve', f"제3자 발행 {dt} (해도 발행 아님)")
                 return
 
             # 수입자명이 전체 영문인지 판단 (한글이 포함되지 않음)

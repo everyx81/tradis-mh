@@ -167,7 +167,14 @@ class GeminiOCR:
       - 문서에 적힌 제목이 예시에 없더라도 임의로 바꾸지 말고 적힌 그대로 반환하세요. (시스템이 후처리로 표준화합니다)
 
    B. [내용 기반 심층 분석]
-      - 제목이 '세금계산서', '전자세금계산서', '계산서', '청구서', '영수증', '입금표' 등 범용적인 명칭일 경우, **반드시 품목/비고/내용을 분석**하여 실질에 맞는 이름을 부여하세요.
+      - [★ 청구서 계열 선행 판정 — 계산서 카테고리 배정 금지 ★]
+        제목이 '청구서', '청구내역서', '내역서', '운임내역서', '거래명세서', 'BILLING STATEMENT', 'INVOICE', 'FREIGHT INVOICE', 'DEBIT NOTE', 'ARRIVAL NOTICE'(A/N) 등이고
+        문서에 **전자세금계산서 승인번호**(국세청 24자리 코드, 예: 2026071341000061gf6nhcdi)가 **없으면** → 반드시 doc_type: "청구서" 로 반환하세요.
+        • 품목이 운임·FREIGHT CHARGE·창고료·통관수수료 등 비용 항목이어도 아래 카테고리 계산서 이름(항공운임계산서 등)을 붙이지 마세요. 포워더·창고가 보낸 청구서는 계산서가 아닙니다.
+        • 공급자 등록번호·공급가액·세액 칸이 있어도 승인번호가 없으면 청구서입니다.
+        • 단, 제목이 '자금청구서'/'자금정산서'(관세사무소 양식)이면 기존대로 그 제목을 그대로 반환하세요.
+        • 청구서로 판정한 경우에도 company_name(청구 대상 화주), identifier(B/L·AWB), total_amount, supplier_name, supplier_business_no 는 정상 추출하세요.
+      - 제목이 '세금계산서', '전자세금계산서', '계산서', '영수증', '입금표' 등 범용적인 명칭일 경우, **반드시 품목/비고/내용을 분석**하여 실질에 맞는 이름을 부여하세요.
 
       [카테고리 목록]
       1) **선박운임계산서** — Ocean Freight(O/F), BAF, CAF, LSS, THC, Wharfage, D/O Fee, CIC, EBS, Documentation Fee, Drayage(셔틀/부두이송), 부대비용, Handling Charge(포워더/선사/물류사 발행 시).
@@ -213,7 +220,7 @@ class GeminiOCR:
    - 그 외 문서는 빈 문자열("")을 반환하세요.
 
 7. supplier_name:
-   - 세금계산서, 계산서, 영수증, 입금표인 경우: 공급자의 상호를 추출하세요.
+   - 세금계산서, 계산서, 영수증, 입금표, 청구서(청구내역서·INVOICE·BILLING STATEMENT·A/N 포함)인 경우: 공급자(발행처)의 상호를 추출하세요.
    - 공급자가 명시되지 않은 보험료 영수증 등의 경우: 문서에 기재된 창고명(보관 업체명)을 추출하세요.
    - (주), 주식회사 등 법인명 접미사는 제외하고 본 이름만 추출하며, 모든 공백은 반드시 제거하세요.
    - 그 외 문서는 빈 문자열("")을 반환하세요.
@@ -253,11 +260,13 @@ class GeminiOCR:
   - 금액 0인 항목 제외, 항목이 1개여도 리스트로 반환
 - 그 외 문서(신고필증, 납부고지서, 정산서 등)는 billing_items를 빈 리스트 [] 반환
 
-[3-1단계: 사업자등록번호 (계산서/세금계산서/영수증/입금표 전용)]
+[3-1단계: 사업자등록번호 (계산서/세금계산서/영수증/입금표/청구서 계열 전용)]
 - supplier_business_no: 공급자(발행처)의 사업자등록번호 ("123-45-67890" 형식 그대로)
+  - 청구서·청구내역서·INVOICE·BILLING STATEMENT·자금청구서·자금정산서도 발행처(청구하는 회사)의 사업자등록번호를 추출하세요.
 - buyer_business_no: 공급받는자의 사업자등록번호 ("123-45-67890" 형식 그대로)
+- approval_no: 전자세금계산서 **승인번호** (국세청 24자리, 예: "2026071341000061gf6nhcdi"). 문서에 인쇄된 그대로, 없으면 "Unknown"
 - [주의] 공급자 칸과 공급받는자 칸을 절대 혼동하지 마세요. 각 칸에서 따로 읽으세요.
-- 각각 명확히 확인되지 않으면 "Unknown". 그 외 문서는 두 필드 모두 "Unknown"
+- 각각 명확히 확인되지 않으면 "Unknown". 그 외 문서는 세 필드 모두 "Unknown"
 
 응답은 오직 JSON 형식이어야 하며, 다른 텍스트는 포함하지 마세요.
 """
@@ -356,6 +365,18 @@ class GeminiOCR:
                 result["doc_type"] = title_fix
                 result["doc_type_src"] = "text_layer_fix"
 
+            # --- 보완: 제3자 청구서를 비용 계산서로 분류한 경우 '청구서'로 되돌림 ---
+            # 승인번호(전자세금계산서) 없음 + 청구서 계열 제목 → 계산서가 아니다.
+            # doc_type_src 는 text_layer_fix 로 두지 않는다 (이미 정식 이름이 붙은 파일의
+            # 종류 토큰을 '청구서'로 바꿔 쓰는 흐름을 타지 않도록).
+            from .form_parser import correct_bill_vs_invoice, detect_haedo_issuer
+            bill_fix = correct_bill_vs_invoice(result.get("doc_type"), page_text)
+            if bill_fix:
+                print(f"[보완] 청구서 판정 (승인번호 없음): {result.get('doc_type')} → {bill_fix} "
+                      f"({os.path.basename(fp)})")
+                result["doc_type"] = bill_fix
+                result["doc_type_src"] = "bill_fix"
+
             # --- 보완: B/L 자리에 ⑤화물관리번호를 집어온 경우 1회 재질의 ---
             # 코드가 값을 만들어 넣지 않고, 무엇을 잘못 읽었는지 알려 모델에게 다시 묻는다.
             if is_cargo_mgmt_no(result.get("identifier"), page_text):
@@ -378,6 +399,9 @@ class GeminiOCR:
                         if title_fix:
                             result["doc_type"] = title_fix
                             result["doc_type_src"] = "text_layer_fix"
+                        if bill_fix:
+                            result["doc_type"] = bill_fix
+                            result["doc_type_src"] = "bill_fix"
                         result["identifier_src"] = "ai_retry"
                     else:
                         print(f"[보완] 재질의로도 확정 못함 - 기존 값 유지: {new_id}")
@@ -408,6 +432,11 @@ class GeminiOCR:
             # 수입신고필증은 levy_type 이 없으면 캐시가 매번 무효 판정돼 스캔마다 재OCR 되므로 보장
             if result.get('doc_type') == '수입신고필증':
                 result.setdefault('levy_type', 'Unknown')
+
+            # 발행처가 해도관세사무소인지 각인 — 청구서·정산서·명세서 계열은 이 값이
+            # 참일 때만 이름을 바꾼다 (file_processor 게이트). 모든 결과에 저장해
+            # 캐시 재사용 시에도 판정 근거가 남도록 한다.
+            result["haedo_issued"] = bool(detect_haedo_issuer(result, page_text))
 
             # --- 결과 캐싱 저장 (모든 파일) ---
             self._save_to_cache(fp, result)

@@ -258,3 +258,40 @@ def is_rename_target(doc_type: str) -> bool:
     if any(k in name for k in MERGE_EXCLUDE_KEYWORDS):
         return True
     return any(k.replace(" ", "").lower() in low for k in RENAME_TARGET_KEYWORDS)
+
+
+# ── 발행처 검사 (v1.1.80) ──
+# 청구서·내역서·명세서·정산서 계열은 해도관세사무소가 발행한 것만 이름을 바꾼다.
+# 포워더·창고 등 제3자가 보낸 청구서/BILLING STATEMENT/INVOICE/ARRIVAL NOTICE 는
+# 계산서(전자세금계산서)가 아니므로 원본 파일명을 유지한다.
+# 세금계산서·계산서(비용 계산서류)·입금표·영수증(계산서 대체 서류)·화물인도확인서
+# (운송 서류)는 이 검사 대상이 아니다.
+HAEDO_BUSINESS_NO = "168-76-00091"
+
+# 발행처 검사가 필요한 서류 종류 키워드 (공백 제거·영문 소문자 비교)
+ISSUER_GATED_KEYWORDS = [
+    "청구서", "청구내역서", "내역서", "명세서", "명세표", "정산서",
+    "invoice", "billing", "debit note", "debitnote", "arrival notice", "arrivalnotice",
+]
+
+# 해도 양식이라 발행처 검사 없이 통과시키는 종류
+HAEDO_FORM_DOC_TYPES = {"자금청구서", "자금정산서"}
+
+
+def needs_haedo_issuer(doc_type: str) -> bool:
+    """서류 종류가 '해도 발행일 때만 이름 변경' 검사 대상인지 판정.
+
+    - 자금청구서·자금정산서: 해도 양식 → 검사 불필요 (False)
+    - '계산서'가 들어간 종류(수입세금계산서·선박운임계산서 등): 검사 불필요 (False)
+    - 청구서/내역서/명세서/정산서/INVOICE/BILLING/DEBIT NOTE/ARRIVAL NOTICE 계열: True
+    """
+    if not doc_type or doc_type == "Unknown":
+        return False
+    import re as _re
+    name = _re.sub(r'[\s()（）\[\]]', '', str(doc_type))
+    if name in HAEDO_FORM_DOC_TYPES:
+        return False
+    if "계산서" in name:
+        return False
+    low = name.lower()
+    return any(k.replace(" ", "") in low for k in ISSUER_GATED_KEYWORDS)

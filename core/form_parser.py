@@ -244,6 +244,91 @@ def correct_doc_type_by_title(ai_doc_type, text):
     return None
 
 
+# ── 계산서 vs 청구서 판별 · 해도 발행 판별 (v1.1.80) ──
+# 제3자(포워더·창고 등) 문서는 전자세금계산서 승인번호 유무로 계산서/청구서를 나눈다.
+# 폴더 실측: 정상 계산서는 전부 국세청 승인번호(작성일 8자리+8자리+영숫자 8자리)가
+# 있고, 운임 청구내역서(BILLING STATEMENT)는 공급가액·세액 칸이 있어도 승인번호가 없다.
+# 수기 세금계산서는 제목으로 예외 인정한다.
+
+# 전자세금계산서 승인번호: 2026071341000061gf6nhcdi / 202607284100000151955819
+RE_TAX_INVOICE_APPROVAL = re.compile(r'20\d{14}[0-9a-zA-Z]{8}')
+
+# 청구서 계열 제목 (공백 제거·소문자 비교)
+BILL_TITLE_KEYWORDS = [
+    "청구서", "청구내역서", "운임내역서", "거래명세서", "거래명세표",
+    "billingstatement", "freightinvoice", "invoice", "debitnote", "arrivalnotice",
+]
+
+# 청구서로 뒤집지 않는 종류 (세관·해도 양식, 계산서 대체 서류)
+_BILL_FIX_EXEMPT = {
+    "수입세금계산서", "납부고지서", "자금청구서", "자금정산서",
+    "입금표", "영수증", "이체증",
+}
+
+
+def has_tax_invoice_approval(text):
+    """1페이지 텍스트에 전자세금계산서 승인번호가 있는지."""
+    if not text:
+        return False
+    t = ''.join(text.split())
+    return bool(RE_TAX_INVOICE_APPROVAL.search(t))
+
+
+def is_tax_invoice_text(text):
+    """계산서(세금계산서) 문서인지 — 승인번호가 있거나, 제목 영역에 '세금계산서'가 인쇄됨."""
+    if not text:
+        return False
+    if has_tax_invoice_approval(text):
+        return True
+    head = ''.join(text.split())[:200]
+    return "세금계산서" in head
+
+
+def has_bill_title(text):
+    """청구서 계열 제목(청구서·청구내역서·BILLING STATEMENT·INVOICE·A/N 등)이 있는지."""
+    if not text:
+        return False
+    t = ''.join(text.split()).lower()
+    return any(k in t for k in BILL_TITLE_KEYWORDS)
+
+
+def correct_bill_vs_invoice(ai_doc_type, text):
+    """AI 가 청구서를 비용 계산서(항공운임계산서 등)로 분류했을 때 '청구서'로 되돌린다.
+
+    조건: AI 종류가 '…계산서' 이고, 텍스트에 승인번호·세금계산서 제목이 없으며,
+    청구서 계열 제목이 있을 때만. 텍스트 레이어가 없는 스캔본은 None (AI 판정 유지).
+    """
+    dt = (ai_doc_type or '').replace(' ', '')
+    if not text or not dt or not dt.endswith("계산서"):
+        return None
+    if dt in _BILL_FIX_EXEMPT:
+        return None
+    if is_tax_invoice_text(text):
+        return None
+    if has_bill_title(text):
+        return "청구서"
+    return None
+
+
+def detect_haedo_issuer(result, text):
+    """문서 발행처가 해도관세사무소인지.
+
+    AI 가 공급자 사업자번호를 읽었으면 그 값만 신뢰하고, 못 읽었을 때만
+    텍스트 레이어에서 해도 사업자번호·상호를 찾는다 (자금청구서·자금정산서는
+    본문에 168-76-00091 과 '해도관세' 가 인쇄됨).
+    """
+    from .constants import HAEDO_BUSINESS_NO
+    haedo = re.sub(r'\D', '', HAEDO_BUSINESS_NO)
+    sup = str((result or {}).get('supplier_business_no') or '')
+    sup_digits = re.sub(r'\D', '', sup)
+    if len(sup_digits) == 10:
+        return sup_digits == haedo
+    if not text:
+        return False
+    t = ''.join(text.split())
+    return HAEDO_BUSINESS_NO in t or haedo in t or "해도관세" in t
+
+
 # ── 수입신고필증 징수형태·세액 직독 ──
 # AI 가 감면 필증에서 '세액' 칸(감면 후 납부세액) 대신 '감면액' 칸을 부가세로
 # 읽는 오독이 있어 (감면율 100% → 실제 세액 0 인데 감면액 19,392,130 을 vat 로 반환),

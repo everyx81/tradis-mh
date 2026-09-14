@@ -220,30 +220,43 @@ RENAME_SKIP_KEYWORDS = [
     "월별납부",
 ]
 
-# ── 자동 이름 변경 대상 서류 (v1.1.74) ──
+# ── 자동 이름 변경 대상 서류 (v1.1.74 → v1.1.81 원칙 재정립) ──
 # is_rename_target() 을 통과하는 서류만 정식 이름(회사(BL)종류.pdf) 또는
-# 미분류_ 대기 이름을 부여한다. 목록 밖 서류(인보이스·패킹리스트·계약서·
-# 견적서·사업자등록증 등 정산과 무관한 파일)는 원본 파일명을 그대로 둔다.
-# 미분류_ 대기 → 카드 편입 흐름(요건 서류·BL 없는 계산서)은 목록 안 서류에
-# 한해 기존과 동일하게 동작한다.
-RENAME_TARGET_KEYWORDS = [
-    # 정산 구성 서류
-    "계산서", "신고필증", "신고서", "고지서", "정산서", "청구서",
-    "명세서", "명세표",
-    # 금전 증빙 (AI 가 범용 제목을 그대로 돌려주는 경우 대비)
-    "입금표", "입금증", "영수증", "이체증", "receipt", "debit note",
-    # 요건·통관 부속 증빙
-    "확인증", "증명서", "확인서", "허가서", "승인서", "신청서",
-]
+# 미분류_ 대기 이름을 부여한다. 그 밖의 모든 서류(인보이스·패킹리스트·선하증권·
+# 원산지증명서·위임장·계약서·견적서 등)와 종류를 판독 못 한 서류(Unknown)는
+# 원본 파일명을 그대로 둔다.
+#
+# 판정 원칙 — "정산서를 구성하는 서류의 급(級)" 만 닫힌 집합으로 정한다.
+#  1) 표준 서류 / 교정 후보 목록: 정확히 일치
+#  2) 서류 급: 제목의 **마지막 단어**(끝맺음)가 아래 급에 속할 때만
+#     계산서 / 영수증·입금표(계산서 대체) / 이체증 / 신고필증·신고서 / 고지서 /
+#     정산서·청구서(해도 발행 게이트는 file_processor 에서 별도 적용)
+#  3) 요건 서류: 정산서 수수료 항목과 짝이 되는 범주 키워드(REQUIREMENT_DOC_KEYWORDS)
+#  4) 운송 부속 서류: 화물인도확인서·운송의뢰서(MERGE_EXCLUDE_KEYWORDS)
+# "증명서·확인서·신청서·명세서" 같은 포괄어 '포함' 판정은 쓰지 않는다 — 세상의 모든
+# 증명서/신청서가 대상이 되어 사례마다 예외를 코딩해야 하는 구조였음(v1.1.74~80).
+# 새 급을 정산에 포함시키기로 결정했을 때만 아래 목록을 늘린다.
+RENAME_CLASS_SUFFIXES = (
+    "계산서",
+    "영수증", "입금표", "입금증", "receipt",
+    "이체증",
+    "신고필증", "신고서",
+    "고지서",
+    "정산서", "청구서",
+)
+
+# (하위 호환) 과거 키워드 목록 이름을 참조하는 코드가 있어도 깨지지 않게 유지
+RENAME_TARGET_KEYWORDS = list(RENAME_CLASS_SUFFIXES)
 
 
 def is_rename_target(doc_type: str) -> bool:
-    """AI 가 판독한 서류 종류가 자동 이름 변경 대상인지 판정.
+    """AI 가 판독한 서류 종류가 자동 이름 변경 대상인지 판정 (닫힌 집합).
 
-    - 표준 서류 / 교정 후보 목록에 있으면 대상
-    - 요건 서류 키워드(식물검역·적합성평가 등), 운송 부속 서류 키워드(운송의뢰 등)
-    - RENAME_TARGET_KEYWORDS 부분 일치 (공백 제거, 영문 대소문자 무시)
-    Unknown 은 여기서 판정하지 않는다 (호출측에서 별도 처리).
+    - Unknown / 빈 값: 대상 아님 (원본 이름 유지)
+    - 표준 서류 / 교정 후보 목록: 대상
+    - 제목 끝맺음이 RENAME_CLASS_SUFFIXES 의 급이면 대상 (공백·괄호 제거, 영문 대소문자 무시)
+    - 요건 서류 범주 키워드(식물검역·적합성평가 등), 운송 부속 서류 키워드(화물인도 등): 대상
+    - 그 외 전부: 대상 아님
     """
     if not doc_type or doc_type == "Unknown":
         return False
@@ -252,12 +265,16 @@ def is_rename_target(doc_type: str) -> bool:
     import re as _re
     # 공백·괄호 제거 후 비교 ("물품폐기승인(신청)서" → "물품폐기승인신청서")
     name = _re.sub(r'[\s()（）\[\]]', '', str(doc_type))
+    if name in STANDARD_DOC_TYPES or name in DOC_TYPE_CORRECTION_CHOICES:
+        return True
     low = name.lower()
+    if low.endswith(tuple(s.lower() for s in RENAME_CLASS_SUFFIXES)):
+        return True
     if any(k in name for k in REQUIREMENT_DOC_KEYWORDS):
         return True
     if any(k in name for k in MERGE_EXCLUDE_KEYWORDS):
         return True
-    return any(k.replace(" ", "").lower() in low for k in RENAME_TARGET_KEYWORDS)
+    return False
 
 
 # ── 발행처 검사 (v1.1.80) ──

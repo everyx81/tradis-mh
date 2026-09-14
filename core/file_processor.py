@@ -299,7 +299,29 @@ class AutoRenamer:
             # 인보이스·패킹리스트·계약서 등 정산과 무관한 서류는 원본 파일명 유지.
             # (목록: core.constants.is_rename_target)
             from core.constants import is_rename_target, needs_haedo_issuer
-            if dt != "Unknown" and not is_rename_target(dt):
+
+            # [v1.1.81] 종류를 판독 못 한 파일(Unknown)은 정산 구성 서류가 아니다.
+            # 회사명만 읽혔다는 이유로 미분류_알수없는서류_ 이름을 주던 우회로를 닫는다
+            # (선하증권 등 종류 미상 서류는 무한히 다양하므로 종류별 대응은 불가).
+            # AI 비결정성 대응으로 1회만 재분석하고, 그래도 Unknown 이면 원본 이름 유지.
+            if not _retried_all and dt == "Unknown":
+                self.log(f" -> [OCR 재시도] 종류 Unknown - 재분석: {fn}")
+                time.sleep(2)
+                gemini_ocr.invalidate(fp)
+                res3 = extract_document_info_ai(fp)
+                if not res3.get('error'):
+                    res = res3
+                    dt = normalize_doc_type(res.get("doc_type") or "Unknown")
+                    cn = res.get("company_name") or cn
+                    iden = res.get("identifier") or iden
+                    if dt != "Unknown":
+                        self.log(f" -> [OCR 재시도 성공] 종류 확보: {dt}")
+            if dt == "Unknown":
+                _policy = 'unreadable' if (cn == "Unknown" and iden == "Unknown") else 'preserve'
+                self._preserve_name(fp, fn, _policy, "서류 종류 판독 불가")
+                return
+
+            if not is_rename_target(dt):
                 self._preserve_name(fp, fn, 'preserve', f"정산 무관 서류({dt})")
                 return
 

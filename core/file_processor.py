@@ -206,9 +206,7 @@ class AutoRenamer:
                 # 보완 레이어가 신고필증 오분류를 교정한 건에 한해 파일명도 맞춘다.
                 # BL 이 이름에 있다는 이유로 리네임을 건너뛰던 탓에 과거 오분류로
                 # 굳어진 이름(신고서인데 …수입신고필증.pdf)이 영구히 남던 문제를 푼다.
-                # 사용자가 직접 정한 이름(name_policy=manual)은 종류 토큰도 건드리지 않는다.
-                if (_res and _res.get('doc_type_src') == 'text_layer_fix'
-                        and _res.get('name_policy') != 'manual'):
+                if _res and _res.get('doc_type_src') == 'text_layer_fix':
                     self._fix_doctype_in_filename(fp, fn, d, _res.get('doc_type'))
                 # 캐시 유무와 무관하게 UI 갱신 — 외부(탐색기 등)에서 리네임된 파일도
                 # 카드 스냅샷에 반영되도록 함. 콜백은 1초 디바운스라 부담 없음.
@@ -224,12 +222,18 @@ class AutoRenamer:
             if self.rename_complete_callback:
                 self.rename_complete_callback()
 
+            # v1.1.74~81 의 '수동 이름 보호'(manual) 각인은 폐지 — 남아 있는 각인은 무시하고
+            # 새로 판독한다 (사용자가 다시 분류시키려고 바꾼 이름이 영구히 굳어 있던 문제).
+            if (res or {}).get('name_policy') == 'manual':
+                self.log(f" -> [옛 이름 보호 각인 해제] 다시 분석: {fn}")
+                gemini_ocr.invalidate(fp)
+                res = extract_document_info_ai(fp)
+
             # 이름 정책이 각인된 파일은 재처리하지 않는다 —
             #  preserve   : 정산 무관 서류, 원본 이름 유지 결정
             #  unreadable : 종류·상호·BL·금액 모두 판독 실패, 원본 이름 유지
-            #  manual     : 사용자가 직접 바꾼 이름
             # (재시작 초기 스캔·수정 이벤트마다 재분석·재변경되던 것을 차단)
-            if (res or {}).get('name_policy') in ('preserve', 'unreadable', 'manual'):
+            if (res or {}).get('name_policy') in ('preserve', 'unreadable'):
                 return
 
             # 모델이 null 을 주면 None 이 흘러 들어와 TypeError / 영구 보존 각인으로 이어짐 → Unknown 취급
@@ -480,32 +484,24 @@ class AutoRenamer:
         except Exception:
             return False
 
-    def protect_user_rename(self, src, dest):
-        """폴더 안 이름 변경이 사용자 의도인지 판정하고, 그렇다면 되돌리지 않도록 보호.
+    def note_user_rename(self, src, dest):
+        """폴더 안 이름 변경 처리 (v1.1.82).
 
-        TRADIS 형식 이름(또는 이미 이름 정책이 각인된 파일)을 형식 밖 이름으로 바꾼
-        경우만 사용자 변경으로 본다. TRADIS 자신의 변경은 항상 형식 안으로 향하므로
-        여기서 걸리지 않는다. 캐시 키를 새 이름으로 옮기고 manual 정책을 각인한다.
-        True 를 돌려주면 호출측은 process_pdf 를 돌리지 않는다."""
+        사용자는 파일 이름을 아무렇게나 바꿔서 "다시 분류해 달라"는 신호로 써 왔다.
+        새 이름이 TRADIS 형식(정식 회사(번호)종류 / 미분류_ / 이체증_)이면 그대로 두고,
+        형식 밖 이름이면 옛 이름·새 이름의 캐시를 지워 새로 판독하게 한다.
+        (v1.1.74~81 의 '수동 이름 보호'(name_policy=manual) 는 이 습관을 막던 것이라 폐지.)"""
         src_name = os.path.basename(src or "")
         dest_name = os.path.basename(dest or "")
-        if not src_name or not dest_name or self._is_tradis_named(dest_name):
-            return False
-        src_policy = None
-        if not self._is_tradis_named(src_name):
-            prev = gemini_ocr.peek_cached_result(src)
-            src_policy = (prev or {}).get('name_policy')
-            if src_policy not in ('preserve', 'unreadable', 'manual'):
-                return False
-        try:
-            gemini_ocr._update_cache_key(src, dest)
-            gemini_ocr.set_result_fields(dest, name_policy='manual')
-        except Exception as e:
-            self.log(f" -> [수동 이름 보호 각인 실패] {dest_name}: {e}")
-        self.log(f" -> [수동 이름 보호] {src_name} → {dest_name} (되돌리지 않음)")
-        if self.rename_complete_callback:
-            self.rename_complete_callback()
-        return True
+        if not dest_name or self._is_tradis_named(dest_name):
+            return
+        for _p in (src, dest):
+            if _p:
+                try:
+                    gemini_ocr.invalidate(_p)
+                except Exception as e:
+                    self.log(f" -> [이름 변경 캐시 정리 실패] {os.path.basename(_p)}: {e}")
+        self.log(f" -> [이름 변경 감지] {src_name} → {dest_name}: 다시 분석")
 
     def _fix_doctype_in_filename(self, fp, fn, old_dt, new_dt):
         """파일명에 박힌 서류 종류를 확정 값으로 교정.
@@ -2350,12 +2346,11 @@ class PDFHandler(FileSystemEventHandler):
 
     def on_moved(self, e):
         if not e.is_directory and e.dest_path.lower().endswith('.pdf'):
-            # 사용자가 직접 바꾼 이름은 되돌리지 않는다 (TRADIS 형식 → 형식 밖)
+            # 형식 밖 이름으로 바꾼 것은 '다시 분석' 요청 — 캐시를 비우고 재처리
             try:
-                if self.r.protect_user_rename(e.src_path, e.dest_path):
-                    return
+                self.r.note_user_rename(e.src_path, e.dest_path)
             except Exception as _e:
-                self.r.log(f"[수동 이름 보호 판정 오류] {_e}")
+                self.r.log(f"[이름 변경 처리 오류] {_e}")
             self.r.executor.submit(self.r.process_pdf, e.dest_path)
 
     def on_modified(self, e):

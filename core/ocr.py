@@ -791,7 +791,7 @@ class GeminiOCR:
     def set_result_fields(self, fp, **fields):
         """캐시 결과에 필드를 각인. 엔트리가 없으면 현재 파일 기준으로 생성.
 
-        이름 정책(name_policy: preserve/unreadable/manual) 표시에 사용 —
+        이름 정책(name_policy: preserve/unreadable) 표시에 사용 —
         원본 이름을 유지하기로 한 파일이 재시작·수정 이벤트마다 재분석·재변경되지
         않도록 결정을 파일과 함께 보존한다."""
         with cache_lock:

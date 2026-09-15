@@ -259,6 +259,13 @@ BILL_TITLE_KEYWORDS = [
     "billingstatement", "freightinvoice", "invoice", "debitnote", "arrivalnotice",
 ]
 
+# 영수증 급 제목 (공백 제거·소문자 비교) — 계산서 대체 서류. 영수증에는 참조란에
+# "INVOICE NO." 같은 글자가 흔히 인쇄되므로, 이 제목이 있으면 청구서로 뒤집지 않는다.
+RECEIPT_TITLE_KEYWORDS = [
+    "영수증", "입금표", "입금증",
+    "officialreceipt", "receivedwiththanks", "receipt",
+]
+
 # 청구서로 뒤집지 않는 종류 (세관·해도 양식, 계산서 대체 서류)
 _BILL_FIX_EXEMPT = {
     "수입세금계산서", "납부고지서", "자금청구서", "자금정산서",
@@ -292,11 +299,20 @@ def has_bill_title(text):
     return any(k in t for k in BILL_TITLE_KEYWORDS)
 
 
+def has_receipt_title(text):
+    """영수증 급 제목(영수증·입금표·RECEIPT·OFFICIAL RECEIPT 등)이 있는지."""
+    if not text:
+        return False
+    t = ''.join(text.split()).lower()
+    return any(k in t for k in RECEIPT_TITLE_KEYWORDS)
+
+
 def correct_bill_vs_invoice(ai_doc_type, text):
     """AI 가 청구서를 비용 계산서(항공운임계산서 등)로 분류했을 때 '청구서'로 되돌린다.
 
-    조건: AI 종류가 '…계산서' 이고, 텍스트에 승인번호·세금계산서 제목이 없으며,
-    청구서 계열 제목이 있을 때만. 텍스트 레이어가 없는 스캔본은 None (AI 판정 유지).
+    조건: AI 종류가 '…계산서' 이고, 텍스트에 승인번호·세금계산서 제목이 없고,
+    영수증 급 제목도 없으며, 청구서 계열 제목이 있을 때만.
+    텍스트 레이어가 없는 스캔본은 None (AI 판정 유지).
     """
     dt = (ai_doc_type or '').replace(' ', '')
     if not text or not dt or not dt.endswith("계산서"):
@@ -305,6 +321,8 @@ def correct_bill_vs_invoice(ai_doc_type, text):
         return None
     if is_tax_invoice_text(text):
         return None
+    if has_receipt_title(text):
+        return None   # 영수증(계산서 대체 서류) — "INVOICE NO." 참조란 때문에 청구서로 오판하지 않음
     if has_bill_title(text):
         return "청구서"
     return None

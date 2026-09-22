@@ -388,6 +388,7 @@ class GroupCard(GlassFrame):
         self.marked_folders_to_cleanup = []  # 폴더 정리 후 삭제할 원본 폴더 목록
         self.is_collapsed = True  # 기본 접힘 (밀도 우선)
         self._status = 'gray'
+        self.business_no = ''   # 신고필증에서 추출된 사업자번호 (시트 동기화용)
         # 검증 상태 (문자열 파싱 대신 변수로 관리):
         #   None      = 아직 검증 안 함 (분석 전/중)
         #   'no_items' = 검증할 비용 항목 없음
@@ -1084,6 +1085,13 @@ class GroupCard(GlassFrame):
         """사업자등록번호·신고번호 라벨 갱신 (둘 다 없으면 숨김 유지).
         둘 다 하이픈 없이 표시 — 하이픈이 있으면 더블클릭 선택이 단어 단위로
         쪼개져 번호 전체를 한 번에 복사할 수 없다."""
+        # 시트 동기화용 보관 + 예약 (라벨 유무와 무관하게 먼저 처리)
+        try:
+            self.business_no = str(biz or '').strip()
+            if self.business_no and hasattr(self.parent_widget, '_schedule_card_sheet_sync'):
+                self.parent_widget._schedule_card_sheet_sync()
+        except Exception:
+            pass
         try:
             if not hasattr(self, 'lbl_biz_no'):
                 return

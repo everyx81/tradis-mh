@@ -1213,7 +1213,27 @@ class FileManagerWidget(QWidget):
         self.lbl_mail_status = QLabel("Status: Not configured")
         self.lbl_mail_status.setStyleSheet("color: #888; font-size: 8pt;")
         t4_layout.addWidget(self.lbl_mail_status)
-        
+
+        # === Google 시트 카드 동기화 (봇 화이트리스트) ===
+        t4_layout.addSpacing(20)
+        lbl_sheet_header = QLabel("Google 시트 카드 동기화")
+        lbl_sheet_header.setMinimumHeight(24)
+        lbl_sheet_header.setStyleSheet("color: #00ffff; font-weight: bold;")
+        t4_layout.addWidget(lbl_sheet_header)
+        from PyQt6.QtWidgets import QCheckBox as _QCheckBox
+        from core.config import get_card_sheet_sync_enabled, get_card_sheet_title
+        self.chk_card_sheet_sync = _QCheckBox(
+            f"  정산 카드(BL·회사명·사업자번호)를 시트 '{get_card_sheet_title()}' 탭에 올리기")
+        self.chk_card_sheet_sync.setChecked(get_card_sheet_sync_enabled())
+        self.chk_card_sheet_sync.setStyleSheet(
+            "QCheckBox { color: #ffffff; background: transparent; spacing: 8px; }"
+            "QCheckBox::indicator { width: 16px; height: 16px; }")
+        self.chk_card_sheet_sync.setToolTip(
+            "신고필증에서 사업자번호가 추출된 카드만 올라가고, 병합으로 카드가 사라지면 행도 삭제됩니다.\n"
+            "끄면 시트 호출이 전혀 일어나지 않습니다.")
+        self.chk_card_sheet_sync.toggled.connect(self._on_card_sheet_sync_toggled)
+        t4_layout.addWidget(self.chk_card_sheet_sync)
+
         # === 관리자 잠금 해제 섹션 ===
         t4_layout.addSpacing(20)
         lbl_admin_header = QLabel("관리자 잠금 해제")
@@ -2542,6 +2562,18 @@ class FileManagerWidget(QWidget):
         else:
             JarvisMessageBox.warning(self, "오류", "비밀번호가 올바르지 않습니다.")
             self.input_admin_pw.clear()
+
+    def _on_card_sheet_sync_toggled(self, on: bool):
+        """카드 → 시트 동기화 on/off 저장. 켜면 즉시 한 번 동기화를 예약한다."""
+        try:
+            from core.config import set_card_sheet_sync_enabled
+            set_card_sheet_sync_enabled(on)
+            self.emit_log(f"[시트] 카드 동기화 {'켜짐' if on else '꺼짐'}")
+            mw = self.window()
+            if on and hasattr(mw, '_schedule_card_sheet_sync'):
+                mw._schedule_card_sheet_sync()
+        except Exception as e:
+            self.emit_log(f"[시트] 설정 저장 실패: {e}")
 
     def _save_hanbiro_settings(self):
         """한비로 메일 설정 저장"""

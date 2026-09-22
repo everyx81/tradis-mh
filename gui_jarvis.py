@@ -89,6 +89,14 @@ class JarvisGUI(QMainWindow):
         self.debounce_timer = QTimer(self)
         self.debounce_timer.setSingleShot(True)
         self.debounce_timer.timeout.connect(self._debounced_refresh)
+        # 카드 → Google 시트 미러 (3초 디바운스, 백그라운드 1스레드)
+        self._sheet_sync_timer = QTimer(self)
+        self._sheet_sync_timer.setSingleShot(True)
+        self._sheet_sync_timer.timeout.connect(self._run_card_sheet_sync)
+        self._sheet_sync_running = False
+        self._sheet_sync_pending = False
+        self._sheet_last_sent = None      # 마지막 성공 송신 스냅샷 (같으면 호출 생략)
+        self._sheet_last_error = ''       # 같은 오류 반복 로그 방지
         
         # Load Logic
         self.renamer = AutoRenamer(
@@ -2342,6 +2350,7 @@ class JarvisGUI(QMainWindow):
                 lbl.setStyleSheet("color: #777; font-size: 11pt;")
                 self.merge_layout.addWidget(lbl)
                 self._refresh_filter_counts()
+                self._schedule_card_sheet_sync()   # 카드 0장 → 시트 행도 비운다
                 return
 
             # 1차 패스: 카드로 만들 그룹 / 미분류로 합산할 그룹 분리.
@@ -2381,6 +2390,7 @@ class JarvisGUI(QMainWindow):
             # 필터 초기화 후 카운트 갱신
             self.current_card_filter = 'all'
             self._refresh_filter_counts()
+            self._schedule_card_sheet_sync()
             # 스캔 후 메모리 정리 + 추적 로그 (증가 추이 파악용, 파일 로그에만 기록)
             QTimer.singleShot(1500, self._post_scan_memory_cleanup)
         except Exception as e: self.emit_log(f"Critical error updating UI: {e}")
@@ -2563,8 +2573,100 @@ class JarvisGUI(QMainWindow):
 
         threading.Thread(target=do_prefetch, daemon=True).start()
 
+    # ─────────────────────────────────────────────────
+    # 카드 → Google 시트 미러 ("계산서요청" 탭: BL·회사명·사업자번호)
+    #   규칙: 신고필증 사업자번호가 있는 카드만 행으로. 카드가 사라지면 행 삭제.
+    #   성능: 3초 디바운스 → 메인 스레드는 문자열 수집만, 네트워크는 워커 1개.
+    # ─────────────────────────────────────────────────
+    def _schedule_card_sheet_sync(self):
+        try:
+            from core.config import get_card_sheet_sync_enabled
+            if not get_card_sheet_sync_enabled():
+                return
+            self._sheet_sync_timer.start(3000)
+        except Exception:
+            pass
+
+    def _collect_card_sheet_rows(self):
+        """메인 스레드: 카드에서 BL·회사명·사업자번호·신고필증 경로만 뽑는다 (I/O 없음)."""
+        rows = []
+        for card in list(getattr(self, 'group_cards', []) or []):
+            try:
+                docs = card.data.get('docs', {}) or {}
+                decl = ''
+                for k, v in docs.items():
+                    if v and ('신고필증' in (k or '') or '신고필증' in v):
+                        decl = v
+                        break
+                if not decl:
+                    continue   # 신고필증 없는 카드는 시트에 올리지 않는다
+                rows.append({
+                    'bl': str(card.text_id or '').strip(),
+                    'company': str(card.data.get('company', '') or '').strip(),
+                    'business_no': str(getattr(card, 'business_no', '') or '').strip(),
+                    'decl_path': os.path.join(card.directory, decl),
+                })
+            except RuntimeError:
+                continue   # 삭제 중인 카드
+        return rows
+
+    def _run_card_sheet_sync(self):
+        import re as _re
+        from core.config import get_card_sheet_sync_enabled, get_card_sheet_title
+        if not get_card_sheet_sync_enabled():
+            return
+        if self._sheet_sync_running:
+            self._sheet_sync_pending = True   # 끝나면 한 번 더
+            return
+        rows = self._collect_card_sheet_rows()
+        title = get_card_sheet_title()
+        self._sheet_sync_running = True
+
+        def _fmt_biz(b):
+            d = _re.sub(r'\D', '', str(b or ''))
+            return f"{d[:3]}-{d[3:5]}-{d[5:]}" if len(d) == 10 else ''
+
+        def _work():
+            try:
+                final = []
+                for r in rows:
+                    biz = _fmt_biz(r['business_no'])
+                    if not biz:
+                        # 카드가 재생성돼 추출 결과를 못 받은 경우 — OCR 캐시만 읽는다 (AI 호출 없음)
+                        try:
+                            from core.ocr import gemini_ocr
+                            cached = gemini_ocr._get_cached_result(r['decl_path']) or {}
+                            biz = _fmt_biz(cached.get('business_no', ''))
+                        except Exception:
+                            biz = ''
+                    if biz and r['bl']:
+                        final.append({'bl': r['bl'], 'company': r['company'], 'business_no': biz})
+                snapshot = tuple(sorted((x['bl'], x['company'], x['business_no']) for x in final))
+                if snapshot == self._sheet_last_sent:
+                    return
+                from core.google_sheets import sync_cards_to_sheet
+                res = sync_cards_to_sheet(final, sheet_title=title)
+                self._sheet_last_sent = snapshot
+                self._sheet_last_error = ''
+                if any(res.values()):
+                    self.emit_log(f"[시트] 카드 동기화: 추가 {res['added']} · 갱신 {res['updated']} · 삭제 {res['deleted']} (총 {len(final)}행)")
+            except Exception as e:
+                msg = f"{type(e).__name__}: {e}"
+                if msg != self._sheet_last_error:
+                    self._sheet_last_error = msg
+                    self.emit_log(f"[시트] 카드 동기화 실패 (다음 변경 때 재시도): {msg}")
+            finally:
+                def _done():
+                    self._sheet_sync_running = False
+                    if self._sheet_sync_pending:
+                        self._sheet_sync_pending = False
+                        self._schedule_card_sheet_sync()
+                self._ui_call.emit(_done)
+
+        threading.Thread(target=_work, name="card-sheet-sync", daemon=True).start()
+
     def _debounced_refresh(self):
-        # 폴더 분석은 무거우므로 화면 스레드에서 직접 돌리지 않는다 (큰 폴더에서 UI 정지).
+        # 폴더 분석은 무거우므로화면 스레드에서 직접 돌리지 않는다 (큰 폴더에서 UI 정지).
         # trigger_intelligent_merge 는 내부 락으로 직렬화되므로 겹쳐 호출돼도 안전.
         path = self.line_path.text()
         if not path:

@@ -226,3 +226,115 @@ if __name__ == '__main__':
     except Exception as e:
         print(f"오류: {e}")
 
+
+
+# ─────────────────────────────────────────────────
+# 정산 카드 → 시트 미러 (봇 화이트리스트)
+#   탭 "계산서요청": A BL / B 회사명 / C 사업자번호
+#   - 카드(신고필증 사업자번호 추출 성공)가 생기면 행 추가, 사라지면 행 삭제
+#   - tradis 는 A~C 열만 쓴다. D 열 이후는 봇의 자리 — 절대 건드리지 않는다
+# ─────────────────────────────────────────────────
+CARD_SHEET_TITLE_DEFAULT = "계산서요청"
+CARD_SHEET_HEADERS = ["BL", "회사명", "사업자번호"]
+_HTTP_TIMEOUT_SEC = 15
+
+
+def _open_card_sheet(client, spreadsheet_id: str, title: str):
+    """제목으로 탭을 찾고, 없으면 만들어 헤더를 채운다. 헤더가 비어 있으면 채운다."""
+    spreadsheet = client.open_by_key(spreadsheet_id)
+    sheet = None
+    for ws in spreadsheet.worksheets():
+        if ws.title == title:
+            sheet = ws
+            break
+    if sheet is None:
+        sheet = spreadsheet.add_worksheet(title=title, rows=200, cols=10)
+        sheet.update(range_name='A1:C1', values=[CARD_SHEET_HEADERS])
+        return sheet
+    first = sheet.row_values(1)
+    if not any(str(v).strip() for v in first[:3]):
+        sheet.update(range_name='A1:C1', values=[CARD_SHEET_HEADERS])
+    return sheet
+
+
+def sync_cards_to_sheet(
+    rows: list,
+    spreadsheet_id: str = None,
+    sheet_title: str = None,
+    credentials_path: str = None,
+) -> dict:
+    """카드 목록을 시트 A~C 열에 거울처럼 맞춘다 (BL 키).
+
+    Args:
+        rows: [{'bl': str, 'company': str, 'business_no': str}, ...]
+              — 호출측이 사업자번호 있는 카드만 넘긴다
+    Returns:
+        {'added': n, 'updated': n, 'deleted': n}
+    Raises:
+        FileNotFoundError: credentials.json 없음 / Exception: API 오류
+    """
+    spreadsheet_id = spreadsheet_id or DEFAULT_SPREADSHEET_ID
+    sheet_title = sheet_title or CARD_SHEET_TITLE_DEFAULT
+    credentials_path = credentials_path or get_credentials_path()
+    if not os.path.exists(credentials_path):
+        raise FileNotFoundError(f"Google 인증 파일이 없습니다: {credentials_path}")
+
+    # 원하는 상태: BL → (회사명, 사업자번호). 같은 BL 이 두 번 오면 뒤가 이긴다
+    want = {}
+    for r in rows or []:
+        bl = str(r.get('bl', '') or '').strip()
+        if not bl:
+            continue
+        want[bl] = (str(r.get('company', '') or '').strip(),
+                    str(r.get('business_no', '') or '').strip())
+
+    creds = Credentials.from_service_account_file(credentials_path, scopes=SCOPES)
+    client = gspread.authorize(creds)
+    try:
+        client.http_client.session.request = _with_timeout(client.http_client.session.request)
+    except Exception:
+        pass
+    sheet = _open_card_sheet(client, spreadsheet_id, sheet_title)
+
+    # 현재 상태 (A~C 만 읽는다). 행 번호는 1-based, 1행은 헤더
+    current = sheet.get_values('A2:C')
+    have = {}          # BL → (row_no, company, biz)
+    dup_rows = []      # 같은 BL 중복 행 → 삭제 대상
+    for i, vals in enumerate(current):
+        vals = list(vals) + [''] * (3 - len(vals))
+        bl = str(vals[0]).strip()
+        row_no = i + 2
+        if not bl:
+            continue
+        if bl in have:
+            dup_rows.append(row_no)
+            continue
+        have[bl] = (row_no, str(vals[1]).strip(), str(vals[2]).strip())
+
+    updates = []   # gspread batch_update 용 {'range':..., 'values':...}
+    added = updated = 0
+    for bl, (row_no, comp, biz) in have.items():
+        if bl in want and want[bl] != (comp, biz):
+            updates.append({'range': f'B{row_no}:C{row_no}', 'values': [list(want[bl])]})
+            updated += 1
+    new_rows = [[bl, comp, biz] for bl, (comp, biz) in want.items() if bl not in have]
+    delete_rows = sorted([rn for bl, (rn, _, _) in have.items() if bl not in want] + dup_rows,
+                         reverse=True)   # 아래부터 지워야 위 행 번호가 밀리지 않는다
+
+    if updates:
+        sheet.batch_update(updates, value_input_option='RAW')
+    # 삭제를 추가보다 먼저 — 삭제 후 append 하면 빈 자리부터 채워진다
+    for rn in delete_rows:
+        sheet.delete_rows(rn)
+    if new_rows:
+        sheet.append_rows(new_rows, value_input_option='RAW', table_range='A1')
+        added = len(new_rows)
+    return {'added': added, 'updated': updated, 'deleted': len(delete_rows)}
+
+
+def _with_timeout(request_fn, timeout=_HTTP_TIMEOUT_SEC):
+    """requests.Session.request 에 기본 timeout 을 끼운다 — 인터넷 끊김에 스레드가 매달리지 않게."""
+    def _wrapped(method, url, **kw):
+        kw.setdefault('timeout', timeout)
+        return request_fn(method, url, **kw)
+    return _wrapped

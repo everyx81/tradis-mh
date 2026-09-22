@@ -104,6 +104,26 @@ def set_card_memo(bl_id: str, text: str):
 
 
 # ─────────────────────────────────────────────────
+# 정산 카드 → Google 시트 미러 (봇 화이트리스트) 설정
+# ─────────────────────────────────────────────────
+def get_card_sheet_sync_enabled() -> bool:
+    """카드 → 시트 동기화 on/off (기본 켜짐). 끄면 시트 호출이 전혀 일어나지 않는다."""
+    v = CONFIG.get("card_sheet_sync", True)
+    return bool(v) if v is not None else True
+
+
+def set_card_sheet_sync_enabled(enabled: bool):
+    CONFIG["card_sheet_sync"] = bool(enabled)
+    _persist_keys("card_sheet_sync")
+
+
+def get_card_sheet_title() -> str:
+    """카드 미러 탭 이름 (기본 '계산서요청')."""
+    t = str(CONFIG.get("card_sheet_title", "") or "").strip()
+    return t or "계산서요청"
+
+
+# ─────────────────────────────────────────────────
 # 월납업체 (매출 수수료 계산서 미발행 업체)
 # ─────────────────────────────────────────────────
 def get_monthly_billing_companies() -> list:

@@ -2623,8 +2623,9 @@ class JarvisGUI(QMainWindow):
         self._sheet_sync_running = True
 
         def _fmt_biz(b):
+            # 시트에는 하이픈 없는 10자리 숫자로만 (사용자 결정) — 자릿수 안 맞으면 미추출 취급
             d = _re.sub(r'\D', '', str(b or ''))
-            return f"{d[:3]}-{d[3:5]}-{d[5:]}" if len(d) == 10 else ''
+            return d if len(d) == 10 else ''
 
         def _work():
             try:

@@ -25,6 +25,15 @@ from .utils import (
     is_prefix_match_id
 )
 from .ocr import gemini_ocr, extract_document_info_ai
+from .freight_mode import (
+    FREIGHT_DOCS, corrected_freight_doc, same_bl_files
+)
+
+# 공급자 묶음 부분집합 탐색 상한 (2^N 조합) — 한 건에 한 공급자 계산서가 이보다 많을 일은 없다
+_BUNDLE_MAX_FILES = 10
+
+# 같은 B/L 의 운송 수단 증거가 될 수 있는 서류 — 들어오면 중립 운임 계산서를 다시 맞춘다
+_MODE_TRIGGER_DOCS = set(FREIGHT_DOCS) | {"자금정산서", "자금청구서"}
 
 
 class AutoRenamer:
@@ -208,6 +217,10 @@ class AutoRenamer:
                 # 굳어진 이름(신고서인데 …수입신고필증.pdf)이 영구히 남던 문제를 푼다.
                 if _res and _res.get('doc_type_src') == 'text_layer_fix':
                     self._fix_doctype_in_filename(fp, fn, d, _res.get('doc_type'))
+                # 운임 계산서·정산서가 들어오거나 다시 보일 때 같은 B/L 의 중립 운임
+                # 계산서(HANDLING 만 있는 등)를 해상/항공 증거에 맞춘다 (자기 자신 포함).
+                if d in _MODE_TRIGGER_DOCS:
+                    self._reconcile_freight_mode(os.path.dirname(fp), i, own_fp=fp)
                 # 캐시 유무와 무관하게 UI 갱신 — 외부(탐색기 등)에서 리네임된 파일도
                 # 카드 스냅샷에 반영되도록 함. 콜백은 1초 디바운스라 부담 없음.
                 if self.rename_complete_callback and not is_initial:
@@ -433,6 +446,15 @@ class AutoRenamer:
             cn = sanitize_filename(cn).replace(" ", "")
             iden = sanitize_filename(iden).replace(" ", "").upper()
 
+            # 중립 운임 계산서(HANDLING FEE 만 있는 등)는 같은 B/L 서류의 해상/항공
+            # 증거로 종류를 확정한 뒤 이름을 붙인다 (AI 는 무조건 선박운임으로 부름).
+            if dt in FREIGHT_DOCS:
+                _fixed_dt = self._freight_mode_fix(fp, dict(res, doc_type=dt), iden)
+                if _fixed_dt:
+                    self.log(f" -> [운송 수단 보정] {dt} → {_fixed_dt} (같은 B/L 서류 근거)")
+                    dt = _fixed_dt
+                    gemini_ocr.set_result_fields(fp, doc_type=dt, doc_type_src='mode_fix')
+
             from core.config import get_custom_naming
             _naming = get_custom_naming()
             try:
@@ -455,6 +477,9 @@ class AutoRenamer:
                         self.rename_complete_callback()
                 except Exception as e:
                     self.log(f" -> [실패] 이름 변경 오류: {e}")
+            # 새 증거(운임 계산서·정산서)가 생겼으면 먼저 와 있던 중립 운임 계산서를 다시 맞춘다
+            if dt in _MODE_TRIGGER_DOCS:
+                self._reconcile_freight_mode(dir_name, iden, skip_name=os.path.basename(np))
         except Exception as e:
             # 스레드 풀에 제출된 작업의 예외는 아무도 확인하지 않아 조용히 사라지던 것을 로그로
             self.log(f" -> [처리 오류] {fn}: {type(e).__name__}: {e}")
@@ -523,6 +548,55 @@ class AutoRenamer:
             self.log(f" -> [종류 교정] {fn} → {nn}")
         except Exception as e:
             self.log(f" -> [실패] 종류 교정 이름 변경 오류: {e}")
+
+    def _freight_mode_fix(self, fp, result, identifier):
+        """중립 운임 계산서의 올바른 종류 (같은 B/L 다른 서류 근거). 보정 불필요 시 None."""
+        try:
+            siblings = same_bl_files(os.path.dirname(fp), identifier,
+                                     exclude=os.path.basename(fp))
+            sib_results = [gemini_ocr.peek_cached_result(p) for p in siblings]
+            return corrected_freight_doc(result, [r for r in sib_results if r])
+        except Exception as e:
+            self.log(f" -> [운송 수단 판정 오류] {os.path.basename(fp)}: {e}")
+            return None
+
+    def _reconcile_freight_mode(self, dir_name, identifier, own_fp=None, skip_name=None):
+        """같은 B/L 의 중립 운임 계산서들을 해상/항공 증거에 맞춰 종류·이름 교정.
+
+        own_fp: 지금 처리 중인 파일 (processing_files 에 있어도 교정 대상)
+        skip_name: 방금 이름을 붙인 파일 (이미 판정 끝) — 건너뜀
+        """
+        try:
+            files = same_bl_files(dir_name, identifier)
+        except Exception:
+            return
+        for p in files:
+            name = os.path.basename(p)
+            if name == skip_name:
+                continue
+            res = gemini_ocr.peek_cached_result(p)
+            if not res or res.get("doc_type") not in FREIGHT_DOCS:
+                continue
+            new_dt = self._freight_mode_fix(p, res, identifier)
+            if not new_dt:
+                continue
+            is_own = own_fp is not None and os.path.normcase(p) == os.path.normcase(own_fp)
+            if not is_own:
+                with self._proc_lock:
+                    if p in self.processing_files:
+                        continue   # 다른 워커가 처리 중 — 그 워커의 판정에 맡긴다
+                    self.processing_files.add(p)
+            try:
+                old_dt = res.get("doc_type")
+                self.log(f" -> [운송 수단 보정] {name}: {old_dt} → {new_dt} (같은 B/L 서류 근거)")
+                gemini_ocr.set_result_fields(p, doc_type=new_dt, doc_type_src='mode_fix')
+                self._fix_doctype_in_filename(p, name, old_dt, new_dt)
+                if self.rename_complete_callback:
+                    self.rename_complete_callback()
+            finally:
+                if not is_own:
+                    with self._proc_lock:
+                        self.processing_files.discard(p)
 
     def trigger_intelligent_merge(self, dr):
         """폴더 분석 → 카드 그룹 보고. 동시 호출은 직렬화한다 — 두 실행이 겹치면 같은
@@ -1423,6 +1497,8 @@ class AutoRenamer:
             개별 파일 금액이 정산서 항목과 안 맞음 → 공급자(사업자번호) 단위로 묶어
             합계를 비교한다. 파일명 doc_type 라벨이 잘못 분류돼 있어도 동작.
             오매칭 방지: 묶음 중 최소 1개는 키워드 후보(candidates)여야 함.
+            v1.1.86: 공급자 전체 합계가 아니라 부분집합 합계 — 같은 포워더가 운송료
+            계산서까지 따로 발행하면 전체 합계가 항목 금액과 절대 맞지 않던 문제.
             """
             if item_amt <= 0:
                 return None
@@ -1433,14 +1509,33 @@ class AutoRenamer:
                 key = _supplier_key(pdf)
                 if key:
                     by_supplier.setdefault(key, []).append(pdf)
+            # 같은 공급자가 다른 항목의 계산서(운송료 등)까지 함께 발행한 경우
+            # 전체 합계는 항목 금액과 절대 맞지 않는다 → 부분집합 합계를 본다.
+            # 가장 작은 묶음부터 찾고, 같은 크기에서 일치 묶음이 둘 이상이면
+            # 어느 쪽인지 근거가 없으므로 배정하지 않는다 (추측 금지).
+            from itertools import combinations
             cand_set = set(candidates)
+            found = []
             for key, group_files in by_supplier.items():
                 if len(group_files) < 2 or not any(f in cand_set for f in group_files):
                     continue
-                if sum(_get_file_amount(f) for f in group_files) == item_amt:
-                    # 키워드 후보를 대표(슬롯 파일)로 앞세움
-                    return sorted(group_files, key=lambda f: (f not in cand_set, f))
-            return None
+                group_files = sorted(group_files)[:_BUNDLE_MAX_FILES]
+                amts = {f: _get_file_amount(f) for f in group_files}
+                for size in range(2, len(group_files) + 1):
+                    hits = [c for c in combinations(group_files, size)
+                            if any(f in cand_set for f in c)
+                            and sum(amts[f] for f in c) == item_amt]
+                    if hits:
+                        found.append((size, hits))
+                        break
+            if not found:
+                return None
+            min_size = min(sz for sz, _ in found)
+            hits = [c for sz, hs in found if sz == min_size for c in hs]
+            if len(hits) != 1:
+                return None
+            # 키워드 후보를 대표(슬롯 파일)로 앞세움
+            return sorted(hits[0], key=lambda f: (f not in cand_set, f))
 
         # ── Step 0: 분리형/묶음형 파일 사전 분류 ──
         # 분리형: 파일의 billing_items 이름이 정산서 expense 이름과 2개 이상 정확 일치

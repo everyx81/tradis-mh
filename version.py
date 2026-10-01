@@ -1,6 +1,6 @@
 """TRADIS MH 버전 정보"""
 
-__version__ = "1.1.86"
+__version__ = "1.1.87"
 APP_NAME = "TRADIS MH"
 GITHUB_REPO = "everyx81/tradis-mh"
 

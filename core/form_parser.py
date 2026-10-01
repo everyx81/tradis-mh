@@ -1,6 +1,7 @@
 # JARVIS Core - 표준 서식 직독 파서
 """
-관세청 표준 서식(납부고지서, 수입세금계산서)의 텍스트 레이어 직독 파서.
+관세청 표준 서식(납부고지서, 수입세금계산서)과 해도 양식(자금청구서·자금정산서)의
+텍스트 레이어 직독 파서.
 
 이 서류들은 UNI-PASS 전산 출력물이라 텍스트 레이어가 완전하다.
 AI 이미지 인식은 상호/성명 라벨-값 짝짓기를 틀릴 수 있으므로
@@ -133,6 +134,165 @@ def _parse_import_tax_invoice(t):
     }
 
 
+# ── 해도 양식 (자금청구서 / 자금정산서) 좌표 직독 (v1.1.87) ──
+# 해도관세사무소가 발행하는 2023년 이후 신양식. 텍스트가 '라벨 묶음 → 값 묶음'
+# 순서로 추출돼 문자열로는 짝을 지을 수 없으므로 단어 좌표(행 y, 열 x)로 읽는다.
+# 확정 조건: 제목·해도 사업자번호·실화주·B/L 형식·비용 표 구조가 모두 맞고
+#            표 항목 합계 == 비용합계 (검산). 하나라도 어긋나면 None → AI 경로.
+# 실측: PC 내 신양식 약 3,500건 중 약 95% 확정, 기존 AI 결과 42건과 종류·상호·
+#       B/L·공급받는자 번호 전부 일치. 구양식('통관 자금 청구서')은 대상 아님.
+HAEDO_FORM_TITLES = ("자금정산서", "자금청구서")
+RE_AMOUNT_TOKEN = re.compile(r'^-?[\d,]+$')
+RE_BIZ_NO = re.compile(r'(\d{3}-\d{2}-\d{5})')
+RE_HAEDO_BL = re.compile(r'[A-Za-z0-9\-]+')
+# 법인 형태 표기 — 상호 본체가 아님 (영문(한글) 병기 판정 전에 먼저 제거)
+RE_LEGAL_FORM = re.compile(r'[\(（]\s*(?:주|유|합|사|재)\s*[\)）]|유한회사|유한책임회사|합자회사|합명회사|사단법인|재단법인')
+RE_KO_IN_PAREN = re.compile(r'^([^가-힣]*)[\(（]([가-힣]+)[\)）]$')
+
+
+def _first_page_words(fp):
+    import fitz  # lazy import
+    with pdf_lock:
+        doc = fitz.open(fp)
+        try:
+            if doc.page_count < 1:
+                return []
+            return [(w[0], w[1], w[4]) for w in doc[0].get_text("words")]
+        finally:
+            doc.close()
+
+
+def _to_amount(tok):
+    return int(tok.replace(',', ''))
+
+
+def _haedo_company(raw):
+    """실화주 칸 원문 → 상호 (법인 표기 제거, 영문(한글) 병기는 한글)."""
+    name = RE_LEGAL_FORM.sub('', raw or '').strip()
+    m = RE_KO_IN_PAREN.match(name.replace(' ', ''))
+    if m:
+        name = m.group(2)
+    return cleanup_company_name(name)
+
+
+def _parse_haedo_form(words):
+    from .constants import HAEDO_BUSINESS_NO
+    if not words:
+        return None
+
+    title = next((w[:5] for x, y, w in words
+                  if y < 100 and w.startswith(HAEDO_FORM_TITLES)), None)
+    if not title:
+        return None
+    if not any(HAEDO_BUSINESS_NO in w for _, _, w in words):
+        return None   # 해도 발행 양식만
+
+    def row_text(label_pred, x_from, x_to, ytol=6):
+        """조건에 맞는 라벨이 정확히 1개일 때, 같은 행 x 범위의 단어들."""
+        labels = [(x, y) for x, y, w in words if label_pred(x, y, w)]
+        if len(labels) != 1:
+            return None
+        ly = labels[0][1]
+        vals = sorted((x, w) for x, y, w in words
+                      if abs(y - ly) <= ytol and x_from <= x < x_to)
+        return [w for _, w in vals]
+
+    # 실화주: '실 화 주' 라벨의 '주' 글자 (좌측 받는자 블록) 와 같은 행
+    v = row_text(lambda x, y, w: w == "주" and 85 <= x <= 100 and 140 <= y <= 170, 100, 280)
+    company = _haedo_company(" ".join(v)) if v else ""
+    if not company:
+        return None
+
+    # B/L (I/V) No: 'B/L' 라벨 행, '신고금액' 열 앞까지
+    v = row_text(lambda x, y, w: w == "B/L" and 175 <= x <= 195, 230, 390)
+    ident = "".join(v) if v else ""
+    if not ident or not RE_HAEDO_BL.fullmatch(ident):
+        return None
+
+    # 받는자 사업자번호 (좌측 상단 블록, '등록번호204-81-…' 처럼 붙어 나오기도 함)
+    buyer = 'Unknown'
+    for x, y, w in words:
+        if x < 280 and 110 <= y <= 135:
+            m = RE_BIZ_NO.search(w)
+            if m:
+                buyer = m.group(1)
+
+    # 비용 표: '공급가' 헤더 ~ '비용합계' 라벨
+    hdr = [y for x, y, w in words if w == "공급가"]
+    tot = [y for x, y, w in words if x < 60 and w.startswith("비용합계")]
+    if len(hdr) != 1 or len(tot) != 1:
+        return None
+    y_top, y_tot = hdr[0], tot[0]
+    # 비용명 열(x<130) 라벨 행 — 같은 행(±2) 단어는 이어 붙인다 ('미 수 금(b)' 등)
+    label_rows = []
+    for x, y, w in sorted(((x, y, w) for x, y, w in words
+                           if x < 130 and y_top + 8 < y < y_tot - 2),
+                          key=lambda t: (t[1], t[0])):
+        if label_rows and y - label_rows[-1][0] <= 2:
+            label_rows[-1][1].append((x, w))
+        else:
+            label_rows.append([y, [(x, w)]])
+    label_rows = [(y, "".join(w for _, w in sorted(ws))) for y, ws in label_rows]
+    # 합계 열(x 280~360) 금액을 가장 가까운 라벨 행(거리 ≤10)에 1:1 배정
+    anchors = label_rows + [(y_tot, None)]
+    assigned, total = {}, None
+    for x, y, w in words:
+        if not (280 <= x < 360 and y_top + 8 < y < y_tot + 12 and RE_AMOUNT_TOKEN.match(w)):
+            continue
+        ay, name = min(anchors, key=lambda a: abs(a[0] - y))
+        if abs(ay - y) > 10:
+            return None   # 어느 행 금액인지 모름
+        if name is None:
+            if total is not None:
+                return None
+            total = _to_amount(w)
+        else:
+            if name in assigned:
+                return None
+            assigned[name] = _to_amount(w)
+    if total is None or any(name not in assigned for _, name in label_rows):
+        return None
+    if sum(assigned.values()) != total:
+        return None   # 검산 불일치 — 확정하지 않는다
+    items = [{"name": n, "amount": a} for n, a in assigned.items() if a > 0]
+
+    def amount_right_of(label, x_from=250, x_to=360):
+        ys = [y for x, y, w in words if w.startswith(label) and x < 60]
+        if len(ys) != 1:
+            return None
+        vals = [w for x, y, w in words
+                if abs(y - ys[0]) <= 6 and x_from <= x < x_to and RE_AMOUNT_TOKEN.match(w)]
+        return _to_amount(vals[0]) if len(vals) == 1 else None
+
+    result = {
+        'doc_type': title,
+        'company_name': company,
+        'identifier': ident.upper(),
+        'id_type': 'BL',
+        'total_amount': total,           # 비용합계 (정산서·청구서 공통 정의)
+        'product_name': '',
+        'supplier_name': '해도관세사',
+        'supplier_business_no': HAEDO_BUSINESS_NO,
+        'buyer_business_no': buyer,
+        'approval_no': 'Unknown',
+        'haedo_issued': True,
+        'parsed_by': 'form_parser',
+    }
+    if title == "자금청구서":
+        claim = amount_right_of("청구금액")
+        if claim is None:
+            return None
+        result['total_amount'] = claim
+        result['billing_items'] = items
+    else:
+        result['merge_info'] = {'expense_items': items}
+        result['billing_items'] = []
+        deposit = amount_right_of("입금금액")
+        if deposit is not None:
+            result['deposit_amount'] = deposit
+    return result
+
+
 def parse_standard_form(fp):
     """1페이지 텍스트 레이어로 표준 서식 확정 파싱. 실패/비대상이면 None."""
     try:
@@ -142,7 +302,12 @@ def parse_standard_form(fp):
     if not text or len(text.strip()) < 50:
         return None  # 스캔본 등 텍스트 없음 → AI 경로
     try:
-        return _parse_notice(text) or _parse_import_tax_invoice(text)
+        parsed = _parse_notice(text) or _parse_import_tax_invoice(text)
+        if parsed:
+            return parsed
+        if any(t in text for t in HAEDO_FORM_TITLES):
+            return _parse_haedo_form(_first_page_words(fp))
+        return None
     except Exception:
         return None
 

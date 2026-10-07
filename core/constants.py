@@ -212,6 +212,60 @@ FIXED_SLOT_KEYS = [
     "수입세금계산서",
 ]
 
+# ── 징수형태별 해당없음 서류 (v1.1.88 단일 판정원) ──
+# 관세법 제40조·시행령 제37조: 징수금액 1만원 미만은 징수하지 않음 → 납부고지서 미발행
+MIN_LEVY_AMOUNT = 10_000
+
+
+def levy_not_applicable(levy_type, total_tax) -> set:
+    """수입신고필증의 징수형태·총세액으로 '해당없음' 서류 이름 집합을 반환.
+
+    - 11 자진신고납부: 세액 1만원 미만이면 납부고지서 불필요
+    - 14 수시부과: 수입세금계산서 불필요, 세액 1만원 미만이면 납부고지서도 불필요
+    - 43 사후납부: 수입세금계산서·납부고지서 모두 불필요
+    - 그 외/미상: 모두 필요 (보수적)
+    total_tax 가 None 이면 세액 미상 → 고지 있는 것으로 본다.
+    """
+    lt = str(levy_type or "").strip()
+    taxed = total_tax is None or total_tax >= MIN_LEVY_AMOUNT
+    na = set()
+    if lt in ("14", "43"):
+        na.add(DOC_TYPE_IMPORT_TAX_INVOICE)
+    if lt == "43" or (lt in ("11", "14") and not taxed):
+        na.add(DOC_TYPE_PAYMENT_NOTICE)
+    return na
+
+
+# 월납업체 매출 수수료 키워드 — 월납업체 카드에서 이 비용 항목들은 해당없음
+MONTHLY_FEE_KEYWORDS = [
+    "통관수수료", "검역수수료", "식품검역", "식물검역", "동물검역",
+    "요건대행수수료", "요건수수료", "요건면제수수료",
+    "폐기수수료", "폐기 수수료",
+    "취하수수료", "검사수수료", "갈음수수료",
+    "원산지증명서", "CITES", "통관고유부호",
+    "환급수수료", "분증수수료", "기납증수수료",
+    "반입수수료", "반출수수료", "신고전물품확인수수료",
+    "선사선적 핸들링", "선사선적핸들링",
+    "BL분할수수료", "개청비",
+    "구매확인서 수수료", "구매확인서수수료",
+    "검사비지원수수료",
+    "배차핸들링", "배차 핸들링",
+    "HANDLING",
+]
+
+
+def is_monthly_fee_item(name: str) -> bool:
+    """비용 항목명이 월납업체 매출 수수료인지 (공백 무시 양방향 포함)."""
+    if not name:
+        return False
+    n = name.replace(" ", "")
+    for kw in MONTHLY_FEE_KEYWORDS:
+        k = kw.replace(" ", "")
+        if k in n or n in k:
+            return True
+    return False
+
+
 # 자동 이름 변경 제외 키워드
 # 파일명에 이 키워드 중 하나라도 포함되면 AI 이름 변경을 건너뜀.
 # 사용자가 수동으로 이름을 지정한 파일을 보호하는 용도.

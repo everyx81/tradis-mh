@@ -19,6 +19,24 @@ from .widgets import GlassFrame
 from core.config import get_config_path
 
 
+def _mapping_item_name(label: str) -> str:
+    """정산명세서 행 라벨 → 체크리스트 칩 이름 ('[세금] 납부고지서' / '비용: 창고료')."""
+    if ']' in label:
+        return label.split(']')[-1].strip()
+    if ':' in label:
+        return label.split(':')[-1].strip()
+    return label
+
+
+def _resolve_na(default_na: bool, override: str) -> bool:
+    """기본 해당없음 여부에 사용자 칩 override 를 적용."""
+    if override == "force_applicable":
+        return False
+    if override == "force_not_applicable":
+        return True
+    return default_na
+
+
 # ── 모던 맥 스타일 버튼 (펼친 카드 내부 공용) ──
 _MODERN_BTN_STYLE = """
     QPushButton {
@@ -1315,17 +1333,10 @@ class GroupCard(GlassFrame):
             na_set = self._compute_na_set()
         except Exception:
             na_set = set()
-        def _item_name(it):
-            lbl = it.get('label', '')
-            if ']' in lbl:
-                return lbl.split(']')[-1].strip()
-            elif ':' in lbl:
-                return lbl.split(':')[-1].strip()
-            return lbl
         missing = any(
             (not item.get('filename', ''))
             and '포함' not in item.get('label', '')
-            and _item_name(item) not in na_set
+            and _mapping_item_name(item.get('label', '')) not in na_set
             for item in self.mapping
         )
 
@@ -1559,20 +1570,10 @@ class GroupCard(GlassFrame):
             ]
         else:
             # 수입: 징수형태 기반으로 납부고지서/수입세금계산서 필요 여부 결정
-            levy_type, has_tax = self._get_levy_info()
-            need_payment_notice = True
-            need_tax_invoice = True
-            if levy_type == "11":
-                need_tax_invoice = True
-                need_payment_notice = has_tax
-            elif levy_type == "14":
-                need_tax_invoice = False
-                need_payment_notice = has_tax
-            elif levy_type == "43":
-                need_tax_invoice = False
-                need_payment_notice = False
+            levy_na = self._levy_na_set()
 
             # 징수형태 배지 정보 저장 (코드만, 이름 생략 — 사용자 요청)
+            levy_type, _ = self._get_levy_info()
             if levy_type and levy_type != "Unknown":
                 self._levy_badge_info = (levy_type, "")
 
@@ -1585,12 +1586,12 @@ class GroupCard(GlassFrame):
             required.append({
                 "name": "납부고지서",
                 "found": _pn_found,
-                "not_applicable": not need_payment_notice,
+                "not_applicable": "납부고지서" in levy_na,
             })
             required.append({
                 "name": "수입세금계산서",
                 "found": "수입세금계산서" in docs,
-                "not_applicable": not need_tax_invoice,
+                "not_applicable": "수입세금계산서" in levy_na,
             })
         
         # 캐시에서 정산서 분석 결과 조회 → 비용 항목 추가
@@ -1838,13 +1839,7 @@ class GroupCard(GlassFrame):
         items = []
         for req in required:
             default_na = req.get('not_applicable', False)
-            ov = overrides.get(req['name'], "")
-            if ov == "force_applicable":
-                not_app = False
-            elif ov == "force_not_applicable":
-                not_app = True
-            else:
-                not_app = default_na
+            not_app = _resolve_na(default_na, overrides.get(req['name'], ""))
             items.append({
                 'name': req['name'],
                 'found': req.get('found', False),
@@ -1861,59 +1856,15 @@ class GroupCard(GlassFrame):
 
     def _update_checklist_from_mapping(self):
         """AI 분석 후 mapping 기반으로 전체 체크리스트 갱신 (비용 항목 포함)"""
-        # 징수형태 기반 not_applicable 판단 (수입만)
+        # 징수형태 배지 (수입만)
         docs = self.data.get('docs', {})
-        is_export = "수출신고필증" in docs or "반송신고필증" in docs
-        na_set = set()
-        if not is_export:
-            levy_type, has_tax = self._get_levy_info()
+        if not ("수출신고필증" in docs or "반송신고필증" in docs):
+            levy_type, _ = self._get_levy_info()
             if levy_type and levy_type != "Unknown":
                 self._levy_badge_info = (levy_type, "")
-            if levy_type == "11":
-                if not has_tax:
-                    na_set.add("납부고지서")
-            elif levy_type == "14":
-                na_set.add("수입세금계산서")
-                if not has_tax:
-                    na_set.add("납부고지서")
-            elif levy_type == "43":
-                na_set.add("수입세금계산서")
-                na_set.add("납부고지서")
 
-        # 월납업체 판정 — 카드 company 가 월납업체 리스트에 포함되면
-        # 매출 수수료 관련 항목 전부 not_applicable
-        is_monthly = False
-        try:
-            from core.config import is_monthly_billing_company
-            company = self.data.get('company', '') or ''
-            is_monthly = is_monthly_billing_company(company)
-        except Exception:
-            is_monthly = False
-        self._is_monthly_billing = is_monthly
-        # 매출 수수료 판정 키워드 (통관수수료, 검역수수료, 요건, 취하수수료 등)
-        _FEE_KWS = [
-            "통관수수료", "검역수수료", "식품검역", "식물검역", "동물검역",
-            "요건대행수수료", "요건수수료", "요건면제수수료",
-            "폐기수수료", "폐기 수수료",
-            "취하수수료", "검사수수료", "갈음수수료",
-            "원산지증명서", "CITES", "통관고유부호",
-            "환급수수료", "분증수수료", "기납증수수료",
-            "반입수수료", "반출수수료", "신고전물품확인수수료",
-            "선사선적 핸들링", "선사선적핸들링",
-            "BL분할수수료", "개청비",
-            "구매확인서 수수료", "구매확인서수수료",
-            "검사비지원수수료",
-            "배차핸들링", "배차 핸들링",
-            "HANDLING",
-        ]
-        def _is_fee_item(name: str) -> bool:
-            if not name:
-                return False
-            n = name.replace(" ", "")
-            for kw in _FEE_KWS:
-                if kw.replace(" ", "") in n or n in kw.replace(" ", ""):
-                    return True
-            return False
+        # 기본 not_applicable (징수형태 / 월납업체) — _compute_na_set 과 같은 판정원
+        default_na_set = self._default_na_set()
 
         # 사용자의 chip override 로드 (BL별)
         try:
@@ -1926,31 +1877,13 @@ class GroupCard(GlassFrame):
         for item in self.mapping:
             label = item.get('label', '')
             filename = item.get('filename', '')
-            if ']' in label:
-                name = label.split(']')[-1].strip()
-            elif ':' in label:
-                name = label.split(':')[-1].strip()
-            else:
-                name = label
+            name = _mapping_item_name(label)
             is_found = bool(filename) or (not filename and "포함" in label)
             sub = None
             if "포함" in label and not filename:
                 sub = "(수수료계산서 포함)"
-            # 기본 not_applicable (징수형태 / 월납업체 기반)
-            # 월납 면제는 수수료 '계산서'(비용 항목)만 — 요건 증빙서류([요건] 등
-            # 대괄호 라벨)는 월납과 무관하게 필요하므로 NA 대상에서 제외.
-            # (_compute_na_set 의 ':' 라벨 한정 판정과 기준 일치)
-            default_na = name in na_set
-            if is_monthly and ']' not in label and _is_fee_item(name):
-                default_na = True
-            # 사용자 override 적용
-            ov = overrides.get(name, "")
-            if ov == "force_applicable":
-                not_app = False
-            elif ov == "force_not_applicable":
-                not_app = True
-            else:
-                not_app = default_na
+            default_na = name in default_na_set
+            not_app = _resolve_na(default_na, overrides.get(name, ""))
             items.append({
                 'name': name,
                 'found': is_found,
@@ -2168,6 +2101,14 @@ class GroupCard(GlassFrame):
                 self._update_checklist_basic()
         except Exception as e:
             print(f"[chip refresh] {e}")
+        # 정산명세서 행 표시 → 금액 검증 → 카드 상태까지 같은 NA 집합으로 재계산
+        try:
+            for idx in range(len(self.mapping or [])):
+                self._apply_row_status(idx)
+            self._run_amount_validation()
+            self._update_status_badge()
+        except Exception as e:
+            print(f"[chip refresh rows] {e}")
 
     def _make_levy_badge(self, code: str, name: str):
         """징수형태 배지 (예: '징수형태 14')"""
@@ -2492,13 +2433,7 @@ class GroupCard(GlassFrame):
         except Exception:
             _na_set = set()
         _label_raw = item.get('label', '')
-        if ']' in _label_raw:
-            _item_name = _label_raw.split(']')[-1].strip()
-        elif ':' in _label_raw:
-            _item_name = _label_raw.split(':')[-1].strip()
-        else:
-            _item_name = _label_raw
-        _is_na = _item_name in _na_set
+        _is_na = _mapping_item_name(_label_raw) in _na_set
         has_file = bool(item.get('filename', ''))
         is_included = '포함' in _label_raw
 
@@ -2897,19 +2832,19 @@ class GroupCard(GlassFrame):
             self.parent_widget.emit_log(f"[재스캔 오류] {e}")
 
     def _get_levy_info(self):
-        """수입신고필증 캐시에서 (징수형태, 관세+부가세>0 여부) 반환.
-        징수형태 없으면 ('Unknown', True) — 보수적으로 모두 필요로 처리.
+        """수입신고필증 캐시에서 (징수형태, 총세액) 반환.
+        필증·캐시 없으면 ('Unknown', None) — 세액 미상은 고지 있는 것으로 처리.
         """
         try:
             docs = self.data.get('docs', {})
             dec_file = docs.get("수입신고필증")
             if not dec_file:
-                return ("Unknown", True)
+                return ("Unknown", None)
             from core.ocr import gemini_ocr
             fp = os.path.join(self.directory, dec_file)
             cached = gemini_ocr._get_cached_result(fp)
             if not cached:
-                return ("Unknown", True)
+                return ("Unknown", None)
             lt = str(cached.get("levy_type", "Unknown")).strip()
             def _to_int(x):
                 try:
@@ -2919,14 +2854,12 @@ class GroupCard(GlassFrame):
             # 텍스트 직독 총세액합계가 있으면 그 값이 확정 (감면액 오독 무관),
             # 없으면(구 캐시) 관세 + 부가세 합으로 판단
             if cached.get("total_tax") is not None:
-                has_tax = _to_int(cached.get("total_tax")) > 0
+                total_tax = _to_int(cached.get("total_tax"))
             else:
-                duty = _to_int(cached.get("customs_duty", 0))
-                vat = _to_int(cached.get("vat", 0))
-                has_tax = (duty + vat) > 0
-            return (lt, has_tax)
+                total_tax = _to_int(cached.get("customs_duty", 0)) + _to_int(cached.get("vat", 0))
+            return (lt, total_tax)
         except Exception:
-            return ("Unknown", True)
+            return ("Unknown", None)
 
     def _file_sort_key(self, filename: str):
         """파일 정렬 키 — 문서 종류 기반 논리 순서 (병합 순서와 동일).
@@ -3861,66 +3794,53 @@ class GroupCard(GlassFrame):
 
     def _compute_na_set(self):
         """현재 BL 카드의 not_applicable 항목 이름 집합을 반환.
-        (징수형태 / 월납업체 / 사용자 override 종합)"""
-        docs = self.data.get('docs', {})
-        is_export = "수출신고필증" in docs or "반송신고필증" in docs
-        na = set()
-        if not is_export:
-            levy_type, has_tax = self._get_levy_info()
-            if levy_type == "11":
-                if not has_tax:
-                    na.add("납부고지서")
-            elif levy_type == "14":
-                na.add("수입세금계산서")
-                if not has_tax:
-                    na.add("납부고지서")
-            elif levy_type == "43":
-                na.add("수입세금계산서")
-                na.add("납부고지서")
-        # 월납업체
-        try:
-            from core.config import is_monthly_billing_company
-            company = self.data.get('company', '') or ''
-            if is_monthly_billing_company(company):
-                _FEE_KWS = [
-                    "통관수수료", "검역수수료", "식품검역", "식물검역", "동물검역",
-                    "요건대행수수료", "요건수수료", "요건면제수수료",
-                    "폐기수수료", "폐기 수수료",
-                    "취하수수료", "검사수수료", "갈음수수료",
-                    "원산지증명서", "CITES", "통관고유부호",
-                    "환급수수료", "분증수수료", "기납증수수료",
-                    "반입수수료", "반출수수료", "신고전물품확인수수료",
-                    "선사선적 핸들링", "선사선적핸들링",
-                    "BL분할수수료", "개청비",
-                    "구매확인서 수수료", "구매확인서수수료",
-                    "검사비지원수수료",
-                    "배차핸들링", "배차 핸들링",
-                    "HANDLING",
-                ]
-                # mapping 에서 비용 항목 이름 추출해 키워드 매칭
-                for item in self.mapping:
-                    label = item.get('label', '')
-                    if ':' not in label:
-                        continue
-                    name = label.split(':')[-1].strip()
-                    n = name.replace(" ", "")
-                    for kw in _FEE_KWS:
-                        if kw.replace(" ", "") in n or n in kw.replace(" ", ""):
-                            na.add(name)
-                            break
-        except Exception:
-            pass
+        (징수형태 / 월납업체 / 사용자 override 종합)
+
+        체크리스트·정산명세서 행·금액 검증·카드 상태가 모두 이 집합 하나를 본다."""
+        na = self._default_na_set()
         # 사용자 override
         try:
             from core.config import get_chip_overrides
             overrides = get_chip_overrides(self.text_id)
             for chip_name, state in overrides.items():
-                if state == "force_not_applicable":
+                if _resolve_na(chip_name in na, state):
                     na.add(chip_name)
-                elif state == "force_applicable" and chip_name in na:
+                else:
                     na.discard(chip_name)
         except Exception:
             pass
+        return na
+
+    def _levy_na_set(self):
+        """징수형태·총세액 기준 해당없음 서류 (수입만, 판정 규칙은 core.constants)."""
+        docs = self.data.get('docs', {})
+        if "수출신고필증" in docs or "반송신고필증" in docs:
+            return set()
+        from core.constants import levy_not_applicable
+        levy_type, total_tax = self._get_levy_info()
+        return levy_not_applicable(levy_type, total_tax)
+
+    def _default_na_set(self):
+        """override 적용 전 기본 해당없음 집합 (징수형태 + 월납업체 매출 수수료).
+        월납 면제는 수수료 '계산서'(비용 항목)만 — 요건 증빙서류([요건] 등
+        대괄호 라벨)는 월납과 무관하게 필요하므로 대상에서 제외."""
+        na = self._levy_na_set()
+        is_monthly = False
+        try:
+            from core.config import is_monthly_billing_company
+            is_monthly = is_monthly_billing_company(self.data.get('company', '') or '')
+        except Exception:
+            is_monthly = False
+        self._is_monthly_billing = is_monthly
+        if is_monthly:
+            from core.constants import is_monthly_fee_item
+            for item in (getattr(self, 'mapping', None) or []):
+                label = item.get('label', '')
+                if ']' in label or ':' not in label:
+                    continue
+                name = _mapping_item_name(label)
+                if is_monthly_fee_item(name):
+                    na.add(name)
         return na
 
     def _run_amount_validation(self):
@@ -3940,16 +3860,8 @@ class GroupCard(GlassFrame):
 
         # NA 항목 제외한 검증용 mapping
         na_set = self._compute_na_set()
-        def _is_na(item):
-            label = item.get('label', '')
-            if ']' in label:
-                name = label.split(']')[-1].strip()
-            elif ':' in label:
-                name = label.split(':')[-1].strip()
-            else:
-                name = label
-            return name in na_set
-        validation_mapping = [it for it in self.mapping if not _is_na(it)]
+        validation_mapping = [it for it in self.mapping
+                              if _mapping_item_name(it.get('label', '')) not in na_set]
 
         # 비용 항목이 하나라도 있는지 확인 (NA 제외 후)
         has_expense_items = any('비용: ' in item.get('label', '') for item in validation_mapping)

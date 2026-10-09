@@ -352,9 +352,11 @@ class AutoRenamer:
 
             # 수입자명이 전체 영문인지 판단 (한글이 포함되지 않음)
             # cn이 "Unknown"이면 무시하고 판별
+            # 수출·반송필증은 제외 — 외국인 개인 등 영문 전용 수출자가 정상으로 존재하며,
+            # 상호는 ocr 보완 레이어가 원문 수출대행자로 확정한다 (v1.1.89)
             import re
             is_english_only = False
-            if cn != "Unknown":
+            if cn != "Unknown" and dt not in ("수출신고필증", "반송신고필증"):
                 if not re.search(r'[가-힣]', cn):
                     is_english_only = True
 

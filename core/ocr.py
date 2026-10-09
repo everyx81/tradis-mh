@@ -411,6 +411,18 @@ class GeminiOCR:
                 except Exception as e:
                     print(f"[보완] 재질의 오류: {e}")
 
+            # --- 보완: 수출·반송필증 상호 — 원문에 없는 한글 음역 상호 차단 ---
+            # 영문 전용 수출자(외국인 개인 등)를 AI 가 실행마다 영문/한글 음역으로
+            # 오가며 반환 → 같은 수출자가 두 상호로 갈리던 문제. 원문 수출대행자로 확정.
+            if result.get('doc_type') in ('수출신고필증', '반송신고필증') and page_text:
+                from .form_parser import correct_export_company
+                comp_fix = correct_export_company(result.get('company_name'), page_text)
+                if comp_fix:
+                    print(f"[보완] 수출필증 상호 원문 교정: {result.get('company_name')} → {comp_fix} "
+                          f"({os.path.basename(fp)})")
+                    result['company_name'] = comp_fix
+                    result['company_src'] = 'text_layer_fix'
+
             # --- 보완: 수입신고필증 징수형태·세액 텍스트 직독 ---
             # AI 가 감면 필증의 '감면액'을 세액으로 오독하는 사례 차단.
             # 텍스트 레이어에서 확정된 필드만 덮어쓰고, 못 읽은 필드는 AI 값 유지.

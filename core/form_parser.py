@@ -617,3 +617,30 @@ def is_cargo_mgmt_no(value, text):
     if not RE_CARGO_MGMT_NO.match(v):
         return False
     return v in ''.join(text.split()).upper()
+
+
+# 수출신고필증 ② 수출대행자 상호 (라벨 다음 줄). 실측: 아카이브 표본 400건 중 350건 직독
+RE_EXPORT_AGENT = re.compile(r'수\s*출\s*대\s*행\s*자\s*\n?(.*?)\n')
+RE_HANGUL = re.compile(r'[가-힣]')
+
+
+def correct_export_company(ai_company, text):
+    """수출·반송필증에서 AI 가 원문에 없는 한글 상호를 지어낸 경우 원문 영문 상호로 교정.
+
+    교정 조건 (셋 다 만족할 때만, 그 외에는 None → AI 값 유지):
+    - AI 상호에 한글이 있고, 그 표기가 원문 어디에도 없다
+    - 원문 수출대행자 상호를 읽었고, 그 상호에 한글이 전혀 없다 (영문 전용 수출자)
+    원문에 한글 상호가 있는 서류(약칭·오타 등)는 건드리지 않는다.
+    """
+    if not ai_company or not text or not RE_HANGUL.search(ai_company):
+        return None
+    flat = ''.join(text.split())
+    if ''.join(ai_company.split()) in flat:
+        return None
+    m = RE_EXPORT_AGENT.search(text)
+    if not m:
+        return None
+    agent = m.group(1).strip()
+    if not agent or RE_HANGUL.search(agent) or not re.search(r'[A-Za-z]', agent):
+        return None
+    return cleanup_company_name(agent) or None

@@ -2055,6 +2055,16 @@ class AutoRenamer:
                     final_of = _naming["merge_pattern"].format(company=final_company, bl=target_id)
                 except (KeyError, ValueError):
                     final_of = f"{final_company}({target_id})정산서.pdf"
+                # 같은 이름의 정산서가 작업 폴더·정리 폴더 어느 쪽에 있어도 덮어쓰지 않도록
+                # (1), (2) … 를 붙인다 — 재병합 시 기존 정산서가 갱신(유실)되던 문제
+                _base, _ext = os.path.splitext(final_of)
+                _n = 0
+                while (os.path.exists(os.path.join(dr, final_of))
+                       or os.path.exists(os.path.join(archive_dir, final_of))):
+                    _n += 1
+                    final_of = f"{_base}({_n}){_ext}"
+                if _n:
+                    self.log(f" -> [이름 중복] 같은 이름의 정산서가 있어 {final_of} 로 저장")
                 output_path = os.path.join(dr, final_of)
 
                 # 병합 실행 (재시도 지원)
@@ -2291,8 +2301,12 @@ class AutoRenamer:
 
             # 관련 파일/폴더 자동 수집 (merge 대상 폴더 - 이름변경 폴더에서만)
             # 마킹으로 이미 이동된 파일은 제외
-            self._collect_related_items(dr, archive_dir, target_id,
-                                        exclude_names=moved_marked, history=history)
+            # 수출·반송건은 카드 서류 + 마킹 파일만 묶는다 — ID 포함 비교 수집이
+            # 별건 카드(예: 2026.10.09 ↔ 2026.10.09-1)의 필증까지 끌고 오던 문제 (v1.1.90)
+            is_export_card = any(f and ("수출신고필증" in f or "반송신고필증" in f) for f in fo)
+            if not is_export_card:
+                self._collect_related_items(dr, archive_dir, target_id,
+                                            exclude_names=moved_marked, history=history)
 
             # 되돌리기 기록 확정
             merge_history.save_entry(history)

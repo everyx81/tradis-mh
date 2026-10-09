@@ -3512,7 +3512,8 @@ class GroupCard(GlassFrame):
                     parent.shipping_search_signal.emit(_bl_id, target_folder)
 
         threading.Thread(target=run_archive, daemon=True).start()
-        parent.emit_log(f"[{log_prefix}] {self.text_id} 폴더 정리 + 관련 파일 수집 중... (마킹 {len(marked)}개)")
+        _collect_note = "" if log_prefix in ("수출", "반송") else " + 관련 파일 수집"
+        parent.emit_log(f"[{log_prefix}] {self.text_id} 폴더 정리{_collect_note} 중... (마킹 {len(marked)}개)")
         # 마킹 데이터 정리
         if hasattr(parent, 'marked_data') and self.text_id in parent.marked_data:
             del parent.marked_data[self.text_id]

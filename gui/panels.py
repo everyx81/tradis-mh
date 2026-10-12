@@ -793,6 +793,8 @@ class FileManagerWidget(QWidget):
         _settings_scroll = QScrollArea()
         _settings_scroll.setWidgetResizable(True)
         _settings_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        # 가로 스크롤 금지 — 긴 항목이 생겨도 화면이 옆으로 밀려 오른쪽이 잘리지 않게
+        _settings_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         _settings_scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
         _settings_inner = QWidget()
         _settings_inner.setStyleSheet("background-color: transparent;")
@@ -1226,8 +1228,9 @@ class FileManagerWidget(QWidget):
         t4_layout.addWidget(lbl_sheet_header)
         from PyQt6.QtWidgets import QCheckBox as _QCheckBox
         from core.config import get_card_sheet_sync_enabled, get_card_sheet_title
-        self.chk_card_sheet_sync = _QCheckBox(
-            f"  정산 카드(BL·회사명·사업자번호)를 시트 '{get_card_sheet_title()}' 탭에 올리기")
+        # 체크박스 문구는 줄바꿈이 안 돼 길면 설정 화면 전체 폭을 밀어낸다 —
+        # 짧게 두고 자세한 내용은 줄바꿈되는 안내문으로 (v1.1.92)
+        self.chk_card_sheet_sync = _QCheckBox("  시트에 정산 카드 올리기")
         self.chk_card_sheet_sync.setChecked(get_card_sheet_sync_enabled())
         self.chk_card_sheet_sync.setStyleSheet(
             "QCheckBox { color: #ffffff; background: transparent; spacing: 8px; }"
@@ -1237,6 +1240,12 @@ class FileManagerWidget(QWidget):
             "끄면 시트 호출이 전혀 일어나지 않습니다.")
         self.chk_card_sheet_sync.toggled.connect(self._on_card_sheet_sync_toggled)
         t4_layout.addWidget(self.chk_card_sheet_sync)
+        lbl_sheet_desc = QLabel(
+            f"정산 카드의 BL·회사명·사업자번호를 시트 '{get_card_sheet_title()}' 탭에 올립니다.")
+        lbl_sheet_desc.setStyleSheet(
+            f"color: {CT['fg_3']}; font-size: 9pt; background: transparent; border: none;")
+        lbl_sheet_desc.setWordWrap(True)
+        t4_layout.addWidget(lbl_sheet_desc)
 
         # === 관리자 잠금 해제 섹션 ===
         t4_layout.addSpacing(20)
@@ -3170,14 +3179,14 @@ class FileManagerWidget(QWidget):
         _chk_style = (f"QCheckBox {{ color: {CT['fg_1']}; background: transparent; spacing: 6px; font-size: 9.5pt; }}"
                       "QCheckBox::indicator { width: 16px; height: 16px; }")
 
-        # 1행: 업체명 + 구분
-        row1 = QHBoxLayout()
-        row1.setSpacing(8)
+        # 1행: 업체명 / 2행: 구분 (좁은 패널에서도 한 줄이 넘치지 않도록 나눔)
         self.input_decl_company = QLineEdit()
         self.input_decl_company.setPlaceholderText("업체명 (필증 상호, 예: 해도무역)")
         self.input_decl_company.setMinimumHeight(34)
         self.input_decl_company.setStyleSheet(_input_style)
-        row1.addWidget(self.input_decl_company, stretch=1)
+        t4_layout.addWidget(self.input_decl_company)
+        row1 = QHBoxLayout()
+        row1.setSpacing(16)
         self.chk_decl_export = QCheckBox("수출(반송 포함)")
         self.chk_decl_export.setChecked(True)
         self.chk_decl_export.setStyleSheet(_chk_style)
@@ -3185,6 +3194,7 @@ class FileManagerWidget(QWidget):
         self.chk_decl_import = QCheckBox("수입")
         self.chk_decl_import.setStyleSheet(_chk_style)
         row1.addWidget(self.chk_decl_import)
+        row1.addStretch()
         t4_layout.addLayout(row1)
 
         # 2행: 패턴 + 추가

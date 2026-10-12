@@ -144,6 +144,7 @@ class JarvisGUI(QMainWindow):
         self.file_manager.item_deleted.connect(self._on_mail_item_deleted_reset) # 목록 삭제 시 초기화
         self.file_manager.admin_unlocked.connect(self._on_admin_unlocked)  # 관리자 잠금 해제
         self.file_manager.settings_changed.connect(self.save_settings)  # 폴더 설정 변경 즉시 저장
+        self.file_manager.decl_rules_changed.connect(self._apply_decl_name_rules)  # 업체별 필증 이름 규칙 즉시 적용
         self.file_manager.startup_guide_requested.connect(self._show_startup_guide)  # 시작 가이드 재표시
         
         # Everything 자동 시작 (검색 기능 활성화) - 비동기 실행으로 프리징 방지
@@ -2336,6 +2337,7 @@ class JarvisGUI(QMainWindow):
             # 카드 필터 대상 리스트 초기화
             self.group_cards = []
 
+            from core.decl_naming import match_text as _decl_text
             groups = report.get('groups', {})
             unclassified = report.get('unclassified', [])
             suggested = report.get('suggested', [])
@@ -2360,8 +2362,10 @@ class JarvisGUI(QMainWindow):
             for text_id, data in groups.items():
                 docs = data.get('docs', {})
                 has_statement = '자금정산서' in docs or '정산서' in docs
-                is_export = any('수출신고필증' in v or '반송신고필증' in v for v in docs.values())
-                is_import = any('수입신고필증' in v for v in docs.values())
+                # match_text: 업체별 이름 규칙 이름(종류 글자 없음)도 이름표의 종류로 판정
+                _dtexts = [_decl_text(v) for v in docs.values()]
+                is_export = any('수출신고필증' in t or '반송신고필증' in t for t in _dtexts)
+                is_import = any('수입신고필증' in t for t in _dtexts)
                 if not has_statement and not is_export and not is_import:
                     self.emit_log(f"[건너뜀] {text_id}: 자금정산서/신고필증 없음 — 미분류로 이동")
                     for _fn in docs.values():
@@ -2796,6 +2800,24 @@ class JarvisGUI(QMainWindow):
             self._update_state_ui(True)
         self.emit_log("Monitoring Started...")
         self.run_intelligent_merge()
+
+    def _apply_decl_name_rules(self):
+        """업체별 필증 이름 규칙 추가·삭제 직후 작업 폴더의 필증 이름을 맞춘다
+        (모니터링 중이 아니어도 적용, 하위 정리 폴더는 그대로)."""
+        path = self.line_path.text()
+        if not path or not os.path.isdir(path):
+            return
+
+        def _run():
+            try:
+                n = self.renamer.apply_decl_name_rules(path)
+                self.emit_log(f"[업체 이름 규칙] 작업 폴더 필증 {n}건 이름 변경" if n
+                              else "[업체 이름 규칙] 작업 폴더에 바꿀 필증 없음")
+                if n:
+                    self.rename_trigger_signal.emit()
+            except Exception as e:
+                self.emit_log(f"[업체 이름 규칙 오류] {e}")
+        threading.Thread(target=_run, daemon=True).start()
 
     def _preload_ocr_modules(self):
         """OCR에 필요한 무거운 모듈을 백그라운드에서 미리 로드"""

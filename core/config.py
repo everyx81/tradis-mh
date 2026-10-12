@@ -165,6 +165,33 @@ def remove_monthly_billing_company(company: str) -> list:
     return cs
 
 
+# ─────────────────────────────────────────────────
+# 업체별 신고필증 이름 규칙 (v1.1.91)
+# [{"company": "○○상사", "kinds": ["수출"], "pattern": "{신고번호}({ID}).pdf"}]
+# kinds: "수출"(반송 포함) / "수입". 같은 업체·같은 구분은 한 규칙만 둔다.
+# ─────────────────────────────────────────────────
+def get_decl_name_rules() -> list:
+    cfg = CONFIG.get("decl_name_rules")
+    if not isinstance(cfg, list):
+        return []
+    rules = []
+    for r in cfg:
+        if not isinstance(r, dict):
+            continue
+        company = str(r.get("company", "") or "").strip()
+        pattern = str(r.get("pattern", "") or "").strip()
+        kinds = [k for k in (r.get("kinds") or []) if k in ("수출", "수입")]
+        if company and pattern and kinds:
+            rules.append({"company": company, "kinds": kinds, "pattern": pattern})
+    return rules
+
+
+def set_decl_name_rules(rules: list):
+    CONFIG["decl_name_rules"] = list(rules)
+    _persist_keys("decl_name_rules")
+    return get_decl_name_rules()
+
+
 def is_monthly_billing_company(company: str) -> bool:
     """업체 이름이 월납업체 리스트에 포함되는지 (공백 제거 부분 매칭, 양방향)."""
     if not company:

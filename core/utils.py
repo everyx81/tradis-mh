@@ -300,6 +300,12 @@ def parse_renamed_filename(filename: str) -> Tuple[Optional[str], Optional[str],
     if not filename.lower().endswith('.pdf'):
         return None, None, None, None
 
+    # 업체별 필증 이름 규칙으로 붙인 이름 — 회사명·종류가 이름에 없으므로 이름표 기록 우선
+    from .decl_naming import lookup as _decl_lookup
+    _tagged = _decl_lookup(filename)
+    if _tagged:
+        return _tagged
+
     # 커스텀 패턴 파싱 시도 (괄호 없는 패턴 대응)
     try:
         from core.config import get_custom_naming, DEFAULT_FILE_PATTERN

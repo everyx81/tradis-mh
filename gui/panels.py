@@ -37,6 +37,7 @@ class FileManagerWidget(QWidget):
     item_deleted = pyqtSignal()  # 항목 삭제 시그널
     admin_unlocked = pyqtSignal()  # 관리자 잠금 해제 시그널
     settings_changed = pyqtSignal()  # 설정 변경 즉시 저장 요청
+    decl_rules_changed = pyqtSignal()  # 업체별 필증 이름 규칙 변경 → 작업 폴더 즉시 적용
     startup_guide_requested = pyqtSignal()  # 시작 가이드 재표시 요청
     _mail_search_done = pyqtSignal(str, str, str, object, str)  # company, bl_id, file_path, threads, my_email
 
@@ -963,6 +964,9 @@ class FileManagerWidget(QWidget):
 
         # 초기 리스트 채우기
         self._refresh_skip_keywords_list()
+
+        # === 업체별 필증 이름 규칙 섹션 ===
+        self._setup_decl_rule_section(t4_layout)
 
         # === 월납업체 설정 섹션 ===
         t4_layout.addSpacing(20)
@@ -3122,6 +3126,240 @@ class FileManagerWidget(QWidget):
         except Exception as e:
             self.emit_log(f"[오류] 키워드 삭제 실패: {e}")
         self._refresh_skip_keywords_list()
+
+    # ─────────────────────────────────────────────
+    # 업체별 필증 이름 규칙 (v1.1.91)
+    # ─────────────────────────────────────────────
+    def _setup_decl_rule_section(self, t4_layout):
+        """설정한 업체의 신고필증만 지정 형식으로 이름을 바꾼다. 카드 표시는 그대로."""
+        from PyQt6.QtGui import QShortcut as _QShortcut, QKeySequence as _QKeySequence
+        from core.decl_naming import DEFAULT_RULE_PATTERN
+
+        t4_layout.addSpacing(20)
+        lbl_header = QLabel("업체별 필증 이름 규칙")
+        lbl_header.setMinimumHeight(24)
+        lbl_header.setStyleSheet(
+            f"color: {CT['fg_0']}; font-weight: 600; letter-spacing: 0.2px; "
+            f"background: transparent; border: none;"
+        )
+        t4_layout.addWidget(lbl_header)
+
+        lbl_desc = QLabel(
+            "등록한 업체의 신고필증만 아래 형식으로 이름을 바꿉니다. 카드 표시는 그대로입니다.\n"
+            "추가·삭제 즉시 작업 폴더의 해당 필증에도 적용됩니다 (정리된 폴더는 그대로).\n"
+            "신고번호를 읽지 못한 필증(스캔본 등)은 기본 이름으로 둡니다."
+        )
+        lbl_desc.setStyleSheet(
+            f"color: {CT['fg_3']}; font-size: 9pt; background: transparent; border: none;"
+        )
+        lbl_desc.setWordWrap(True)
+        lbl_desc.setMinimumHeight(48)
+        t4_layout.addWidget(lbl_desc)
+
+        _input_style = f"""
+            QLineEdit {{
+                background-color: {CT['bg_2']};
+                color: {CT['fg_0']};
+                border: 1px solid {CT['border_soft']};
+                border-radius: 8px;
+                padding: 6px 10px;
+                font-size: 10pt;
+            }}
+            QLineEdit:focus {{ border: 1px solid {CT['accent_border']}; }}
+        """
+        _chk_style = (f"QCheckBox {{ color: {CT['fg_1']}; background: transparent; spacing: 6px; font-size: 9.5pt; }}"
+                      "QCheckBox::indicator { width: 16px; height: 16px; }")
+
+        # 1행: 업체명 + 구분
+        row1 = QHBoxLayout()
+        row1.setSpacing(8)
+        self.input_decl_company = QLineEdit()
+        self.input_decl_company.setPlaceholderText("업체명 (필증 상호, 예: 해도무역)")
+        self.input_decl_company.setMinimumHeight(34)
+        self.input_decl_company.setStyleSheet(_input_style)
+        row1.addWidget(self.input_decl_company, stretch=1)
+        self.chk_decl_export = QCheckBox("수출(반송 포함)")
+        self.chk_decl_export.setChecked(True)
+        self.chk_decl_export.setStyleSheet(_chk_style)
+        row1.addWidget(self.chk_decl_export)
+        self.chk_decl_import = QCheckBox("수입")
+        self.chk_decl_import.setStyleSheet(_chk_style)
+        row1.addWidget(self.chk_decl_import)
+        t4_layout.addLayout(row1)
+
+        # 2행: 패턴 + 추가
+        row2 = QHBoxLayout()
+        row2.setSpacing(8)
+        self.input_decl_pattern = QLineEdit(DEFAULT_RULE_PATTERN)
+        self.input_decl_pattern.setMinimumHeight(34)
+        self.input_decl_pattern.setStyleSheet(_input_style)
+        self.input_decl_pattern.returnPressed.connect(self._on_add_decl_rule)
+        row2.addWidget(self.input_decl_pattern, stretch=1)
+
+        btn_add = QPushButton("추가")
+        btn_add.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_add.setFixedHeight(34)
+        btn_add.setMinimumWidth(60)
+        btn_add.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {CT['accent']};
+                color: #ffffff;
+                border: 1px solid {CT['accent_hi']};
+                border-radius: 8px;
+                padding: 4px 12px;
+                font-size: 9.5pt;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{ background-color: {CT['accent_hi']}; }}
+            QPushButton:pressed {{ background-color: {CT['accent_lo']}; }}
+        """)
+        btn_add.clicked.connect(self._on_add_decl_rule)
+        row2.addWidget(btn_add)
+        t4_layout.addLayout(row2)
+
+        # 미리보기 + 사용 가능 항목
+        self.lbl_decl_preview = QLabel("")
+        self.lbl_decl_preview.setWordWrap(True)
+        t4_layout.addWidget(self.lbl_decl_preview)
+        lbl_vars = QLabel("사용 가능: {신고번호}  {ID}  {회사명}  {서류종류}")
+        lbl_vars.setStyleSheet(
+            f"color: {CT['fg_3']}; font-size: 8pt; background: transparent; border: none;"
+        )
+        t4_layout.addWidget(lbl_vars)
+        self.input_decl_pattern.textChanged.connect(self._update_decl_preview)
+        self.input_decl_company.textChanged.connect(self._update_decl_preview)
+        self._update_decl_preview()
+
+        # 규칙 목록 (더블클릭/Delete = 삭제)
+        self.list_decl_rules = QListWidget()
+        self.list_decl_rules.setStyleSheet(f"""
+            QListWidget {{
+                background-color: {CT['bg_2']};
+                color: {CT['fg_1']};
+                border: 1px solid {CT['border_soft']};
+                border-radius: 8px;
+                padding: 4px;
+                outline: 0;
+                font-size: 10pt;
+            }}
+            QListWidget::item {{
+                padding: 6px 10px;
+                border-radius: 6px;
+                margin: 1px 0;
+            }}
+            QListWidget::item:hover {{ background-color: {CT['bg_3']}; }}
+            QListWidget::item:selected {{
+                background-color: {CT['accent_bg']};
+                color: {CT['fg_0']};
+            }}
+        """)
+        self.list_decl_rules.setMaximumHeight(140)
+        self.list_decl_rules.setMinimumHeight(80)
+        self.list_decl_rules.itemDoubleClicked.connect(lambda _it: self._on_remove_decl_rules())
+        _sc_del = _QShortcut(_QKeySequence(Qt.Key.Key_Delete), self.list_decl_rules)
+        _sc_del.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        _sc_del.activated.connect(self._on_remove_decl_rules)
+        t4_layout.addWidget(self.list_decl_rules)
+
+        btn_remove = QPushButton("선택 규칙 삭제")
+        btn_remove.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_remove.setFixedHeight(32)
+        btn_remove.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {CT['red']};
+                border: 1px solid {CT['border_soft']};
+                border-radius: 6px;
+                padding: 4px 10px;
+                font-size: 9pt;
+            }}
+            QPushButton:hover {{
+                background-color: rgba(250, 104, 99, 30);
+                border: 1px solid #844142;
+            }}
+        """)
+        btn_remove.clicked.connect(self._on_remove_decl_rules)
+        t4_layout.addWidget(btn_remove)
+
+        self._refresh_decl_rules_list()
+
+    def _update_decl_preview(self):
+        from core.decl_naming import validate_pattern, render
+        pat = self.input_decl_pattern.text().strip()
+        err = validate_pattern(pat)
+        if err:
+            self.lbl_decl_preview.setText(f"미리보기: ({err})")
+            self.lbl_decl_preview.setStyleSheet(
+                f"color: {CT['red']}; font-size: 8.5pt; background: transparent; border: none;")
+            return
+        company = self.input_decl_company.text().strip() or "해도무역"
+        name = render(pat, company, "ZABC-260930-4A", "수출신고필증", "13133-26-003099X")
+        self.lbl_decl_preview.setText(f"미리보기: {name}")
+        self.lbl_decl_preview.setStyleSheet(
+            f"color: {CT['fg_3']}; font-size: 8.5pt; background: transparent; border: none;")
+
+    def _refresh_decl_rules_list(self):
+        try:
+            from core.config import get_decl_name_rules
+            rules = get_decl_name_rules()
+        except Exception:
+            rules = []
+        self.list_decl_rules.clear()
+        for r in rules:
+            item = QListWidgetItem(f"{r['company']} · {'·'.join(r['kinds'])} · {r['pattern']}")
+            item.setToolTip("수출 규칙은 반송신고필증에도 적용됩니다." if "수출" in r['kinds'] else "")
+            item.setData(Qt.ItemDataRole.UserRole, r['company'])
+            self.list_decl_rules.addItem(item)
+
+    def _on_add_decl_rule(self):
+        from core.config import get_decl_name_rules, set_decl_name_rules
+        from core.decl_naming import validate_pattern
+        company = self.input_decl_company.text().strip()
+        pattern = self.input_decl_pattern.text().strip()
+        kinds = [k for k, chk in (("수출", self.chk_decl_export), ("수입", self.chk_decl_import))
+                 if chk.isChecked()]
+        if not company:
+            JarvisMessageBox.warning(self, "업체 이름 규칙", "업체명을 입력하세요.")
+            return
+        if not kinds:
+            JarvisMessageBox.warning(self, "업체 이름 규칙", "수출 또는 수입 중 하나 이상을 선택하세요.")
+            return
+        err = validate_pattern(pattern)
+        if err:
+            JarvisMessageBox.warning(self, "업체 이름 규칙", f"잘못된 패턴: {err}")
+            return
+        # 같은 업체는 규칙 하나 — 다시 추가하면 교체
+        rules = [r for r in get_decl_name_rules() if r['company'] != company]
+        rules.append({"company": company, "kinds": kinds, "pattern": pattern})
+        try:
+            set_decl_name_rules(rules)
+        except Exception as e:
+            self.emit_log(f"[오류] 업체 이름 규칙 저장 실패: {e}")
+            return
+        self.input_decl_company.clear()
+        self._refresh_decl_rules_list()
+        self.emit_log(f"[설정] 업체 이름 규칙: {company} [{'·'.join(kinds)}] {pattern}")
+        self.decl_rules_changed.emit()
+
+    def _on_remove_decl_rules(self):
+        from core.config import get_decl_name_rules, set_decl_name_rules
+        names = {i.data(Qt.ItemDataRole.UserRole) for i in self.list_decl_rules.selectedItems()}
+        names.discard(None)
+        if not names:
+            return
+        if not JarvisMessageBox.question(
+                self, "업체 이름 규칙 삭제",
+                f"{', '.join(sorted(names))}\n\n규칙을 삭제하면 작업 폴더의 해당 필증은 기본 이름으로 돌아갑니다."):
+            return
+        try:
+            set_decl_name_rules([r for r in get_decl_name_rules() if r['company'] not in names])
+        except Exception as e:
+            self.emit_log(f"[오류] 업체 이름 규칙 삭제 실패: {e}")
+            return
+        for n in sorted(names):
+            self.emit_log(f"[설정] 업체 이름 규칙 삭제: '{n}'")
+        self._refresh_decl_rules_list()
+        self.decl_rules_changed.emit()
 
     # ─────────────────────────────────────────────
     # 월납업체 관리

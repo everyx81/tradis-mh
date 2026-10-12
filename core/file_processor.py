@@ -25,6 +25,7 @@ from .utils import (
     is_prefix_match_id
 )
 from .ocr import gemini_ocr, extract_document_info_ai
+from . import decl_naming
 from .freight_mode import (
     FREIGHT_DOCS, corrected_freight_doc, same_bl_files
 )
@@ -215,12 +216,23 @@ class AutoRenamer:
                 # 보완 레이어가 신고필증 오분류를 교정한 건에 한해 파일명도 맞춘다.
                 # BL 이 이름에 있다는 이유로 리네임을 건너뛰던 탓에 과거 오분류로
                 # 굳어진 이름(신고서인데 …수입신고필증.pdf)이 영구히 남던 문제를 푼다.
+                # (cur: 이름이 바뀐 뒤의 경로. fp 는 finally 의 processing_files 정리에 그대로 쓴다)
+                cur = fp
                 if _res and _res.get('doc_type_src') == 'text_layer_fix':
-                    self._fix_doctype_in_filename(fp, fn, d, _res.get('doc_type'))
+                    _fixed = _res.get('doc_type')
+                    if decl_naming.lookup(fn):
+                        # 업체 형식 이름엔 종류 글자가 없다 — 이름표만 교정
+                        if _fixed and _fixed != d:
+                            decl_naming.register(fn, c, i, _fixed)
+                    else:
+                        cur = self._fix_doctype_in_filename(cur, fn, d, _fixed)
+                    d = _fixed or d
+                # 업체별 필증 이름 규칙에 맞춘다 (규칙 추가·삭제 후 재시작·이벤트 때도 일치 유지)
+                cur = self._reconcile_decl_name(cur, c, i, d)
                 # 운임 계산서·정산서가 들어오거나 다시 보일 때 같은 B/L 의 중립 운임
                 # 계산서(HANDLING 만 있는 등)를 해상/항공 증거에 맞춘다 (자기 자신 포함).
                 if d in _MODE_TRIGGER_DOCS:
-                    self._reconcile_freight_mode(os.path.dirname(fp), i, own_fp=fp)
+                    self._reconcile_freight_mode(os.path.dirname(cur), i, own_fp=cur)
                 # 캐시 유무와 무관하게 UI 갱신 — 외부(탐색기 등)에서 리네임된 파일도
                 # 카드 스냅샷에 반영되도록 함. 콜백은 1초 디바운스라 부담 없음.
                 if self.rename_complete_callback and not is_initial:
@@ -457,12 +469,18 @@ class AutoRenamer:
                     dt = _fixed_dt
                     gemini_ocr.set_result_fields(fp, doc_type=dt, doc_type_src='mode_fix')
 
-            from core.config import get_custom_naming
-            _naming = get_custom_naming()
-            try:
-                nn = _naming["file_pattern"].format(company=cn, bl=iden, doctype=dt, amount="")
-            except (KeyError, ValueError):
-                nn = f"{cn}({iden}){dt}.pdf"
+            # 업체별 필증 이름 규칙이 걸린 업체는 그 형식, 아니면 기본 이름
+            # (신고번호를 못 읽은 스캔본 등은 기본 이름으로 둔다)
+            nn = None
+            _rule = decl_naming.find_rule(cn, dt)
+            if _rule:
+                from core.form_parser import extract_declaration_no
+                nn = decl_naming.render(_rule['pattern'], cn, iden, dt, extract_declaration_no(fp))
+                if not nn:
+                    self.log(f" -> [업체 이름 규칙] 신고번호 판독 불가 — 기본 이름 사용: {fn}")
+            is_custom = bool(nn)
+            if not nn:
+                nn = decl_naming.default_name(cn, iden, dt)
             dir_name = os.path.dirname(fp)
             np = os.path.join(dir_name, nn)
 
@@ -470,6 +488,9 @@ class AutoRenamer:
                 if os.path.exists(np):
                     np = get_unique_filename(np)
                     nn = os.path.basename(np)
+                # 이름표는 바꾸기 전에 — 감시기가 새 이름을 '사용자 이름 변경'으로 오인하지 않도록
+                if is_custom:
+                    decl_naming.register(nn, cn, iden, dt)
                 try:
                     os.rename(fp, np)
                     self.log(f" -> [성공] {nn}")
@@ -478,7 +499,12 @@ class AutoRenamer:
                     if self.rename_complete_callback:
                         self.rename_complete_callback()
                 except Exception as e:
+                    if is_custom:
+                        decl_naming.unregister(nn)
                     self.log(f" -> [실패] 이름 변경 오류: {e}")
+            elif is_custom:
+                # 이름표 기록이 사라졌던 업체 형식 이름 — 다시 각인
+                decl_naming.register(nn, cn, iden, dt)
             # 새 증거(운임 계산서·정산서)가 생겼으면 먼저 와 있던 중립 운임 계산서를 다시 맞춘다
             if dt in _MODE_TRIGGER_DOCS:
                 self._reconcile_freight_mode(dir_name, iden, skip_name=os.path.basename(np))
@@ -522,6 +548,8 @@ class AutoRenamer:
         dest_name = os.path.basename(dest or "")
         if not dest_name or self._is_tradis_named(dest_name):
             return
+        # 업체 형식 이름이었다면 이름표도 함께 비운다 (다시 분석 후 새로 붙는다)
+        decl_naming.unregister(src_name)
         for _p in (src, dest):
             if _p:
                 try:
@@ -534,10 +562,10 @@ class AutoRenamer:
         """파일명에 박힌 서류 종류를 확정 값으로 교정.
 
         직독으로 확정된 doc_type 에 대해서만 호출한다. 파일명 패턴(커스텀 포함)을
-        건드리지 않도록, 종류 토큰 자리만 문자열 치환한다.
+        건드리지 않도록, 종류 토큰 자리만 문자열 치환한다. 바뀐(또는 그대로인) 경로 반환.
         """
         if not new_dt or not old_dt or new_dt == old_dt or old_dt not in fn:
-            return
+            return fp
         pos = fn.rfind(old_dt)
         nn = fn[:pos] + new_dt + fn[pos + len(old_dt):]
         np = os.path.join(os.path.dirname(fp), nn)
@@ -548,8 +576,89 @@ class AutoRenamer:
             os.rename(fp, np)
             gemini_ocr._update_cache_key(fp, np)
             self.log(f" -> [종류 교정] {fn} → {nn}")
+            return np
         except Exception as e:
             self.log(f" -> [실패] 종류 교정 이름 변경 오류: {e}")
+            return fp
+
+    def _reconcile_decl_name(self, fp, company, identifier, doc_type):
+        """업체별 필증 이름 규칙과 현재 이름을 맞춘다. 바뀐(또는 그대로인) 경로 반환.
+
+        - 규칙이 걸린 필증         → 업체 형식 이름 (규칙 패턴이 바뀌었으면 새 패턴으로)
+        - 업체 형식인데 규칙이 없음 → 기본 이름으로 되돌림 (규칙 삭제·종류 교정 시)
+        - 그 밖의 파일             → 손대지 않음 (기본 이름 재구성으로 인한 흔들림 방지)
+        """
+        fn = os.path.basename(fp)
+        tagged = decl_naming.lookup(fn) is not None
+        if not identifier or (not tagged and doc_type not in decl_naming.DECL_KIND):
+            return fp
+        rule = decl_naming.find_rule(company, doc_type)
+        if rule:
+            from .form_parser import extract_declaration_no
+            want = decl_naming.render(rule['pattern'], company, identifier, doc_type,
+                                      extract_declaration_no(fp))
+            if not want:
+                return fp   # 신고번호 판독 불가 — 지금 이름 유지
+        elif tagged:
+            # 규칙 적용 전 이름이 있으면 그대로 복원 ('(영문)' 같은 표시 보존)
+            want = (decl_naming.original_name(fn)
+                    or decl_naming.default_name(company, identifier, doc_type))
+        else:
+            return fp
+        if decl_naming.same_family(fn, want):
+            if rule and not tagged:
+                decl_naming.register(fn, company, identifier, doc_type)
+            return fp
+
+        np = os.path.join(os.path.dirname(fp), want)
+        if os.path.exists(np):
+            np = get_unique_filename(np)
+        nn = os.path.basename(np)
+        if rule:
+            orig = decl_naming.original_name(fn) if tagged else fn   # 패턴 변경 시 원래 이름 승계
+            decl_naming.register(nn, company, identifier, doc_type, orig=orig)
+        try:
+            os.rename(fp, np)
+        except Exception as e:
+            if rule:
+                decl_naming.unregister(nn)
+            self.log(f" -> [실패] 업체 이름 규칙 적용 오류: {fn}: {e}")
+            return fp
+        gemini_ocr._update_cache_key(fp, np)
+        if tagged:
+            decl_naming.unregister(fn)
+        self.log(f" -> [업체 이름 규칙] {fn} → {nn}" if rule
+                 else f" -> [업체 이름 규칙 해제] {fn} → {nn}")
+        if self.rename_complete_callback:
+            self.rename_complete_callback()
+        return np
+
+    def apply_decl_name_rules(self, folder):
+        """규칙 추가·삭제 즉시 작업 폴더의 필증 이름을 맞춘다 (하위 정리 폴더는 그대로).
+        바뀐 파일 수 반환."""
+        if not folder or not os.path.isdir(folder):
+            return 0
+        changed = 0
+        for f in sorted(os.listdir(folder)):
+            if not f.lower().endswith('.pdf'):
+                continue
+            c, i, d, _s = parse_renamed_filename(f)
+            if not i:
+                continue
+            fp = os.path.join(folder, f)
+            with self._proc_lock:
+                if fp in self.processing_files:
+                    continue   # 처리 중인 워커가 같은 판정으로 맞춘다
+                self.processing_files.add(fp)
+            try:
+                if self._reconcile_decl_name(fp, c, i, d) != fp:
+                    changed += 1
+            except Exception as e:
+                self.log(f" -> [업체 이름 규칙 오류] {f}: {e}")
+            finally:
+                with self._proc_lock:
+                    self.processing_files.discard(fp)
+        return changed
 
     def _freight_mode_fix(self, fp, result, identifier):
         """중립 운임 계산서의 올바른 종류 (같은 B/L 다른 서류 근거). 보정 불필요 시 None."""
@@ -1680,7 +1789,7 @@ class AutoRenamer:
                         f for f in allp
                         if f not in af and f not in candidates
                         and not is_merge_excluded_file(f)
-                        and not any(x in f for x in ("신고필증", "정산서", "납부고지서", "수입세금계산서"))
+                        and not any(x in decl_naming.match_text(f) for x in ("신고필증", "정산서", "납부고지서", "수입세금계산서"))
                         and _get_file_amount(f) == item_amt
                     ]
                     # 자매 건 파일이 ID 재배정 등으로 카드에 섞여 같은 금액이
@@ -2303,7 +2412,8 @@ class AutoRenamer:
             # 마킹으로 이미 이동된 파일은 제외
             # 수출·반송건은 카드 서류 + 마킹 파일만 묶는다 — ID 포함 비교 수집이
             # 별건 카드(예: 2026.10.09 ↔ 2026.10.09-1)의 필증까지 끌고 오던 문제 (v1.1.90)
-            is_export_card = any(f and ("수출신고필증" in f or "반송신고필증" in f) for f in fo)
+            is_export_card = any(f and ("수출신고필증" in decl_naming.match_text(f)
+                                      or "반송신고필증" in decl_naming.match_text(f)) for f in fo)
             if not is_export_card:
                 self._collect_related_items(dr, archive_dir, target_id,
                                             exclude_names=moved_marked, history=history)

@@ -17,6 +17,7 @@ from PyQt6.QtGui import QColor, QDrag
 
 from .widgets import GlassFrame
 from core.config import get_config_path
+from core.decl_naming import match_text as _decl_text
 
 
 def _mapping_item_name(label: str) -> str:
@@ -674,7 +675,7 @@ class GroupCard(GlassFrame):
         _docs = self.data.get('docs', {})
         _io_is_export = any(
             ('수출신고' in s) or ('반송신고' in s)
-            for s in list(_docs.keys()) + list(_docs.values())
+            for s in list(_docs.keys()) + [_decl_text(v) for v in _docs.values()]
         )
         if _io_is_export:
             _io_txt, _io_fg = "수출", "#d9c6fa"
@@ -766,8 +767,10 @@ class GroupCard(GlassFrame):
         # 기존 버튼 로직 결정
         docs = self.data['docs']
         has_statement = "자금정산서" in docs or "정산서" in docs
-        is_export_only = not has_statement and any('수출신고필증' in v or '반송신고필증' in v for v in docs.values())
-        is_import_no_settlement = not has_statement and not is_export_only and any('수입신고필증' in v for v in docs.values())
+        # _decl_text: 업체별 이름 규칙 이름(종류 글자 없음)도 이름표의 종류로 판정
+        _dtexts = [_decl_text(v) for v in docs.values()]
+        is_export_only = not has_statement and any('수출신고필증' in t or '반송신고필증' in t for t in _dtexts)
+        is_import_no_settlement = not has_statement and not is_export_only and any('수입신고필증' in t for t in _dtexts)
         self.is_export_only = is_export_only
         self.is_archive_only = is_export_only or is_import_no_settlement
 
@@ -916,7 +919,7 @@ class GroupCard(GlassFrame):
         body_layout.addWidget(self.file_list)
 
         if is_export_only:
-            export_label = "반송신고필증" if any('반송신고필증' in v for v in docs.values()) else "수출신고필증"
+            export_label = "반송신고필증" if any('반송신고필증' in _decl_text(v) for v in docs.values()) else "수출신고필증"
             self._rebuild_checklist([(export_label, True, "(정산서 없음 → 바로 폴더 정리)")])
         elif is_import_no_settlement:
             self._rebuild_checklist([("수입신고필증", True, "(정산서 없음 → 바로 폴더 정리)")])
@@ -1044,7 +1047,7 @@ class GroupCard(GlassFrame):
                 break
         if not target:
             for v in docs.values():
-                if '신고필증' in v:
+                if '신고필증' in _decl_text(v):
                     target = v
                     break
         if not target:
@@ -2872,14 +2875,15 @@ class GroupCard(GlassFrame):
         7. 그 외 (알파벳)
         """
         fn = filename or ""
+        _ft = _decl_text(fn)   # 업체별 이름 규칙 이름은 이름표의 종류로
         # 그룹 번호 + 하위 정렬 문자열
         if "자금정산서" in fn or "정산서" in fn:
             return (1, fn)
-        if "수입신고필증" in fn:
+        if "수입신고필증" in _ft:
             return (2, 0, fn)
-        if "수출신고필증" in fn:
+        if "수출신고필증" in _ft:
             return (2, 1, fn)
-        if "반송신고필증" in fn:
+        if "반송신고필증" in _ft:
             return (2, 2, fn)
         if "납부고지서" in fn or "납부영수증" in fn:
             return (3, fn)
@@ -3433,10 +3437,10 @@ class GroupCard(GlassFrame):
 
         parent = self.parent_widget
         # 수입/수출 자동 구분
-        if any('수입신고필증' in v for v in docs.values()):
+        if any('수입신고필증' in _decl_text(v) for v in docs.values()):
             doc_label = "수입신고필증"
             log_prefix = "수입"
-        elif any('반송신고필증' in v for v in docs.values()):
+        elif any('반송신고필증' in _decl_text(v) for v in docs.values()):
             doc_label = "반송신고필증"
             log_prefix = "반송"
         else:

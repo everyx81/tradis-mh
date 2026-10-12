@@ -4,7 +4,6 @@ JARVIS 수출 자동화 - 메일 발송 모듈
 """
 
 import os
-import re
 import smtplib
 import imaplib
 import datetime
@@ -283,16 +282,17 @@ class ExportMailSender:
         # ID 정규화 (공백 제거, 대문자화)
         normalized_id = identifier.replace(" ", "").upper()
         
-        # 파일명 패턴: (ID)수출신고필증.pdf 또는 (ID)반송신고필증.pdf
-        pattern = re.compile(r'\(([^)]+)\)(?:수출|반송)신고필증\.pdf$', re.IGNORECASE)
+        # 파일명 해석은 TRADIS 공용 파서로 — 업체별 이름 규칙 이름
+        # (예: 13133-26-003099X(ZABC-260930-4A).pdf)도 이름표 기록으로 찾는다
+        from core.utils import parse_renamed_filename
 
         for filename in os.listdir(folder_path):
             if not filename.lower().endswith('.pdf'):
                 continue
 
-            match = pattern.search(filename)
-            if match:
-                file_id = match.group(1).replace(" ", "").upper()
+            _c, file_id, doc_type, _s = parse_renamed_filename(filename)
+            if file_id and doc_type in ("수출신고필증", "반송신고필증"):
+                file_id = file_id.replace(" ", "").upper()
                 if file_id == normalized_id:
                     full_path = os.path.join(folder_path, filename)
                     self.log(f"수출/반송신고필증 발견: {filename}")

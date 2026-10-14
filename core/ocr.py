@@ -679,6 +679,12 @@ class GeminiOCR:
             if result and result.get('doc_type') == '수입신고필증':
                 if 'levy_type' not in result:
                     return None
+            # 수입세금계산서 직독 규칙이 바뀐 구 캐시는 무효화 — 다시 직독한다 (AI 호출 없음)
+            if (result and result.get('doc_type') == '수입세금계산서'
+                    and result.get('parsed_by') == 'form_parser'):
+                from .form_parser import IMPORT_TAX_INVOICE_FORM_VER
+                if result.get('form_ver', 1) < IMPORT_TAX_INVOICE_FORM_VER:
+                    return None
             # 주의: business_no 누락은 무효화하지 않음 (소프트 미스) —
             # 무효화하면 levy_type 등 유효한 캐시까지 소실되고 파일 처리 파이프라인이
             # 전부 재분석을 유발함. business_no 백필은 GroupCard가 force 재분석으로 처리.

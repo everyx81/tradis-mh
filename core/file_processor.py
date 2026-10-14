@@ -1450,11 +1450,24 @@ class AutoRenamer:
         # 슬롯이 이미 다른 파일로 채워져 있으면 재다운로드 복사본으로 보고 제외.
         # 재다운로드본은 출력일자 등이 달라 바이트/텍스트 해시로도 못 잡는다.
         # (재발행 등 진짜 교체가 필요하면 매핑 화면에서 수동 배정 가능)
+        # 단, 세관 발급번호가 있는 서류(수입세금계산서 N O .)는 번호로 판정한다 —
+        # 같은 B/L 에 과세분 수입세금계산서 + 면세분 수입계산서, 분할 신고분처럼
+        # 번호가 다른 별개 문서가 여러 장 발급된다. 번호가 같으면 재다운로드 복사본.
+        # 번호를 못 읽는 쪽(스캔본 등)이 있으면 기존대로 BL당 1장.
+        from .form_parser import extract_import_tax_invoice_no as _tinv_no
+        _DOC_NO_READERS = {DOC_TYPE_IMPORT_TAX_INVOICE: _tinv_no}
         _slot_doc_of = {}
         for _fn in af:
             _c0, _i0, _d0, _s0 = parse_renamed_filename(_fn)
             if _d0 in FIXED_SLOT_KEYS and _d0 not in _slot_doc_of:
                 _slot_doc_of[_d0] = _fn
+        _slot_nos = {}     # {종류: 병합에 들어간 발급번호 집합}
+        for _d0, _fn in _slot_doc_of.items():
+            if _d0 in _DOC_NO_READERS:
+                _no = _DOC_NO_READERS[_d0](os.path.join(dr, _fn))
+                if _no:
+                    _slot_nos[_d0] = {_no}
+        _slot_extras = {}  # {종류: 번호가 다른 추가 문서 목록}
 
         _seen_hashes = {}
         _seen_texts = {}
@@ -1477,14 +1490,32 @@ class AutoRenamer:
                 continue
             _c0, _i0, _d0, _s0 = parse_renamed_filename(_fn)
             if _d0 in _slot_doc_of and _slot_doc_of[_d0] != _fn:
-                self.log(f" -> [중복 제외] {_fn} (슬롯 이미 배정: {_slot_doc_of[_d0]})")
-                continue
+                _no = (_DOC_NO_READERS[_d0](os.path.join(dr, _fn))
+                       if _d0 in _slot_nos else None)
+                if not _no:
+                    self.log(f" -> [중복 제외] {_fn} (슬롯 이미 배정: {_slot_doc_of[_d0]})")
+                    continue
+                if _no in _slot_nos[_d0]:
+                    self.log(f" -> [중복 제외] {_fn} (같은 발급번호 {_no}: 재다운로드본)")
+                    continue
+                _slot_nos[_d0].add(_no)
+                _slot_extras.setdefault(_d0, []).append(_fn)
+                self.log(f" -> [별도 문서] {_fn} (발급번호 {_no} — {_slot_doc_of[_d0]} 와 다른 문서)")
             if _h:
                 _seen_hashes[_h] = _fn
             if _t:
                 _seen_texts[_t] = _fn
             _deduped.append(_fn)
         allp = _deduped
+
+        # 번호가 다른 추가 문서는 해당 슬롯 바로 뒤에 넣는다 (맨 끝 '[추가] 미분류 서류'로 밀리지 않게)
+        for _d0, _extras in _slot_extras.items():
+            _pos = next((k for k, x in enumerate(m) if x.get('filename') == _slot_doc_of[_d0]), None)
+            if _pos is None:
+                continue
+            for _k, _fn in enumerate(_extras, 1):
+                m.insert(_pos + _k, {'label': f"{m[_pos]['label']} (추가)", 'filename': _fn})
+                af.append(_fn)
 
         syns = EXPENSE_SYNONYMS
 

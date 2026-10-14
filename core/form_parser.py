@@ -107,17 +107,18 @@ def _parse_import_tax_invoice(t):
     buyer_biz = bizs[-1] if bizs else 'Unknown'
 
     # 자릿수 박스 행: [과세표준, 세액] 2행이면 1/10 관계 검증 후 세액,
-    # 1행(면세 수입계산서)이면 그 값, 그 외(일괄발급 등)는 0으로 보수적 처리
+    # 그 외(일괄발급 등)는 0으로 보수적 처리.
+    # 면세 수입계산서는 세액 칸이 없고 1행이 과세표준이라 금액은 0 (세액 없음) —
+    # 과세표준을 금액으로 두면 금액 매칭 후보에 엉뚱한 큰 금액이 들어간다.
     rows = []
     for line in t.split('\n'):
         s = line.strip()
         if RE_DIGIT_BOX.fullmatch(s):
             rows.append(int(s.replace(' ', '')))
     total = 0
-    if len(rows) == 2 and rows[1] > 0 and 9 <= rows[0] / rows[1] <= 11:
+    if (not is_tax_free_import_invoice(t) and len(rows) == 2 and rows[1] > 0
+            and 9 <= rows[0] / rows[1] <= 11):
         total = rows[1]
-    elif len(rows) == 1:
-        total = rows[0]
 
     return {
         'doc_type': '수입세금계산서',
@@ -131,7 +132,36 @@ def _parse_import_tax_invoice(t):
         'supplier_business_no': supplier_biz,
         'buyer_business_no': buyer_biz,
         'parsed_by': 'form_parser',
+        'form_ver': IMPORT_TAX_INVOICE_FORM_VER,
     }
+
+
+# 수입세금계산서 직독 결과 버전 — 올리면 캐시의 직독 결과를 다음 조회 때 다시 직독한다
+# (2: 면세 수입계산서 금액 0)
+IMPORT_TAX_INVOICE_FORM_VER = 2
+
+RE_TAXINV_NO = re.compile(r'NO\.(\d{6,})')
+
+
+def is_tax_free_import_invoice(text):
+    """제목 줄이 '수 입 계 산 서'(면세)인지 — 본문 고시 문구의 '수입세금계산서'와 구분해 제목 줄만 본다."""
+    titles = {''.join(ln.split()) for ln in (text or '').splitlines()}
+    return '수입계산서' in titles and '수입세금계산서' not in titles
+
+
+def extract_import_tax_invoice_no(fp):
+    """수입세금계산서·수입계산서 상단의 세관 발급번호(N O .44216709). 못 읽으면 None.
+
+    같은 B/L 에 과세분·면세분 또는 분할 신고분이 따로 발급되면 번호가 다르고,
+    재다운로드 복사본은 번호가 같다 — 병합 중복 판정의 근거."""
+    try:
+        text = _first_page_text(fp) or ''
+    except Exception:
+        return None
+    if not _parse_import_tax_invoice(text):
+        return None
+    m = RE_TAXINV_NO.search(''.join(text.split())[:80])
+    return m.group(1) if m else None
 
 
 # ── 해도 양식 (자금청구서 / 자금정산서) 좌표 직독 (v1.1.87) ──

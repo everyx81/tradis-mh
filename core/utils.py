@@ -9,7 +9,8 @@ import socket
 import threading
 from typing import Optional, Tuple
 
-from .constants import PORT, STANDARD_DOC_TYPES, DOC_TYPE_ALIAS
+from .constants import (PORT, STANDARD_DOC_TYPES, DOC_TYPE_ALIAS,
+                        GENERIC_RECEIPT_DOC_TYPE, is_generic_receipt_title)
 
 
 def normalize_doc_type(raw):
@@ -49,6 +50,10 @@ def normalize_doc_type(raw):
         return no_space
     if no_space in DOC_TYPE_ALIAS:
         return DOC_TYPE_ALIAS[no_space]
+
+    # 4차: 범용 영수증 제목('Official Receipt', '영수증' 등) → 선박운임계산서
+    if is_generic_receipt_title(cleaned):
+        return GENERIC_RECEIPT_DOC_TYPE
 
     # 표준에도 ALIAS에도 없으면 원본 유지
     return cleaned
@@ -318,7 +323,24 @@ def parse_renamed_filename(filename: str) -> Tuple[Optional[str], Optional[str],
     except Exception:
         pass
 
-    # 기본 패턴 파싱
+    company, identifier, doc_type, suffix = _parse_default_pattern(filename)
+    # doc_type 표준 정규화 (기존 파일명에 "자금정산서 (수입)" 같은 변형이 있어도 통일)
+    doc_type = normalize_doc_type(doc_type) if doc_type else doc_type
+    return company, identifier, doc_type, suffix
+
+
+def filename_doc_token(filename: str) -> Optional[str]:
+    """기본 패턴 이름(회사(번호)종류.pdf)에 적힌 종류 글자 그대로 (정규화 전). 없으면 None.
+
+    파일명의 표기('Official Receipt')가 표준 이름('선박운임계산서')과 다를 때
+    이름을 맞추는 데 쓴다 (parse_renamed_filename 은 정규화된 값만 돌려준다)."""
+    if not filename or not filename.lower().endswith('.pdf'):
+        return None
+    return _parse_default_pattern(filename)[2] or None
+
+
+def _parse_default_pattern(filename: str) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
+    """기본 패턴 파싱 — 종류는 파일명 표기 그대로 반환."""
     if not RE_FILE_PATTERN.match(filename):
         return None, None, None, None
     all_parens = list(RE_ID_PAREN.finditer(filename))
@@ -347,6 +369,4 @@ def parse_renamed_filename(filename: str) -> Tuple[Optional[str], Optional[str],
         doc_type = filename[end_idx : suffix_match.start()].strip()
     else:
         doc_type = remaining
-    # doc_type 표준 정규화 (기존 파일명에 "자금정산서 (수입)" 같은 변형이 있어도 통일)
-    doc_type = normalize_doc_type(doc_type) if doc_type else doc_type
     return company, identifier, doc_type, suffix

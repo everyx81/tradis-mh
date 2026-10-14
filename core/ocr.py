@@ -380,6 +380,16 @@ class GeminiOCR:
                 result["doc_type"] = bill_fix
                 result["doc_type_src"] = "bill_fix"
 
+            # --- 보완: 제목이 범용 영수증(OFFICIAL RECEIPT 등)인데 AI 가 '청구서' 등으로 반환 ---
+            # 위 보정의 반대 방향. 제목 직독이므로 이미 붙은 이름도 맞추도록 text_layer_fix.
+            from .form_parser import correct_generic_receipt
+            receipt_fix = correct_generic_receipt(result.get("doc_type"), page_text)
+            if receipt_fix:
+                print(f"[보완] 영수증 제목 직독 교정: {result.get('doc_type')} → {receipt_fix} "
+                      f"({os.path.basename(fp)})")
+                result["doc_type"] = receipt_fix
+                result["doc_type_src"] = "text_layer_fix"
+
             # --- 보완: B/L 자리에 ⑤화물관리번호를 집어온 경우 1회 재질의 ---
             # 코드가 값을 만들어 넣지 않고, 무엇을 잘못 읽었는지 알려 모델에게 다시 묻는다.
             if is_cargo_mgmt_no(result.get("identifier"), page_text):
@@ -405,6 +415,9 @@ class GeminiOCR:
                         if bill_fix:
                             result["doc_type"] = bill_fix
                             result["doc_type_src"] = "bill_fix"
+                        if receipt_fix:
+                            result["doc_type"] = receipt_fix
+                            result["doc_type_src"] = "text_layer_fix"
                         result["identifier_src"] = "ai_retry"
                     else:
                         print(f"[보완] 재질의로도 확정 못함 - 기존 값 유지: {new_id}")
@@ -654,6 +667,14 @@ class GeminiOCR:
                 if self._revalidate_declaration(fp, filename, result):
                     return None  # 캐시 폐기 → 모델에게 다시 물어 값을 받는다
 
+            # 청구서 계열 판정 캐시는 영수증 제목 직독으로 1회 재점검한다 (AI 재호출 없음).
+            # 선사 OFFICIAL RECEIPT 가 '청구서'·원본 이름 유지로 굳어 있던 캐시를 푼다.
+            if (result and result.get('doc_type_src') != 'manual'
+                    and not entry.get('receipt_chk')):
+                from .constants import needs_haedo_issuer
+                if needs_haedo_issuer(result.get('doc_type')):
+                    self._revalidate_receipt(fp, filename, result)
+
             # 수입신고필증에 levy_type 필드가 없는 구 캐시는 재분석을 위해 무효화
             if result and result.get('doc_type') == '수입신고필증':
                 if 'levy_type' not in result:
@@ -668,6 +689,37 @@ class GeminiOCR:
         except Exception as e:
             print(f"캐시 읽기 오류: {e}")
             return None
+
+    def _revalidate_receipt(self, fp, filename, result):
+        """청구서 계열 캐시를 영수증 제목 직독으로 1회 재점검 (result 를 제자리 교정).
+
+        제목이 범용 영수증이면 선박운임계산서로 교정하고, 청구서 판정으로 붙은
+        '원본 이름 유지' 각인을 걷어 이름 변경이 다시 진행되게 한다.
+        어느 쪽이든 receipt_chk 를 각인해 반복 검사를 막는다.
+        """
+        from .form_parser import correct_generic_receipt, _first_page_text
+        try:
+            text = _first_page_text(fp) or ''
+        except Exception:
+            text = ''
+        fixed = correct_generic_receipt(result.get('doc_type'), text)
+        if fixed:
+            print(f"[보완] 캐시 영수증 교정: {result.get('doc_type')} → {fixed} ({filename})")
+            result['doc_type'] = fixed
+            result['doc_type_src'] = 'text_layer_fix'
+            result.pop('name_policy', None)
+        with cache_lock:
+            try:
+                cache = self._load_cache()
+                entry = cache.get(filename)
+                if entry is None:
+                    return
+                if fixed:
+                    entry['result'] = copy.deepcopy(result)
+                entry['receipt_chk'] = 1
+                self._write_cache()
+            except Exception as e:
+                print(f"캐시 재점검 저장 오류: {e}")
 
     def _revalidate_declaration(self, fp, filename, result):
         """구 버전 캐시의 신고 계열 결과를 1회 재점검 (보완 레이어).

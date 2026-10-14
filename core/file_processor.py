@@ -22,7 +22,7 @@ from .constants import (
 from .utils import (
     sanitize_filename, get_unique_filename, cleanup_company_name,
     parse_renamed_filename, RE_ID_PAREN, normalize_id, is_similar_id,
-    is_prefix_match_id
+    is_prefix_match_id, filename_doc_token, normalize_doc_type as _norm_dt
 )
 from .ocr import gemini_ocr, extract_document_info_ai
 from . import decl_naming
@@ -217,16 +217,23 @@ class AutoRenamer:
                 # BL 이 이름에 있다는 이유로 리네임을 건너뛰던 탓에 과거 오분류로
                 # 굳어진 이름(신고서인데 …수입신고필증.pdf)이 영구히 남던 문제를 푼다.
                 # (cur: 이름이 바뀐 뒤의 경로. fp 는 finally 의 processing_files 정리에 그대로 쓴다)
+                # 파일명 표기가 표준 이름과 다른 경우('…Official Receipt.pdf' → 선박운임계산서)도
+                # 같은 자리에서 표준 이름으로 맞춘다.
                 cur = fp
+                _target = d
                 if _res and _res.get('doc_type_src') == 'text_layer_fix':
-                    _fixed = _res.get('doc_type')
-                    if decl_naming.lookup(fn):
-                        # 업체 형식 이름엔 종류 글자가 없다 — 이름표만 교정
-                        if _fixed and _fixed != d:
-                            decl_naming.register(fn, c, i, _fixed)
-                    else:
-                        cur = self._fix_doctype_in_filename(cur, fn, d, _fixed)
-                    d = _fixed or d
+                    _target = _res.get('doc_type') or d
+                if decl_naming.lookup(fn):
+                    # 업체 형식 이름엔 종류 글자가 없다 — 이름표만 교정
+                    if _target and _target != d:
+                        decl_naming.register(fn, c, i, _target)
+                else:
+                    # 기본 패턴 표기가 같은 종류로 읽힐 때만 그 글자를 쓴다 (커스텀 패턴 이름 보호)
+                    _raw = filename_doc_token(fn)
+                    if not _raw or _norm_dt(_raw) != d:
+                        _raw = d
+                    cur = self._fix_doctype_in_filename(cur, fn, _raw, _target)
+                d = _target
                 # 업체별 필증 이름 규칙에 맞춘다 (규칙 추가·삭제 후 재시작·이벤트 때도 일치 유지)
                 cur = self._reconcile_decl_name(cur, c, i, d)
                 # 운임 계산서·정산서가 들어오거나 다시 보일 때 같은 B/L 의 중립 운임

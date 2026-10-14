@@ -493,6 +493,29 @@ def correct_bill_vs_invoice(ai_doc_type, text):
     return None
 
 
+def correct_generic_receipt(ai_doc_type, text):
+    """문서 제목(텍스트 레이어 첫 줄)이 범용 영수증이면 선박운임계산서로 확정한다.
+
+    correct_bill_vs_invoice 의 반대 방향: 선사 OFFICIAL RECEIPT 를 AI 가 '청구서'로
+    반환하면 제3자 청구서 → 원본 이름 유지로 멈췄다 (같은 양식인데 한 장만 이름 변경).
+    - AI 가 이미 '…계산서' 카테고리를 붙였으면 그 판정을 따른다 (창고 영수증 → 창고료계산서 등)
+    - 승인번호·세금계산서 제목이 있으면 손대지 않는다
+    - 텍스트 레이어가 없는 스캔본은 None (AI 판정 유지)
+    """
+    from .constants import GENERIC_RECEIPT_DOC_TYPE, is_generic_receipt_title
+    if not text:
+        return None
+    dt = (ai_doc_type or '').replace(' ', '')
+    if dt.endswith("계산서") or (dt in _BILL_FIX_EXEMPT and dt != "영수증"):
+        return None
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    if not lines or not is_generic_receipt_title(lines[0]):
+        return None
+    if is_tax_invoice_text(text):
+        return None
+    return GENERIC_RECEIPT_DOC_TYPE
+
+
 def detect_haedo_issuer(result, text):
     """문서 발행처가 해도관세사무소인지.
 

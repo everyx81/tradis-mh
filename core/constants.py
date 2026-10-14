@@ -100,6 +100,24 @@ DOC_TYPE_ALIAS = {
     "납부영수증": "납부고지서",
 }
 
+# 범용 영수증 제목 → 선박운임계산서 (공백 제거·영문 소문자 정확 일치)
+# 선사 OFFICIAL RECEIPT·영수증은 운임 계산서를 대체하는 서류인데, AI 가 실행마다
+# '선박운임계산서' / 제목 그대로('Official Receipt', '영수증') / '청구서' 를 오가며 반환해
+# 같은 양식이 서로 다른 이름이 되거나 원본 이름으로 남았다 → 선박운임계산서로 고정.
+# 항공 건은 freight_mode 가 같은 B/L 의 증거로 항공운임계산서로 보정한다.
+# '보세화물화재보험료영수증'처럼 내용이 붙은 제목은 대상 아님 (정확 일치만).
+GENERIC_RECEIPT_TITLES = {"영수증", "officialreceipt", "receipt"}
+GENERIC_RECEIPT_DOC_TYPE = "선박운임계산서"
+
+
+def is_generic_receipt_title(title: str) -> bool:
+    """제목·종류 문자열이 범용 영수증 제목인지 (끝 괄호 부가설명은 무시)."""
+    if not title:
+        return False
+    import re as _re
+    t = _re.sub(r'\s*[\(\[（][^)\]）]*[\)\]）]\s*$', '', str(title).strip())
+    return ''.join(t.split()).lower() in GENERIC_RECEIPT_TITLES
+
 # 통관수수료계산서에 포함되는 수수료/비용 항목 목록
 # 이 항목들은 모두 "통관수수료계산서" 1장에 포함됨
 FEE_INVOICE_ITEMS = {

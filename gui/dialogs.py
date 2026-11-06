@@ -193,6 +193,31 @@ class FlowLayout(QLayout):
         return y + line_height - rect.y() + m.bottom()
 
 
+def _after_cleanup(parent, renamer, target_dir, bl_id, is_export, declined):
+    """합치기·폴더 정리 성공 후 (백그라운드 스레드).
+
+    수출·반송건은 작업 폴더에 남은 같은 ID 파일을 고르게 한 뒤 선적서류 검색,
+    그 밖은 기존대로 선적서류 검색만 한다. 팝업은 메인 스레드 시그널로 띄운다.
+    """
+    try:
+        bl_folders = [d for d in os.listdir(target_dir)
+                      if os.path.isdir(os.path.join(target_dir, d)) and bl_id in d]
+    except OSError:
+        bl_folders = []
+    shipping_folder = os.path.join(target_dir, bl_folders[0]) if bl_folders else ''
+    info = getattr(renamer, 'last_history_entry', None) or {}
+    if is_export and info.get('folder_name') and hasattr(parent, 'related_pick_signal'):
+        parent.related_pick_signal.emit({
+            'bl': bl_id, 'dr': target_dir,
+            'archive': os.path.join(target_dir, info['folder_name']),
+            'entry_id': info.get('id'), 'declined': set(declined or ()),
+            'shipping_folder': shipping_folder,
+        })
+        return
+    if shipping_folder and hasattr(parent, 'shipping_search_signal'):
+        parent.shipping_search_signal.emit(bl_id, shipping_folder)
+
+
 def _cleanup_empty_marked_folders(parent, folders):
     """폴더 정리 후 마킹된 원본 폴더가 비어 있으면 삭제.
 
@@ -3345,6 +3370,38 @@ class GroupCard(GlassFrame):
 
         self._process_added_paths(paths)
 
+    def _offer_related_before_cleanup(self):
+        """수출·반송건 폴더 정리 전: 작업 폴더의 같은 ID 파일을 골라 함께 넣게 한다.
+
+        파일/폴더 추가로 직접 넣은 파일이 있으면 묻지 않는다 (사용자가 이미 골랐다).
+        고른 것은 마킹 파일로 넣어 기존 이동·되돌리기 흐름을 그대로 탄다.
+        고르지 않은 것은 _related_declined 에 남겨 합친 뒤 다시 묻지 않는다.
+        취소하면 False (폴더 정리 중단).
+        """
+        self._related_declined = set()
+        if self.marked_files:
+            return True
+        from core.related_files import find_related_candidates
+        card_files = set(self.data.get('docs', {}).values())
+        card_files |= {m['filename'] for m in (getattr(self, 'mapping', None) or []) if m.get('filename')}
+        try:
+            cands = find_related_candidates(self.directory, self.text_id, exclude_names=card_files)
+        except Exception:
+            cands = []
+        if not cands:
+            return True
+        from .related_pick import pick_related
+        ok, selected, declined = pick_related(
+            self, "같은 ID 파일",
+            f"{self.text_id} 이(가) 들어간 파일이 작업 폴더에 있습니다.\n정리 폴더에 함께 넣을 것을 고르세요.",
+            cands)
+        if not ok:
+            return False
+        self._related_declined = {c['name'] for c in declined}
+        if selected:
+            self._process_added_paths([c['path'] for c in selected])
+        return True
+
     def _process_added_paths(self, paths):
         """파일/폴더 경로 리스트를 마킹 목록에 처리.
 
@@ -3447,6 +3504,10 @@ class GroupCard(GlassFrame):
             doc_label = "수출신고필증"
             log_prefix = "수출"
         output_name = f"{self.data['company']}({self.text_id}){doc_label}.pdf"
+        _is_export = log_prefix in ("수출", "반송")
+        if _is_export and not self._offer_related_before_cleanup():
+            return
+        _declined = set(getattr(self, '_related_declined', set()))
         marked = list(self.marked_files)  # 마킹된 파일 복사
 
         # 마킹 파일 경로 재검증
@@ -3510,10 +3571,7 @@ class GroupCard(GlassFrame):
             if success:
                 # 폴더로 마킹 추가했던 원본 폴더 빈 상태이면 삭제
                 _cleanup_empty_marked_folders(parent, _folders_to_cleanup)
-                bl_folders = [d for d in os.listdir(_target_dir) if os.path.isdir(os.path.join(_target_dir, d)) and _bl_id in d]
-                if bl_folders and hasattr(parent, 'shipping_search_signal'):
-                    target_folder = os.path.join(_target_dir, bl_folders[0])
-                    parent.shipping_search_signal.emit(_bl_id, target_folder)
+                _after_cleanup(parent, self.renamer, _target_dir, _bl_id, _is_export, _declined)
 
         threading.Thread(target=run_archive, daemon=True).start()
         _collect_note = "" if log_prefix in ("수출", "반송") else " + 관련 파일 수집"
@@ -3715,6 +3773,12 @@ class GroupCard(GlassFrame):
         output_name = f"{self.data['company']}({self.text_id})정산서.pdf"
 
         parent = self.parent_widget
+        _docs = self.data.get('docs', {})
+        _is_export = any('수출신고필증' in _decl_text(v) or '반송신고필증' in _decl_text(v)
+                         for v in _docs.values())
+        if _is_export and not self._offer_related_before_cleanup():
+            return
+        _declined = set(getattr(self, '_related_declined', set()))
         marked = list(self.marked_files) if self.marked_files else None
 
         # 마킹 파일 경로 재검증
@@ -3780,10 +3844,7 @@ class GroupCard(GlassFrame):
             if success:
                 # 폴더로 마킹 추가했던 원본 폴더 빈 상태이면 삭제
                 _cleanup_empty_marked_folders(parent, _folders_to_cleanup)
-                bl_folders = [d for d in os.listdir(_target_dir) if os.path.isdir(os.path.join(_target_dir, d)) and _bl_id in d]
-                if bl_folders and hasattr(parent, 'shipping_search_signal'):
-                    target_folder = os.path.join(_target_dir, bl_folders[0])
-                    parent.shipping_search_signal.emit(_bl_id, target_folder)
+                _after_cleanup(parent, self.renamer, _target_dir, _bl_id, _is_export, _declined)
 
         threading.Thread(target=run_merge, daemon=True).start()
 

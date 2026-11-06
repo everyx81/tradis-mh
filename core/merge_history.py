@@ -145,6 +145,18 @@ def record_move(entry, name, src_dir, dst_dir):
     entry['moved'].append({'name': name, 'from': src_dir, 'to': dst_dir})
 
 
+def append_moves(entry_id, moves):
+    """이미 저장된 기록에 이동을 덧붙인다 (합친 뒤 고른 파일도 되돌리기 대상).
+    moves: [(name, src_dir, dst_dir)]. 성공 시 True."""
+    with _LOCK:
+        entry = get_entry(entry_id)
+        if not entry:
+            return False
+        for name, src_dir, dst_dir in moves:
+            record_move(entry, name, src_dir, dst_dir)
+        return save_entry(entry)
+
+
 def record_alias(entry, alias, canonical):
     entry['aliases'].append([alias, canonical])
 

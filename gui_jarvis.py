@@ -61,6 +61,7 @@ class JarvisGUI(QMainWindow):
     merge_signal = pyqtSignal(dict)
     merge_complete_signal = pyqtSignal()  # 병합 완료 시 emit
     shipping_search_signal = pyqtSignal(str, str)  # 선적서류 검색 (bl_number, target_folder)
+    related_pick_signal = pyqtSignal(object)  # 수출·반송건 합친 뒤 같은 ID 파일 선택 {bl, dr, archive, entry_id, declined, shipping_folder}
     merge_verify_signal = pyqtSignal(object)  # 병합 검증 실패 팝업 요청
     move_failed_signal = pyqtSignal(list)  # 파일 이동 실패 알림 [(name, reason)]
     undo_toast_signal = pyqtSignal(object)  # 정리 완료 → 되돌리기 토스트 {id, folder_name, kind, file_count}
@@ -131,6 +132,7 @@ class JarvisGUI(QMainWindow):
         self.merge_signal.connect(self._update_middle_panel)
         self.merge_complete_signal.connect(self._on_merge_complete)
         self.shipping_search_signal.connect(self._on_shipping_search)
+        self.related_pick_signal.connect(self._on_related_pick)
         self.merge_verify_signal.connect(self._on_merge_verify_failed)
         self.move_failed_signal.connect(self._on_move_failed)
         self.undo_toast_signal.connect(self._show_undo_toast)
@@ -2472,6 +2474,39 @@ class JarvisGUI(QMainWindow):
         result_holder['action'] = dlg.result_value or "cancel"
         dlg.deleteLater()
         event.set()  # 백그라운드 스레드 대기 해제
+
+    def _on_related_pick(self, info):
+        """수출·반송건 합친 뒤: 작업 폴더에 남은 같은 ID 파일을 골라 정리 폴더로 (메인 스레드).
+
+        폴더 정리 전에 고르지 않기로 한 파일은 다시 묻지 않는다. 옮긴 파일은 같은
+        정리 기록에 덧붙여 되돌리기 대상이 된다. 끝나면 기존 선적서류 검색으로 이어간다.
+        """
+        bl = info.get('bl', '')
+        archive = info.get('archive', '')
+        try:
+            if archive and os.path.isdir(archive):
+                from core.related_files import find_related_candidates, move_into_archive
+                declined = info.get('declined') or set()
+                cands = [c for c in find_related_candidates(info.get('dr', ''), bl,
+                                                            skip_dirs={os.path.basename(archive)})
+                         if c['name'] not in declined]
+                if cands:
+                    from gui.related_pick import pick_related
+                    ok, selected, _ = pick_related(
+                        self, "같은 ID 파일",
+                        f"{bl} 이(가) 들어간 파일이 작업 폴더에 남아 있습니다.\n"
+                        f"정리 폴더({os.path.basename(archive)})에 넣을 것을 고르세요.",
+                        cands, ok_text="정리 폴더에 넣기")
+                    if ok and selected:
+                        n = move_into_archive(selected, archive, info.get('entry_id'),
+                                              log=self.emit_log)
+                        self.emit_log(f"[포함] {bl} {n}개 파일을 {os.path.basename(archive)}/ 로 이동")
+                        if n:
+                            self.trigger_debounced_refresh()
+        except Exception as e:
+            self.emit_log(f"[포함] 같은 ID 파일 선택 오류: {e}")
+        if info.get('shipping_folder'):
+            self._on_shipping_search(bl, info['shipping_folder'])
 
     def _on_shipping_search(self, bl_number, target_folder):
         """선적서류 자동 검색 (합치기/폴더정리 완료 후 트리거)"""

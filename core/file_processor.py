@@ -221,7 +221,7 @@ class AutoRenamer:
                 # 같은 자리에서 표준 이름으로 맞춘다.
                 cur = fp
                 _target = d
-                if _res and _res.get('doc_type_src') == 'text_layer_fix':
+                if _res and _res.get('doc_type_src') in ('text_layer_fix', 'issuer_fix'):
                     _target = _res.get('doc_type') or d
                 if decl_naming.lookup(fn):
                     # 업체 형식 이름엔 종류 글자가 없다 — 이름표만 교정
@@ -574,7 +574,10 @@ class AutoRenamer:
         if not new_dt or not old_dt or new_dt == old_dt or old_dt not in fn:
             return fp
         pos = fn.rfind(old_dt)
-        nn = fn[:pos] + new_dt + fn[pos + len(old_dt):]
+        rest = fn[pos + len(old_dt):]
+        # '(1)' 같은 번호는 옛 종류끼리 겹쳐서 붙은 것 — 종류가 바뀌면 떼고 새로 매긴다
+        rest = re.sub(r'^\(\d+\)(?=\.pdf$)', '', rest, flags=re.IGNORECASE)
+        nn = fn[:pos] + new_dt + rest
         np = os.path.join(os.path.dirname(fp), nn)
         if os.path.exists(np):
             np = get_unique_filename(np)

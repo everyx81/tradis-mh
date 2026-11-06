@@ -565,6 +565,58 @@ def detect_haedo_issuer(result, text):
     return HAEDO_BUSINESS_NO in t or haedo in t or "해도관세" in t
 
 
+# ── 수입세금계산서 판정 근거 검증 ──
+# 수입세금계산서·수입계산서는 제목에 그 글자가 인쇄된다. 운영 PDF 4,600여 개 중 이 문구는
+# 수입세금계산서에만 있었다 (2026-11 전수 확인). AI 가 해도 발행 '전자세금계산서'
+# (통관수수료계산서)를 수입세금계산서로 판정하던 오판은 문구가 없는데도 나왔다.
+# 근거: 텍스트 레이어가 있으면 그 원문, 스캔본이면 AI 가 옮긴 인쇄 제목(doc_title).
+# 보조 근거: 세관 등 국가기관 사업자등록번호는 가운데 두 자리가 83 — 공급자가 비세관이면 모순.
+IMPORT_TAX_DOC_TYPES = ('수입세금계산서', '수입계산서')
+
+
+def has_import_tax_title(s):
+    """'수입세금계산서'·'수입계산서' 문구 유무 (자간 공백 무시)."""
+    t = ''.join((s or '').split())
+    return '수입세금계산서' in t or '수입계산서' in t
+
+
+def _valid_business_no(digits):
+    """사업자등록번호 검증번호(마지막 자리) 일치 여부 — 오독된 번호로 판정을 뒤집지 않게."""
+    if len(digits) != 10 or not digits.isdigit():
+        return False
+    w = (1, 3, 7, 1, 3, 7, 1, 3, 5)
+    s = sum(int(digits[i]) * w[i] for i in range(9)) + (int(digits[8]) * 5) // 10
+    return (10 - s % 10) % 10 == int(digits[9])
+
+
+def correct_non_customs_import_tax(result, text=None):
+    """수입세금계산서 판정이 근거와 모순되면 바른 종류를 반환, 모순이 없으면 None.
+
+    모순: (1) 텍스트 레이어에 문구가 없음 — 스캔본이면 AI 가 옮긴 인쇄 제목에 문구가 없음
+          (2) 공급자 번호가 검증번호까지 맞는 비세관 번호
+    근거가 없으면(스캔본 + 제목 미판독, 공급자 번호 미판독·오독) 그 항목은 판단하지 않는다.
+    반환 종류: 공급자가 해도관세사무소 → '통관수수료계산서' (관세사무소 발행 계산서),
+              그 밖 → 'Unknown' (코드가 정할 근거가 없다 — 호출측이 모델에게 다시 묻는다).
+    """
+    r = result or {}
+    if r.get('doc_type') not in IMPORT_TAX_DOC_TYPES:
+        return None
+    t = ''.join((text or '').split())
+    if len(t) >= 50:
+        no_title = not has_import_tax_title(t)
+    else:
+        title = str(r.get('doc_title') or '').strip()
+        no_title = bool(title) and title != 'Unknown' and not has_import_tax_title(title)
+    sup = re.sub(r'\D', '', str(r.get('supplier_business_no') or ''))
+    non_customs = _valid_business_no(sup) and sup[3:5] != '83'
+    if not (no_title or non_customs):
+        return None
+    from .constants import HAEDO_BUSINESS_NO
+    if sup == re.sub(r'\D', '', HAEDO_BUSINESS_NO):
+        return '통관수수료계산서'
+    return 'Unknown'
+
+
 # ── 수입신고필증 징수형태·세액 직독 ──
 # AI 가 감면 필증에서 '세액' 칸(감면 후 납부세액) 대신 '감면액' 칸을 부가세로
 # 읽는 오독이 있어 (감면율 100% → 실제 세액 0 인데 감면액 19,392,130 을 vat 로 반환),

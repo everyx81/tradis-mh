@@ -31,6 +31,14 @@ RETRY_BL_HINT = """
 필요한 값은 그 왼쪽 칸인 ④**B/L(AWB)번호** 입니다. 두 칸은 나란히 붙어 있어 혼동하기 쉽습니다.
 ④번 칸의 값을 다시 읽어 identifier 로 반환하세요. 그 칸이 비어 있으면 'Unknown' 을 반환하세요."""
 
+RETRY_IMPORT_TAX_HINT = """
+
+[재확인 요청 — 반드시 반영]
+직전 분석은 doc_type 으로 '{wrong}' 를 반환했으나 근거가 맞지 않습니다
+(인쇄 제목: {title}, 공급자 사업자등록번호: {sup}).
+수입세금계산서·수입계산서는 세관(가운데 83 번호)이 발급하고 제목에 그 글자가 인쇄됩니다.
+제목과 공급자, 품목을 다시 보고 doc_type 을 판단하세요."""
+
 
 def _compute_file_hash(fp):
     """파일 내용 해시 반환 (md5, 16진수 문자열).
@@ -162,6 +170,7 @@ class GeminiOCR:
       - [★ 한글이 깨져 보이는 문서 — 오분류 금지 ★]
         폰트 문제로 한글 라벨/제목이 거의 렌더링되지 않고 숫자·영문만 보이는 문서는, 제목을 추측해 '수입신고필증'으로 단정하지 마세요.
         • 좌우 2개의 사업자등록번호 박스(공급자=세관 / 공급받는자) + 큰 금액(과세표준)과 그 약 1/10 금액(세액) + 수납계좌·customs.go.kr 안내 구조 → 세관 발행 **'수입세금계산서'**
+          단, 공급자 칸의 사업자등록번호가 세관 번호(가운데 두 자리 83)일 때만입니다. 일반 전자세금계산서도 같은 박스 구조이므로 구조만으로 판정하지 마세요.
         • 세관 사업자등록번호가 공급자 위치에 보이면 수입세금계산서 가능성 높음. 예: 121-83-00561(인천본부세관), 109-83-02763(인천공항세관), 601-83-00048(부산세관)
         • 수입신고필증의 판별 근거(품명/규격 표, 세번부호, 결제금액 란 등)가 전혀 보이지 않으면 무리하게 추측하지 말고 doc_type 'Unknown'을 반환하세요.
       - 문서에 적힌 제목이 예시에 없더라도 임의로 바꾸지 말고 적힌 그대로 반환하세요. (시스템이 후처리로 표준화합니다)
@@ -270,6 +279,12 @@ class GeminiOCR:
 - approval_no: 전자세금계산서 **승인번호** (국세청 24자리, 예: "2026071341000061gf6nhcdi"). 문서에 인쇄된 그대로, 없으면 "Unknown"
 - [주의] 공급자 칸과 공급받는자 칸을 절대 혼동하지 마세요. 각 칸에서 따로 읽으세요.
 - 각각 명확히 확인되지 않으면 "Unknown". 그 외 문서는 세 필드 모두 "Unknown"
+
+[3-2단계: 인쇄된 제목 (모든 문서)]
+- doc_title: 문서 맨 위에 **실제로 인쇄된 제목 글자**를 공백 없이 그대로 (예: "전자세금계산서", "수입세금계산서", "자금정산서", "INVOICE").
+  doc_type 판정과 무관하게 눈에 보이는 글자만 옮기세요. 제목이 보이지 않거나 읽을 수 없으면 "Unknown".
+- [주의] 수입세금계산서·수입계산서는 제목에 '수입세금계산서' 또는 '수입계산서'가 인쇄된 경우에만 해당합니다.
+  제목이 '전자세금계산서'·'세금계산서'이면 비고란에 '수입'이 적혀 있어도 수입세금계산서가 아닙니다.
 
 응답은 오직 JSON 형식이어야 하며, 다른 텍스트는 포함하지 마세요.
 """
@@ -423,6 +438,35 @@ class GeminiOCR:
                         print(f"[보완] 재질의로도 확정 못함 - 기존 값 유지: {new_id}")
                 except Exception as e:
                     print(f"[보완] 재질의 오류: {e}")
+
+            # --- 보완: 수입세금계산서 판정 근거 검증 ---
+            # 제목 문구(텍스트 레이어, 스캔본은 AI 가 옮긴 인쇄 제목)가 없거나 공급자가
+            # 비세관이면 판정 취소. 해도 발행분은 통관수수료계산서로 확정, 그 밖은 모순을
+            # 알려 모델에게 다시 묻는다 (그래도 수입세금계산서면 Unknown — 이름 변경 보류).
+            from .form_parser import correct_non_customs_import_tax, IMPORT_TAX_DOC_TYPES
+            from .utils import normalize_doc_type
+            tax_fix = correct_non_customs_import_tax(result, page_text)
+            if tax_fix == 'Unknown':
+                wrong = result.get('doc_type')
+                print(f"[보완] {wrong} 근거 없음(제목 '{result.get('doc_title')}', "
+                      f"공급자 {result.get('supplier_business_no')}) - 재질의 ({os.path.basename(fp)})")
+                try:
+                    retry = self._ask_model(
+                        client, types,
+                        prompt + RETRY_IMPORT_TAX_HINT.format(
+                            wrong=wrong, title=result.get('doc_title') or 'Unknown',
+                            sup=result.get('supplier_business_no') or 'Unknown'),
+                        pdf_bytes)
+                    new_dt = normalize_doc_type(retry.get('doc_type') or 'Unknown')
+                    if new_dt not in IMPORT_TAX_DOC_TYPES:
+                        tax_fix = new_dt
+                except Exception as e:
+                    print(f"[보완] 재질의 오류: {e}")
+            if tax_fix:
+                print(f"[보완] 수입세금계산서 발급자 모순 교정: {result.get('doc_type')} → {tax_fix} "
+                      f"({os.path.basename(fp)})")
+                result["doc_type"] = tax_fix
+                result["doc_type_src"] = "issuer_fix"
 
             # --- 보완: 수출·반송필증 상호 — 원문에 없는 한글 음역 상호 차단 ---
             # 영문 전용 수출자(외국인 개인 등)를 AI 가 실행마다 영문/한글 음역으로
@@ -675,6 +719,16 @@ class GeminiOCR:
                 if needs_haedo_issuer(result.get('doc_type')):
                     self._revalidate_receipt(fp, filename, result)
 
+            # 수입세금계산서 판정 캐시는 근거(제목 문구·공급자 번호)로 1회 재점검한다.
+            # 해도 발행분은 제자리 교정(AI 재호출 없음), 그 밖은 캐시를 버려 다시 묻는다.
+            if (result and result.get('doc_type_src') != 'manual'
+                    and result.get('parsed_by') != 'form_parser'
+                    and not entry.get('import_tax_chk')):
+                from .form_parser import IMPORT_TAX_DOC_TYPES
+                if result.get('doc_type') in IMPORT_TAX_DOC_TYPES:
+                    if self._fix_cached_import_tax(fp, filename, result):
+                        return None
+
             # 수입신고필증에 levy_type 필드가 없는 구 캐시는 재분석을 위해 무효화
             if result and result.get('doc_type') == '수입신고필증':
                 if 'levy_type' not in result:
@@ -695,6 +749,47 @@ class GeminiOCR:
         except Exception as e:
             print(f"캐시 읽기 오류: {e}")
             return None
+
+    def _fix_cached_import_tax(self, fp, filename, result):
+        """AI 판정 수입세금계산서 캐시를 근거로 1회 재점검. 캐시를 버렸으면 True (재분석 필요).
+
+        교정 종류가 확정되면 result 를 제자리 교정하고 저장한다 — 이미 붙은
+        '…수입세금계산서' 이름도 종류 교정 흐름(issuer_fix)으로 맞춰진다.
+        모순이 없으면 import_tax_chk 만 각인해 반복 검사(PDF 열기)를 막는다.
+        """
+        from .form_parser import correct_non_customs_import_tax, _first_page_text
+        try:
+            text = _first_page_text(fp) or ''
+        except Exception:
+            text = ''
+        tax_fix = correct_non_customs_import_tax(result, text)
+        drop = tax_fix == 'Unknown'
+        if not tax_fix:
+            pass
+        elif drop:
+            print(f"[보완] 캐시 수입세금계산서 근거 없음(공급자 {result.get('supplier_business_no')}) "
+                  f"- 재분석 요청 ({filename})")
+        else:
+            print(f"[보완] 캐시 수입세금계산서 발급자 모순 교정: {result.get('doc_type')} → "
+                  f"{tax_fix} ({filename})")
+            result['doc_type'] = tax_fix
+            result['doc_type_src'] = 'issuer_fix'
+            result.pop('name_policy', None)
+        with cache_lock:
+            try:
+                cache = self._load_cache()
+                entry = cache.get(filename)
+                if entry is not None:
+                    if drop:
+                        del cache[filename]
+                    else:
+                        if tax_fix:
+                            entry['result'] = copy.deepcopy(result)
+                        entry['import_tax_chk'] = 1
+                    self._write_cache()
+            except Exception as e:
+                print(f"캐시 재점검 저장 오류: {e}")
+        return drop
 
     def _revalidate_receipt(self, fp, filename, result):
         """청구서 계열 캐시를 영수증 제목 직독으로 1회 재점검 (result 를 제자리 교정).
